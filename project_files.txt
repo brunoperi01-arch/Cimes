@@ -1,0 +1,130 @@
+// ─── src/components/ui/Badge.jsx ────────────────────────────────
+export function Badge({ label, color, bg, size=10 }) {
+  return (
+    <span style={{ fontSize:size, fontWeight:700, background:bg, color, padding:"2px 6px", borderRadius:4, whiteSpace:"nowrap" }}>
+      {label}
+    </span>
+  )
+}
+
+
+// ─── src/components/ui/ReliaBadge.jsx ───────────────────────────
+import { C } from "../../utils/colors"
+
+const RELIA_MAP = {
+  "réel":               { bg:C.greenL,   c:C.green  },
+  "saisi manuellement": { bg:C.bluePale, c:C.blue   },
+  "importé CSV":        { bg:C.purpleL,  c:C.purple },
+  "copier-coller":      { bg:"#F3E8FF",  c:C.purple },
+  "à vérifier":         { bg:C.goldL,    c:C.orange },
+  "estimé":             { bg:C.goldL,    c:C.gold   },
+}
+
+export function ReliaBadge({ status }) {
+  const m = RELIA_MAP[status] || { bg:C.grayL, c:C.gray }
+  return (
+    <span style={{ fontSize:9, fontWeight:600, background:m.bg, color:m.c, padding:"1px 5px", borderRadius:4 }}>
+      {status}
+    </span>
+  )
+}
+
+
+// ─── src/components/ui/PromoBadge.jsx ───────────────────────────
+import { C } from "../../utils/colors"
+
+const PROMO_MAP = {
+  "Genius -10%":        { bg:"#DBEAFE", c:"#1D40AE" },
+  "Last minute":        { bg:C.redL,    c:C.red     },
+  "Early booking":      { bg:C.greenL,  c:C.green   },
+  "PDJ inclus":         { bg:C.purpleL, c:C.purple  },
+  "Annulation gratuite":{ bg:C.greenL,  c:C.green   },
+}
+const PROMO_SHORT = {
+  "Genius -10%":        "GENIUS",
+  "Last minute":        "LAST MIN",
+  "Early booking":      "EARLY",
+  "PDJ inclus":         "PDJ",
+  "Annulation gratuite":"ANNUL.",
+}
+
+export function PromoBadge({ label }) {
+  if (!label) return null
+  const m     = PROMO_MAP[label]  || { bg:C.orangeL, c:C.orange }
+  const short = PROMO_SHORT[label] || label.slice(0,12)
+  return (
+    <span style={{ fontSize:9, fontWeight:700, background:m.bg, color:m.c, padding:"2px 5px", borderRadius:4 }}>
+      {short}
+    </span>
+  )
+}
+
+
+// ─── src/components/layout/SBar.jsx ─────────────────────────────
+import { C }     from "../../utils/colors"
+import { styles } from "../../utils/styles"
+import { Badge }  from "../ui/Badge"
+
+export function SBar({ title, user, sbReady, onLogout }) {
+  return (
+    <div style={styles.sbar}>
+      <span style={{ fontSize:13, fontWeight:600, color:C.text }}>{title||"Benchmark Été"}</span>
+      <div style={{ display:"flex", gap:6, alignItems:"center" }}>
+        {user && (
+          <button onClick={onLogout} style={{ fontSize:10, color:C.gray, background:"none", border:"none", cursor:"pointer" }}>
+            Déco.
+          </button>
+        )}
+        <Badge label={sbReady?"SUPABASE ✓":"LOCAL"} color={sbReady?C.green:C.gold} bg={sbReady?C.greenL:C.goldL} size={9}/>
+      </div>
+    </div>
+  )
+}
+
+
+// ─── src/components/layout/BNav.jsx ─────────────────────────────
+import { C } from "../../utils/colors"
+
+const NAV_ITEMS = [
+  { id:"dashboard", icon:"▣",  l:"Dashboard"  },
+  { id:"weeks",     icon:"📅", l:"Semaines"   },
+  { id:"collect",   icon:"✏️", l:"Saisie"     },
+  { id:"import",    icon:"📥", l:"Import"     },
+  { id:"diag",      icon:"🔬", l:"Diagnostic" },
+]
+
+export function BNav({ screen, onNavigate }) {
+  return (
+    <div style={{ position:"sticky", bottom:0, background:C.white, borderTop:`0.5px solid ${C.grayM}`, display:"flex", padding:"6px 0 16px", zIndex:10 }}>
+      {NAV_ITEMS.map(n => (
+        <button key={n.id} onClick={()=>onNavigate(n.id)} style={{ flex:1, background:"none", border:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:1 }}>
+          <span style={{ fontSize:16 }}>{n.icon}</span>
+          <span style={{ fontSize:9, fontWeight:screen===n.id?700:400, color:screen===n.id?C.blue:C.gray }}>
+            {n.l}
+          </span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+
+// ─── src/components/layout/SaveFeedback.jsx ─────────────────────
+import { C }     from "../../utils/colors"
+import { styles } from "../../utils/styles"
+
+const FB = {
+  ok:        { bg:C.greenL, c:C.green,  msg:sbReady => `✓ Enregistré dans ${sbReady?"Supabase":"mémoire locale"}` },
+  duplicate: { bg:C.goldL,  c:C.gold,   msg:()      => "⚠ Doublon — relevé déjà existant pour cette date et ce concurrent" },
+  error:     { bg:C.redL,   c:C.red,    msg:()      => "✗ Erreur d'enregistrement" },
+}
+
+export function SaveFeedback({ status, sbReady }) {
+  if (!status) return null
+  const f = FB[status]
+  return (
+    <div style={{ ...styles.card(9), padding:"9px 12px", background:f.bg, marginBottom:6 }}>
+      <p style={{ margin:0, fontSize:12, fontWeight:700, color:f.c }}>{f.msg(sbReady)}</p>
+    </div>
+  )
+}
