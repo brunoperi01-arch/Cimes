@@ -44,7 +44,7 @@ export function useAuth() {
 
         if (mounted) {
           setUser(null)
-          setAuthError(error.message || 'Erreur Supabase')
+          setAuthError(error?.message || 'Erreur Supabase')
           setLoading(false)
         }
       }
