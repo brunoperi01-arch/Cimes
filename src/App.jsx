@@ -37,8 +37,67 @@ const SETTINGS = {
 }
 
 export default function App() {
-  const { user, loading, signIn, signOut } = useAuth()
+  const {
+    user,
+    loading,
+    signIn,
+    signOut,
+    supabaseReady = false,
+    authError = null
+  } = useAuth()
 
+  async function handleLogin(email, password) {
+    if (!supabaseReady) {
+      throw new Error(
+        'Supabase n’est pas encore configuré. Crée la base puis ajoute VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY dans Vercel.'
+      )
+    }
+
+    const { error } = await signIn(email, password)
+
+    if (error) {
+      throw error
+    }
+  }
+
+  if (loading) {
+    return (
+      <CenteredShell>
+        <p style={{ color: '#6B7280' }}>Chargement…</p>
+      </CenteredShell>
+    )
+  }
+
+  if (!supabaseReady) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', padding: '20px 0 40px' }}>
+        <div style={SHELL}>
+          <SupabaseNotReady authError={authError} />
+        </div>
+      </div>
+    )
+  }
+
+  if (!user) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', padding: '20px 0 40px' }}>
+        <div style={SHELL}>
+          <LoginPage onLogin={handleLogin} sbReady={supabaseReady} />
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <AuthenticatedApp
+      user={user}
+      signOut={signOut}
+      supabaseReady={supabaseReady}
+    />
+  )
+}
+
+function AuthenticatedApp({ user, signOut, supabaseReady }) {
   const [screen, setScreen] = useState('dashboard')
   const [cap, setCap] = useState('6p')
   const [yr, setYr] = useState(2026)
@@ -47,9 +106,9 @@ export default function App() {
   const [formSaved, setFormSaved] = useState(null)
   const [imports, setImports] = useState([])
   const [lastStats, setLastStats] = useState(null)
-  const [sbErrors] = useState([])
+  const [sbErrors, setSbErrors] = useState([])
 
-  const selWeek = WEEKS_ALL.find(w => w.id === selWeekId) || WEEKS_ALL[6]
+  const selWeek = WEEKS_ALL.find(w => w.id === selWeekId) || WEEKS_ALL[0]
   const ourPrice = OUR_TARIFS[cap]?.[selWeek?.season_type] || 0
   const capNum = parseInt(cap, 10)
 
@@ -66,42 +125,54 @@ export default function App() {
   const reco = calculateRecommendation(ourPrice, rates, SETTINGS)
 
   const loadImports = useCallback(() => {
+    if (!supabaseReady) {
+      setImports([])
+      return
+    }
+
     getImports()
       .then(data => {
         setImports(data || [])
       })
-      .catch(() => {
+      .catch(error => {
+        console.error('Erreur chargement imports:', error)
         setImports([])
+        setSbErrors(prev => [
+          ...prev,
+          error?.message || 'Erreur chargement imports'
+        ])
       })
-  }, [])
+  }, [supabaseReady])
 
   useEffect(() => {
-    if (user) {
-      loadImports()
-    }
-  }, [user, loadImports])
-
-  async function handleLogin(email, password) {
-    const { error } = await signIn(email, password)
-
-    if (error) {
-      throw error
-    }
-
-    setScreen('dashboard')
     loadImports()
-  }
+  }, [loadImports])
 
   async function handleSaveRate(rate) {
+    if (!supabaseReady) {
+      setFormSaved('error')
+      setSbErrors(prev => [
+        ...prev,
+        'Supabase non configuré : impossible d’enregistrer le tarif.'
+      ])
+      return
+    }
+
     try {
       await saveCompetitorRate(rate)
 
       setFormSaved('ok')
       reloadRates()
-    } catch (e) {
-      const message = e?.message || ''
+    } catch (error) {
+      const message = error?.message || ''
+
+      console.error('Erreur sauvegarde tarif:', error)
 
       setFormSaved(message.includes('DUPLICATE') ? 'duplicate' : 'error')
+      setSbErrors(prev => [
+        ...prev,
+        message || 'Erreur sauvegarde tarif'
+      ])
     }
 
     setTimeout(() => {
@@ -110,14 +181,31 @@ export default function App() {
   }
 
   async function handleImportCsv(csvText) {
-    const rows = parseCsvText(csvText, capNum)
-    const stats = await importCsvRows(rows)
+    if (!supabaseReady) {
+      throw new Error(
+        'Supabase non configuré : impossible d’importer le CSV.'
+      )
+    }
 
-    setLastStats(stats)
-    reloadRates()
-    loadImports()
+    try {
+      const rows = parseCsvText(csvText, capNum)
+      const stats = await importCsvRows(rows)
 
-    return stats
+      setLastStats(stats)
+      reloadRates()
+      loadImports()
+
+      return stats
+    } catch (error) {
+      console.error('Erreur import CSV:', error)
+
+      setSbErrors(prev => [
+        ...prev,
+        error?.message || 'Erreur import CSV'
+      ])
+
+      throw error
+    }
   }
 
   function navigate(dest) {
@@ -131,7 +219,7 @@ export default function App() {
 
   const shared = {
     user,
-    sbReady: true,
+    sbReady: supabaseReady,
     onLogout: signOut,
     screen,
     onNavigate: navigate
@@ -153,30 +241,6 @@ export default function App() {
     imports,
     lastImportStats: lastStats,
     sbErrors
-  }
-
-  if (loading) {
-    return (
-      <div
-        style={{
-          ...SHELL,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          height: 760
-        }}
-      >
-        <p style={{ color: '#6B7280' }}>Chargement…</p>
-      </div>
-    )
-  }
-
-  if (!user) {
-    return (
-      <div style={SHELL}>
-        <LoginPage onLogin={handleLogin} sbReady={true} />
-      </div>
-    )
   }
 
   return (
@@ -237,6 +301,98 @@ export default function App() {
             {...state}
           />
         )}
+      </div>
+    </div>
+  )
+}
+
+function CenteredShell({ children }) {
+  return (
+    <div
+      style={{
+        ...SHELL,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: 760
+      }}
+    >
+      {children}
+    </div>
+  )
+}
+
+function SupabaseNotReady({ authError }) {
+  return (
+    <div style={{ padding: 24 }}>
+      <h1 style={{ marginTop: 28, marginBottom: 8 }}>
+        Les Cimes
+      </h1>
+
+      <p style={{ color: '#6B7280', lineHeight: 1.5 }}>
+        L’application React fonctionne, mais Supabase n’est pas encore configuré.
+      </p>
+
+      <div
+        style={{
+          background: '#FEF3C7',
+          color: '#92400E',
+          padding: 14,
+          borderRadius: 14,
+          marginTop: 20,
+          fontSize: 14,
+          lineHeight: 1.5
+        }}
+      >
+        <strong>Configuration manquante</strong>
+        <br />
+        Ajoute les variables suivantes dans Vercel :
+        <br />
+        <code>VITE_SUPABASE_URL</code>
+        <br />
+        <code>VITE_SUPABASE_ANON_KEY</code>
+      </div>
+
+      {authError && (
+        <div
+          style={{
+            background: '#FEE2E2',
+            color: '#991B1B',
+            padding: 14,
+            borderRadius: 14,
+            marginTop: 16,
+            fontSize: 14,
+            lineHeight: 1.5
+          }}
+        >
+          <strong>Erreur détectée :</strong>
+          <br />
+          {String(authError)}
+        </div>
+      )}
+
+      <div
+        style={{
+          background: 'white',
+          border: '1px solid #E5E7EB',
+          padding: 14,
+          borderRadius: 14,
+          marginTop: 16,
+          fontSize: 14,
+          lineHeight: 1.5
+        }}
+      >
+        <strong>À faire ensuite :</strong>
+        <br />
+        1. Créer le projet Supabase.
+        <br />
+        2. Copier l’URL du projet.
+        <br />
+        3. Copier la clé publique anon.
+        <br />
+        4. Les ajouter dans Vercel.
+        <br />
+        5. Redéployer le site.
       </div>
     </div>
   )
