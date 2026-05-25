@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { supabase } from '../lib/supabaseClient'
+import { supabase, supabaseReady } from '../lib/supabaseClient'
 
 export function useAuth() {
   const [user, setUser] = useState(null)
@@ -12,8 +12,13 @@ export function useAuth() {
 
     async function initAuth() {
       try {
-        if (!supabase?.auth) {
-          throw new Error('Client Supabase non disponible')
+        if (!supabaseReady || !supabase?.auth) {
+          if (mounted) {
+            setUser(null)
+            setLoading(false)
+            setAuthError('Supabase non configuré')
+          }
+          return
         }
 
         const { data, error } = await supabase.auth.getSession()
@@ -38,8 +43,8 @@ export function useAuth() {
         console.error('Erreur useAuth:', error)
 
         if (mounted) {
-          setAuthError(error)
           setUser(null)
+          setAuthError(error.message || 'Erreur Supabase')
           setLoading(false)
         }
       }
@@ -57,34 +62,27 @@ export function useAuth() {
   }, [])
 
   async function signIn(email, password) {
-    try {
-      if (!supabase?.auth) {
-        return {
-          error: new Error('Supabase n’est pas configuré correctement')
-        }
+    if (!supabaseReady || !supabase?.auth) {
+      return {
+        error: new Error(
+          'Supabase n’est pas encore configuré. Crée la base puis ajoute les variables Vercel.'
+        )
       }
-
-      return await supabase.auth.signInWithPassword({
-        email,
-        password
-      })
-    } catch (error) {
-      return { error }
     }
+
+    return await supabase.auth.signInWithPassword({
+      email,
+      password
+    })
   }
 
   async function signOut() {
-    try {
-      if (!supabase?.auth) {
-        return {
-          error: new Error('Supabase n’est pas configuré correctement')
-        }
-      }
-
-      return await supabase.auth.signOut()
-    } catch (error) {
-      return { error }
+    if (!supabaseReady || !supabase?.auth) {
+      setUser(null)
+      return { error: null }
     }
+
+    return await supabase.auth.signOut()
   }
 
   return {
@@ -92,6 +90,7 @@ export function useAuth() {
     loading,
     authError,
     signIn,
-    signOut
+    signOut,
+    supabaseReady
   }
 }
