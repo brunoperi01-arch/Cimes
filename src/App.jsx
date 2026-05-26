@@ -1,8 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 
 // ══ CONFIG ══════════════════════════════════════════════════════
-// Vite injecte les variables VITE_* via import.meta.env au build.
-// En mode démo (artifact / local sans .env) → fallback "DEMO".
 const SB_URL = import.meta.env.VITE_SUPABASE_URL || "DEMO";
 const SB_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "DEMO";
 const SB_READY = SB_URL !== "DEMO" && SB_KEY !== "DEMO"
@@ -341,7 +339,7 @@ function Badge({ label, color, bg, size=10 }) {
   return <span style={{ fontSize:size, fontWeight:700, background:bg, color, padding:"2px 6px", borderRadius:4, whiteSpace:"nowrap" }}>{label}</span>;
 }
 function ReliaBadge({ status }) {
-  const m = { réel:{bg:C.greenL,c:C.green}, "saisi manuellement":{bg:C.bluePale,c:C.blue}, "importé CSV":{bg:C.purpleL,c:C.purple}, "copier-coller":{bg:"#F3E8FF",c:C.purple}, "à vérifier":{bg:C.goldL,c:C.orange}, estimé:{bg:C.goldL,c:C.gold} }[status]||{bg:C.grayL,c:C.gray};
+  const m = { réel:{bg:C.greenL,c:C.green}, "saisi manuellement":{bg:C.bluePale,c:C.blue}, "importé CSV":{bg:C.purpleL,c:C.purple}, "copier-coller":{bg:"#F3E8FF",c:C.purple}, "à vérifier":{bg:C.goldL,c:C.orange}, estimé:{bg:C.goldL,c:C.gold}, "scraping-auto":{bg:"#F0FDF4",c:"#166534"} }[status]||{bg:C.grayL,c:C.gray};
   return <span style={{ fontSize:9, fontWeight:600, background:m.bg, color:m.c, padding:"1px 5px", borderRadius:4 }}>{status}</span>;
 }
 function PromoBadge({ label }) {
@@ -378,10 +376,15 @@ export default function App() {
   const [iaError, setIaError]     = useState(null);
   const [settings]                = useState({ thresholdLow:15, thresholdHigh:20, obsoleteDays:7, minScore:70 });
 
-  // ✅ FIX : csvText manquant dans la version précédente
   const [csvText, setCsvText]     = useState("");
   const [csvResult, setCsvResult] = useState(null);
   const [csvLoading, setCsvLoad]  = useState(false);
+
+  // ── NOUVEAU : état scraping automatique ──────────────────────
+  const [scraping, setScraping]       = useState(false);
+  const [scrapedRates, setScrapedRates] = useState([]);
+  const [scrapeError, setScrapeError]   = useState("");
+  const [scrapeSaved, setScrapeSaved]   = useState({});
 
   const emptyForm = { weekId:"2026_w7", competitorId:"cv", source:"", type:"résidence", capacity:6, priceWeek:"", priceNight:"", originalPrice:"", promoLabel:"", promoPercent:"", cleaningFee:"", url:"", collectedAt:new Date().toISOString().slice(0,10), notes:"" };
   const [form, setForm] = useState(emptyForm);
@@ -430,6 +433,9 @@ export default function App() {
   const loadRates = useCallback(async () => {
     if (!selWeekId || !capNum) return;
     setRL(true);
+    setScrapedRates([]);
+    setScrapeSaved({});
+    setScrapeError("");
     try { const d = await getCompetitorRates({ weekId:selWeekId, capacity:capNum, showExamples }, competitors); setRates(d||[]); }
     catch(e) { console.error(e); setRates([]); }
     setRL(false);
@@ -629,6 +635,93 @@ ANALYSE 4 BLOCS séparés par "---" (2 phrases max chacun) :
 4. ACTION : une action immédiate et concrète`;
   }
 
+  // ── NOUVEAU : Scraping automatique Booking & Airbnb ───────────
+  async function scrapeMarket() {
+    setScraping(true);
+    setScrapeError("");
+    setScrapedRates([]);
+    setScrapeSaved({});
+
+    const w = selWeek;
+    const dateStr = w?.week_start
+      ? `check-in ${w.week_start}, check-out ${new Date(new Date(w.week_start).getTime() + 7*864e5).toISOString().slice(0,10)} (7 nuits)`
+      : w?.label || "été 2026";
+
+    const prompt = `Search Booking.com and Airbnb for vacation rental listings in La Foux d'Allos (Val d'Allos), Alpes-de-Haute-Provence, France.
+${dateStr}, ${capNum} guests.
+
+Find 8-12 real listings. For each, categorize:
+- "résidence" → managed residence (Labellemontagne, Goélia, Pierre & Vacances, Vacancéole, MMV, etc.)
+- "particulier" → individual host on Airbnb or Booking
+- "hôtel" → hotel or apart-hotel
+
+Return ONLY a raw JSON array, no markdown, no backticks, no other text:
+[{"name":"...","property_type":"résidence","platform":"Booking.com","price_week":595,"price_night":85,"capacity":6,"rating":8.2,"url":"https://..."}]
+
+Use EUR. price_week = total for 7 nights. Estimate if exact price unavailable.`;
+
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 2000,
+          system: "You are a vacation rental price analyst for La Foux d'Allos, France. Use web search to find current real prices on Booking.com and Airbnb. Return ONLY valid raw JSON arrays, absolutely no other text, no backticks.",
+          messages: [{ role: "user", content: prompt }],
+          tools: [{ type: "web_search_20250305", name: "web_search" }],
+        }),
+      });
+
+      const data = await res.json();
+      if (data.error) throw new Error(data.error.message);
+
+      const text = (data.content || [])
+        .filter(b => b.type === "text")
+        .map(b => b.text)
+        .join("\n");
+
+      const match = text.match(/\[[\s\S]*\]/);
+      if (!match) throw new Error("Aucune donnée JSON. Réessayez.");
+
+      const listings = JSON.parse(match[0]);
+      if (!listings.length) throw new Error("Aucun logement trouvé.");
+      setScrapedRates(listings);
+
+    } catch(e) {
+      setScrapeError("Erreur : " + e.message);
+    }
+    setScraping(false);
+  }
+
+  async function saveScrapedRate(item, idx) {
+    const pw = item.price_week ? Math.round(item.price_week) : item.price_night ? Math.round(item.price_night * 7) : 0;
+    const pn = item.price_night ? Math.round(item.price_night) : pw ? Math.round(pw / 7) : 0;
+    try {
+      await saveCompetitorRate({
+        week_id: selWeekId,
+        source: item.platform || "Scraping",
+        property_name: item.name,
+        property_type: item.property_type || "particulier",
+        competitor_id: null,
+        capacity: capNum,
+        price_week: pw,
+        price_night: pn,
+        booking_rating: item.rating || null,
+        url: item.url || "",
+        collected_at: new Date().toISOString().slice(0, 10),
+        collection_type: "scraping-auto",
+        reliability_status: "à vérifier",
+        is_example: false,
+        notes: `Collecté automatiquement via web search depuis ${item.platform || "Booking/Airbnb"}.`,
+      }, competitors);
+      setScrapeSaved(prev => ({ ...prev, [idx]: "ok" }));
+      loadRates();
+    } catch(e) {
+      setScrapeSaved(prev => ({ ...prev, [idx]: e.message?.includes("DUPLICATE") ? "dup" : "err" }));
+    }
+  }
+
   // ── Styles ────────────────────────────────────────────────────
   const ph   = { width:390, margin:"0 auto", fontFamily:"-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif", background:C.grayL, minHeight:760, borderRadius:44, overflow:"hidden", border:`0.5px solid ${C.grayM}` };
   const sbar = { height:46, display:"flex", alignItems:"flex-end", justifyContent:"space-between", padding:"0 20px 6px", background:C.grayL };
@@ -788,6 +881,10 @@ ANALYSE 4 BLOCS séparés par "---" (2 phrases max chacun) :
     const mPct = allMax>allMin&&reco.ref  ? Math.min(96,Math.max(4,Math.round((reco.ref-allMin)/(allMax-allMin)*100)))  : 50;
     const wColor = CAT_C[w?.season_type]||C.blue;
 
+    // Médiane des scrapedRates pour affichage dans le bouton
+    const scrapePrices = scrapedRates.map(i => i.price_week || (i.price_night * 7)).filter(p => p > 0);
+    const scrapeMedian = median(scrapePrices);
+
     return (
       <div><SBar title={w?.label}/>
         <div style={{ background:`linear-gradient(135deg,${wColor}CC,${wColor})`, padding:"8px 14px 12px" }}>
@@ -846,6 +943,7 @@ ANALYSE 4 BLOCS séparés par "---" (2 phrases max chacun) :
           </>)}
 
           {tab==="table" && !ratesLoading && (<>
+            {/* ── Relevés existants ── */}
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
               <p style={sml}>{rates.length} relevé(s) · {cap}</p>
               <button onClick={()=>{ setForm({...emptyForm,weekId:selWeekId}); setScreen("collect"); setCM("manuelle"); }} style={{ fontSize:11, color:C.blue, background:"none", border:"none", cursor:"pointer", fontWeight:600, marginTop:12 }}>+ Ajouter</button>
@@ -892,6 +990,110 @@ ANALYSE 4 BLOCS séparés par "---" (2 phrases max chacun) :
                   </div>
                 );
               })}
+            </div>
+
+            {/* ══ SCRAPING AUTOMATIQUE ══════════════════════════════ */}
+            <div style={{ marginTop:8 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+                <p style={{ ...sml, margin:0 }}>Recherche automatique</p>
+                {scrapeMedian && (
+                  <span style={{ fontSize:10, color:C.blueL, fontWeight:600 }}>
+                    Médiane web : {fmt(scrapeMedian)}€/sem
+                  </span>
+                )}
+              </div>
+
+              {/* Bouton principal */}
+              <button
+                style={{ ...btn(scraping, C.blueL), background: scraping ? "#93C5FD" : C.blueL }}
+                onClick={scrapeMarket}
+                disabled={scraping}
+              >
+                {scraping
+                  ? "⏳ Recherche Booking & Airbnb (20–40s)…"
+                  : `🔍 Rechercher sur Booking & Airbnb · ${selWeek?.label}`}
+              </button>
+
+              {/* Erreur */}
+              {scrapeError && (
+                <div style={{ ...cd(9), padding:"8px 12px", background:C.redL, marginBottom:6 }}>
+                  <p style={{ margin:0, fontSize:11, color:C.red }}>{scrapeError}</p>
+                </div>
+              )}
+
+              {/* Résultats scrapés */}
+              {scrapedRates.length > 0 && (
+                <div style={{ ...cd(), marginBottom:6 }}>
+                  {/* Info */}
+                  <div style={{ padding:"8px 13px", background:C.bluePale, borderBottom:`0.5px solid ${C.grayM}` }}>
+                    <p style={{ margin:0, fontSize:11, fontWeight:600, color:C.blueL }}>
+                      {scrapedRates.length} logements trouvés · Appuyez sur <strong style={{ color:C.blue }}>+</strong> pour enregistrer
+                    </p>
+                    <p style={{ margin:"2px 0 0", fontSize:9, color:C.gray, fontStyle:"italic" }}>
+                      Données web search — à vérifier avant usage tarifaire
+                    </p>
+                  </div>
+
+                  {/* Groupes par catégorie */}
+                  {["résidence","particulier","hôtel"].map(cat => {
+                    const items = scrapedRates.filter(i => i.property_type === cat);
+                    if (!items.length) return null;
+                    const catLabel = { résidence:"Résidences", particulier:"Particuliers", hôtel:"Hôtels" }[cat];
+                    return (
+                      <div key={cat}>
+                        <div style={{ padding:"4px 13px", background:C.grayL, borderBottom:`0.5px solid ${C.grayM}` }}>
+                          <span style={{ fontSize:9, fontWeight:700, textTransform:"uppercase", letterSpacing:".06em", color:C.gray }}>
+                            {catLabel} ({items.length})
+                          </span>
+                        </div>
+                        {items.map((item, i) => {
+                          const globalIdx = scrapedRates.indexOf(item);
+                          const pw = item.price_week ? Math.round(item.price_week) : item.price_night ? Math.round(item.price_night * 7) : 0;
+                          const pn = item.price_night ? Math.round(item.price_night) : pw ? Math.round(pw / 7) : 0;
+                          const diff = ourPrice && pw ? ourPrice - pw : null;
+                          const state = scrapeSaved[globalIdx];
+                          return (
+                            <div key={i} style={{ ...rw(i===items.length-1), padding:"8px 13px", gap:8 }}>
+                              <div style={{ flex:1, minWidth:0 }}>
+                                <p style={{ margin:0, fontSize:12, fontWeight:500, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                                  {item.url
+                                    ? <a href={item.url} target="_blank" rel="noreferrer" style={{ color:C.text, textDecoration:"none" }}>{item.name}</a>
+                                    : item.name
+                                  }
+                                </p>
+                                <p style={{ margin:0, fontSize:9, color:C.gray }}>
+                                  {item.platform}{item.rating ? ` · ${item.rating}★` : ""}
+                                </p>
+                              </div>
+                              <div style={{ textAlign:"right", flexShrink:0 }}>
+                                <p style={{ margin:0, fontSize:12, fontWeight:700, color:C.text }}>{fmt(pw)}€<span style={{ fontSize:9, fontWeight:400, color:C.gray }}>/sem</span></p>
+                                {diff !== null && (
+                                  <p style={{ margin:0, fontSize:9, fontWeight:700, color:diff>0?C.green:C.red }}>
+                                    {diff>0?"+":""}{fmt(diff)}€
+                                  </p>
+                                )}
+                              </div>
+                              <button
+                                onClick={() => saveScrapedRate(item, globalIdx)}
+                                disabled={!!state}
+                                style={{
+                                  width:28, height:28, borderRadius:8, border:"none", flexShrink:0,
+                                  background: state==="dup" ? C.goldL : state==="ok" ? C.greenL : C.bluePale,
+                                  color: state==="dup" ? C.gold : state==="ok" ? C.green : C.blue,
+                                  fontWeight:700, fontSize:16, cursor:state?"default":"pointer",
+                                  display:"flex", alignItems:"center", justifyContent:"center",
+                                }}
+                              >
+                                {state==="dup" ? "=" : state==="ok" ? "✓" : "+"}
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </>)}
 
@@ -1092,7 +1294,6 @@ ANALYSE 4 BLOCS séparés par "---" (2 phrases max chacun) :
     const excluded   = rates.filter(r => !r.is_example && (r.comparability_score??50) < settings.minScore);
     const oldRates   = rates.filter(r => daysSince(r.collected_at) > settings.obsoleteDays);
     const noCompId   = rates.filter(r => !r.is_example && !r.competitor_id);
-    const noName     = rates.filter(r => !r.is_example && !r.property_name);
     const lastImport = imports[0];
     const localKeys  = Object.keys(localStorage).filter(k => k.startsWith("rates_"));
     const totalLocal = localKeys.reduce((s,k) => s + (ls.get(k).length), 0);
@@ -1155,7 +1356,7 @@ ANALYSE 4 BLOCS séparés par "---" (2 phrases max chacun) :
               { l:"Session persistante", ok:!!sessionStorage.getItem("sb_token") },
               { l:"Données exemple désactivées", ok:!showExamples },
               { l:"≥3 relevés qualifiés chargés", ok:qualified.length>=3 },
-              { l:"Route /api/analyse-reco déployée", ok:false, note:"Déployer api/analyse-reco.js sur Vercel" },
+              { l:"Route /api/analyse-reco déployée", ok:false, note:"Déployer api/analyse-reco.js sur Vercel avec ANTHROPIC_API_KEY." },
             ].map((c,i,arr)=>(
               <div key={c.l} style={rw(i===arr.length-1)}>
                 <div><span style={{ fontSize:11, color:C.text }}>{c.l}</span>{c.note&&<p style={{ margin:"1px 0 0", fontSize:9, color:C.gray }}>{c.note}</p>}</div>
