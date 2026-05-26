@@ -349,6 +349,28 @@ function PromoBadge({ label }) {
   return <span style={{ fontSize:9, fontWeight:700, background:m.bg, color:m.c, padding:"2px 5px", borderRadius:4 }}>{short}</span>;
 }
 
+// ══ LOGIN SCREEN (défini hors de App pour éviter le re-mount à chaque frappe) ══
+function LoginScreen({ loginErr, SB_READY, loginEmail, setLE, loginPwd, setLP, loginLoading, handleLogin }) {
+  const sml = { fontSize:10, fontWeight:700, color:C.gray, margin:"12px 2px 5px", letterSpacing:"0.06em", textTransform:"uppercase" };
+  const inp = (extra={}) => ({ width:"100%", padding:"8px 10px", fontSize:13, border:`1px solid ${C.grayM}`, borderRadius:9, background:C.white, color:C.text, boxSizing:"border-box", ...extra });
+  const btn = (dis,bg=C.blue,fg=C.white) => ({ width:"100%", padding:"12px", fontSize:14, fontWeight:600, background:dis?"#C7C7CC":bg, color:fg, border:"none", borderRadius:11, cursor:dis?"not-allowed":"pointer", marginBottom:6 });
+  return (
+    <div style={{ padding:"60px 28px 0" }}>
+      <div style={{ width:52, height:52, background:C.blue, borderRadius:14, display:"flex", alignItems:"center", justifyContent:"center", marginBottom:22 }}><span style={{ fontSize:26 }}>⛰</span></div>
+      <h1 style={{ margin:"0 0 5px", fontSize:21, fontWeight:700, color:C.text }}>Benchmark Été</h1>
+      <p style={{ margin:"0 0 30px", fontSize:12, color:C.textS }}>Les Cimes du Val d'Allos · Accès privé</p>
+      {loginErr && <div style={{ background:C.redL, borderRadius:9, padding:"9px 12px", marginBottom:10 }}><p style={{ margin:0, fontSize:12, color:C.red, fontWeight:600 }}>✗ {loginErr}</p></div>}
+      {!SB_READY && <div style={{ background:C.goldL, borderRadius:9, padding:"9px 12px", marginBottom:10 }}><p style={{ margin:0, fontSize:10, color:C.gold }}>Mode démo — saisir n'importe quel email/mot de passe.</p></div>}
+      <p style={sml}>Email</p>
+      <input type="email" style={{ ...inp(), marginBottom:10 }} value={loginEmail} onChange={e=>setLE(e.target.value)} placeholder="votre@email.com" autoComplete="email"/>
+      <p style={sml}>Mot de passe</p>
+      <input type="password" style={{ ...inp(), marginBottom:16 }} value={loginPwd} onChange={e=>setLP(e.target.value)} placeholder="••••••••" autoComplete="current-password" onKeyDown={e=>e.key==="Enter"&&handleLogin()}/>
+      <button style={btn(loginLoading)} onClick={handleLogin} disabled={loginLoading}>{loginLoading?"Connexion…":"Se connecter →"}</button>
+      <p style={{ fontSize:9, color:C.gray, textAlign:"center", marginTop:12, lineHeight:1.5 }}>Application privée · Données confidentielles<br/>Config : VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY dans .env.local</p>
+    </div>
+  );
+}
+
 // ══ APP ══════════════════════════════════════════════════════════
 export default function App() {
   const [screen, setScreen]       = useState("login");
@@ -765,21 +787,7 @@ Use EUR. price_week = total for 7 nights. Estimate if exact price unavailable.`;
 
   // ══ ÉCRANS ════════════════════════════════════════════════════
 
-  const LoginScreen = () => (
-    <div style={{ padding:"60px 28px 0" }}>
-      <div style={{ width:52, height:52, background:C.blue, borderRadius:14, display:"flex", alignItems:"center", justifyContent:"center", marginBottom:22 }}><span style={{ fontSize:26 }}>⛰</span></div>
-      <h1 style={{ margin:"0 0 5px", fontSize:21, fontWeight:700, color:C.text }}>Benchmark Été</h1>
-      <p style={{ margin:"0 0 30px", fontSize:12, color:C.textS }}>Les Cimes du Val d'Allos · Accès privé</p>
-      {loginErr && <div style={{ background:C.redL, borderRadius:9, padding:"9px 12px", marginBottom:10 }}><p style={{ margin:0, fontSize:12, color:C.red, fontWeight:600 }}>✗ {loginErr}</p></div>}
-      {!SB_READY && <div style={{ background:C.goldL, borderRadius:9, padding:"9px 12px", marginBottom:10 }}><p style={{ margin:0, fontSize:10, color:C.gold }}>Mode démo — saisir n'importe quel email/mot de passe.</p></div>}
-      <p style={sml}>Email</p>
-      <input type="email" style={{ ...inp(), marginBottom:10 }} value={loginEmail} onChange={e=>setLE(e.target.value)} placeholder="votre@email.com"/>
-      <p style={sml}>Mot de passe</p>
-      <input type="password" style={{ ...inp(), marginBottom:16 }} value={loginPwd} onChange={e=>setLP(e.target.value)} placeholder="••••••••" onKeyDown={e=>e.key==="Enter"&&handleLogin()}/>
-      <button style={btn(loginLoading)} onClick={handleLogin} disabled={loginLoading}>{loginLoading?"Connexion…":"Se connecter →"}</button>
-      <p style={{ fontSize:9, color:C.gray, textAlign:"center", marginTop:12, lineHeight:1.5 }}>Application privée · Données confidentielles<br/>Config : VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY dans .env.local</p>
-    </div>
-  );
+
 
   const Dashboard = () => (
     <div><SBar title="Dashboard"/>
@@ -1372,7 +1380,7 @@ Use EUR. price_week = total for 7 nights. Estimate if exact price unavailable.`;
   return (
     <div style={{ padding:"20px 0 40px", display:"flex", justifyContent:"center" }}>
       <div style={ph}>
-        {!user && <LoginScreen/>}
+        {!user && <LoginScreen loginErr={loginErr} SB_READY={SB_READY} loginEmail={loginEmail} setLE={setLE} loginPwd={loginPwd} setLP={setLP} loginLoading={loginLoading} handleLogin={handleLogin}/>}
         {user && screen==="dashboard" && <Dashboard/>}
         {user && screen==="weeks"     && <Weeks/>}
         {user && screen==="week"      && <WeekDetail/>}
