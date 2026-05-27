@@ -156,38 +156,115 @@ function stripUserId(rate) {
   return rest;
 }
 
+// Normalise les lignes Supabase.
+// Ta table actuelle utilise les colonnes simples :
+// competitor / price / source_url.
+// L'interface, elle, travaille avec property_name / price_week / url.
+// Cette fonction fait le pont entre les deux formats.
+function normalizeRateForApp(rate = {}) {
+  const priceWeek = Number(rate.price_week ?? rate.price ?? 0);
+
+  return {
+    ...rate,
+    competitor_id: rate.competitor_id ?? null,
+    property_name: rate.property_name ?? rate.competitor ?? rate.source ?? "Concurrent",
+    competitor_name: rate.competitor_name ?? rate.property_name ?? rate.competitor ?? rate.source ?? "Concurrent",
+    property_type: rate.property_type ?? rate.type ?? "particulier",
+    price_week: priceWeek,
+    price_night: Number(rate.price_night ?? (priceWeek ? Math.round(priceWeek / 7) : 0)),
+    url: rate.url ?? rate.source_url ?? "",
+    source_url: rate.source_url ?? rate.url ?? "",
+    reliability_status: rate.reliability_status ?? "à vérifier",
+    collection_type: rate.collection_type ?? rate.source ?? "manual",
+    comparability_score: rate.comparability_score ?? 75,
+    is_example: rate.is_example ?? false,
+  };
+}
+
 async function getCompetitorRates({ weekId, capacity, showExamples = false }, allCompetitors) {
   let raw = [];
+
   if (SB_READY) {
-    let q = `week_id=eq.${weekId}&capacity=eq.${capacity}&order=collected_at.desc`;
-    q += `&select=*,competitors(id,name,property_type,comparability_score,has_pool,has_ski_access)`;
-    if (!showExamples) q += `&is_example=eq.false`;
+    // Requête compatible avec la table Supabase actuellement créée :
+    // id, week_id, capacity, competitor, price, source, source_url, collected_at, created_by...
+    // On évite ici les colonnes qui n'existent pas encore : price_week, property_name, is_example, competitors(...)
+    const q = [
+      `week_id=eq.${encodeURIComponent(weekId)}`,
+      `capacity=eq.${encodeURIComponent(capacity)}`,
+      "order=collected_at.desc"
+    ].join("&");
+
     raw = await sb.select("competitor_rates", q);
   } else {
-    raw = ls.get(`rates_${weekId}_${capacity}`).filter(r => showExamples || !r.is_example);
+    raw = ls
+      .get(`rates_${weekId}_${capacity}`)
+      .filter(r => showExamples || !r.is_example);
   }
-  return enrichRates(raw || [], allCompetitors);
+
+  const normalized = (raw || [])
+    .map(normalizeRateForApp)
+    .filter(r => showExamples || !r.is_example);
+
+  return enrichRates(normalized, allCompetitors);
 }
 
 async function saveCompetitorRate(rate, allCompetitors) {
   const clean = stripUserId(rate);
+
   if (SB_READY) {
-    if (clean.competitor_id) {
-      const ex = await sb.select("competitor_rates",
-        `week_id=eq.${clean.week_id}&competitor_id=eq.${clean.competitor_id}&capacity=eq.${clean.capacity}&collected_at=eq.${clean.collected_at}&source=eq.${encodeURIComponent(clean.source)}&select=id`);
-      if (ex?.length) throw new Error("DUPLICATE");
-    } else if (clean.property_name) {
-      const ex = await sb.select("competitor_rates",
-        `week_id=eq.${clean.week_id}&property_name=eq.${encodeURIComponent(clean.property_name)}&source=eq.${encodeURIComponent(clean.source)}&capacity=eq.${clean.capacity}&collected_at=eq.${clean.collected_at}&competitor_id=is.null&select=id`);
-      if (ex?.length) throw new Error("DUPLICATE");
-    }
-    return sb.insert("competitor_rates", clean);
+    // Adaptation au schéma Supabase actuel :
+    // competitor_rates contient competitor + price, pas property_name + price_week.
+    const propertyName =
+      clean.property_name ||
+      clean.competitor ||
+      clean.source ||
+      "Concurrent";
+
+    const priceWeek = Number(clean.price_week ?? clean.price ?? 0);
+
+    if (!clean.week_id) throw new Error("Semaine manquante");
+    if (!clean.capacity) throw new Error("Capacité manquante");
+    if (!propertyName) throw new Error("Nom du concurrent manquant");
+    if (!priceWeek || Number.isNaN(priceWeek)) throw new Error("Prix semaine manquant");
+
+    const source = clean.source || clean.platform || clean.collection_type || "manual";
+    const collectedAt = clean.collected_at || new Date().toISOString().slice(0, 10);
+
+    // Vérification doublon compatible avec la contrainte unique :
+    // week_id + capacity + competitor + collected_at + source
+    const duplicateQuery = [
+      `week_id=eq.${encodeURIComponent(clean.week_id)}`,
+      `capacity=eq.${encodeURIComponent(Number(clean.capacity))}`,
+      `competitor=eq.${encodeURIComponent(propertyName)}`,
+      `source=eq.${encodeURIComponent(source)}`,
+      `collected_at=eq.${encodeURIComponent(collectedAt)}`,
+      "select=id"
+    ].join("&");
+
+    const existing = await sb.select("competitor_rates", duplicateQuery);
+    if (existing?.length) throw new Error("DUPLICATE");
+
+    const payload = {
+      week_id: clean.week_id,
+      capacity: Number(clean.capacity),
+      competitor: propertyName,
+      price: priceWeek,
+      source,
+      source_url: clean.source_url || clean.url || null,
+      collected_at: collectedAt,
+      created_by: clean.created_by || null,
+    };
+
+    return sb.insert("competitor_rates", payload);
   }
-  const id    = "r_" + Date.now();
-  const full  = { ...clean, id };
-  const key   = `rates_${clean.week_id}_${clean.capacity}`;
+
+  const id = "r_" + Date.now();
+  const full = { ...clean, id };
+  const key = `rates_${clean.week_id}_${clean.capacity}`;
   const existing = ls.get(key);
+
   if (isDuplicate(existing, clean)) throw new Error("DUPLICATE");
+
   ls.push(key, full);
   return full;
 }
@@ -200,19 +277,47 @@ async function deleteCompetitorRate(id, weekId, capacity) {
 
 async function getHistoricalRates({ weekId, competitorId, capacity }) {
   if (SB_READY) {
-    const q = `week_id=eq.${weekId}&competitor_id=eq.${competitorId}&capacity=eq.${capacity}&order=collected_at.asc&select=*,competitors(name)`;
-    return sb.select("competitor_rates", q);
+    // Version compatible avec le schéma simple actuel.
+    // On charge la semaine/capacité puis on normalise pour l'affichage.
+    const q = [
+      `week_id=eq.${encodeURIComponent(weekId)}`,
+      `capacity=eq.${encodeURIComponent(capacity)}`,
+      "order=collected_at.asc"
+    ].join("&");
+
+    const rows = await sb.select("competitor_rates", q);
+    return (rows || []).map(normalizeRateForApp);
   }
-  return ls.get(`rates_${weekId}_${capacity}`).filter(r => r.competitor_id === competitorId).sort((a,b) => a.collected_at.localeCompare(b.collected_at));
+
+  return ls
+    .get(`rates_${weekId}_${capacity}`)
+    .filter(r => r.competitor_id === competitorId)
+    .sort((a,b) => a.collected_at.localeCompare(b.collected_at));
 }
 
 async function getImports() {
-  if (SB_READY) return sb.select("imports", "order=imported_at.desc&limit=5");
+  if (SB_READY) {
+    // Table imports créée avec created_at, pas imported_at.
+    return sb.select("imports", "order=created_at.desc&limit=5");
+  }
+
   return ls.get("imports").slice(-5).reverse();
 }
 
 async function saveImportLog(log) {
-  if (SB_READY) return sb.insert("imports", log);
+  if (SB_READY) {
+    // Adaptation au schéma imports minimal.
+    return sb.insert("imports", {
+      file_name: log.file_name || log.import_source || "CSV",
+      capacity: log.capacity || null,
+      total_rows: log.rows_total || 0,
+      inserted_rows: log.rows_imported || 0,
+      duplicate_rows: log.rows_duplicate || 0,
+      error_rows: log.rows_error || 0,
+      stats: log,
+    });
+  }
+
   ls.push("imports", { ...log, id: "imp_" + Date.now() });
 }
 
@@ -692,6 +797,10 @@ ANALYSE 4 BLOCS séparés par "---" (2 phrases max chacun) :
   async function saveScrapedRate(item, idx) {
     const pw = item.price_week ? Math.round(item.price_week) : item.price_night ? Math.round(item.price_night * 7) : 0;
     const pn = item.price_night ? Math.round(item.price_night) : pw ? Math.round(pw / 7) : 0;
+
+    setScrapeError("");
+    setScrapeSaved(prev => ({ ...prev, [idx]: "saving" }));
+
     try {
       await saveCompetitorRate({
         week_id: selWeekId,
@@ -704,17 +813,27 @@ ANALYSE 4 BLOCS séparés par "---" (2 phrases max chacun) :
         price_night: pn,
         booking_rating: item.rating || null,
         url: item.url || "",
+        source_url: item.url || "",
         collected_at: new Date().toISOString().slice(0, 10),
         collection_type: "scraping-auto",
         reliability_status: "à vérifier",
         is_example: false,
         notes: `Collecté automatiquement via web search depuis ${item.platform || "Booking/Airbnb"}.`,
       }, competitors);
+
       setScrapeSaved(prev => ({ ...prev, [idx]: "ok" }));
-      loadRates();
+      setFS("ok");
+      await loadRates();
     } catch(e) {
-      setScrapeSaved(prev => ({ ...prev, [idx]: e.message?.includes("DUPLICATE") ? "dup" : "err" }));
+      const status = e.message?.includes("DUPLICATE") ? "dup" : "err";
+      setScrapeSaved(prev => ({ ...prev, [idx]: status }));
+      setFS(status === "dup" ? "duplicate" : "error");
+      if (status !== "dup") {
+        setScrapeError(`Erreur enregistrement "${item.name}" : ${e.message}`);
+      }
     }
+
+    setTimeout(() => setFS(null), 3000);
   }
 
   // ── Styles ────────────────────────────────────────────────────
@@ -995,6 +1114,8 @@ ANALYSE 4 BLOCS séparés par "---" (2 phrases max chacun) :
                   : `🔍 Rechercher sur Booking & Airbnb · ${selWeek?.label}`}
               </button>
 
+              <SaveFeedback/>
+
               {/* Erreur */}
               {scrapeError && (
                 <div style={{ ...cd(9), padding:"8px 12px", background:C.redL, marginBottom:6 }}>
@@ -1008,7 +1129,7 @@ ANALYSE 4 BLOCS séparés par "---" (2 phrases max chacun) :
                   {/* Info */}
                   <div style={{ padding:"8px 13px", background:C.bluePale, borderBottom:`0.5px solid ${C.grayM}` }}>
                     <p style={{ margin:0, fontSize:11, fontWeight:600, color:C.blueL }}>
-                      {scrapedRates.length} logements trouvés · Appuyez sur <strong style={{ color:C.blue }}>+</strong> pour enregistrer
+                      {scrapedRates.length} logements trouvés · {Object.values(scrapeSaved).filter(v => v === "ok").length} enregistré(s) · Appuyez sur <strong style={{ color:C.blue }}>+</strong> pour enregistrer
                     </p>
                     <p style={{ margin:"2px 0 0", fontSize:9, color:C.gray, fontStyle:"italic" }}>
                       Données web search — à vérifier avant usage tarifaire
@@ -1056,16 +1177,16 @@ ANALYSE 4 BLOCS séparés par "---" (2 phrases max chacun) :
                               </div>
                               <button
                                 onClick={() => saveScrapedRate(item, globalIdx)}
-                                disabled={!!state}
+                                disabled={Boolean(state && state !== "err")}
                                 style={{
                                   width:28, height:28, borderRadius:8, border:"none", flexShrink:0,
-                                  background: state==="dup" ? C.goldL : state==="ok" ? C.greenL : C.bluePale,
-                                  color: state==="dup" ? C.gold : state==="ok" ? C.green : C.blue,
-                                  fontWeight:700, fontSize:16, cursor:state?"default":"pointer",
+                                  background: state==="err" ? C.redL : state==="saving" ? C.grayM : state==="dup" ? C.goldL : state==="ok" ? C.greenL : C.bluePale,
+                                  color: state==="err" ? C.red : state==="saving" ? C.gray : state==="dup" ? C.gold : state==="ok" ? C.green : C.blue,
+                                  fontWeight:700, fontSize:16, cursor:state&&state!=="err"?"default":"pointer",
                                   display:"flex", alignItems:"center", justifyContent:"center",
                                 }}
                               >
-                                {state==="dup" ? "=" : state==="ok" ? "✓" : "+"}
+                                {state==="saving" ? "…" : state==="err" ? "!" : state==="dup" ? "=" : state==="ok" ? "✓" : "+"}
                               </button>
                             </div>
                           );
