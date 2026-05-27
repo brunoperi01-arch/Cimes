@@ -657,7 +657,7 @@ ANALYSE 4 BLOCS séparés par "---" (2 phrases max chacun) :
 4. ACTION : une action immédiate et concrète`;
   }
 
-  // ── NOUVEAU : Scraping automatique Booking & Airbnb ───────────
+  // ── NOUVEAU : Scraping automatique via /api/scrape-market (Vercel) ──
   async function scrapeMarket() {
     setScraping(true);
     setScrapeError("");
@@ -665,50 +665,23 @@ ANALYSE 4 BLOCS séparés par "---" (2 phrases max chacun) :
     setScrapeSaved({});
 
     const w = selWeek;
-    const dateStr = w?.week_start
-      ? `check-in ${w.week_start}, check-out ${new Date(new Date(w.week_start).getTime() + 7*864e5).toISOString().slice(0,10)} (7 nuits)`
-      : w?.label || "été 2026";
-
-    const prompt = `Search Booking.com and Airbnb for vacation rental listings in La Foux d'Allos (Val d'Allos), Alpes-de-Haute-Provence, France.
-${dateStr}, ${capNum} guests.
-
-Find 8-12 real listings. For each, categorize:
-- "résidence" → managed residence (Labellemontagne, Goélia, Pierre & Vacances, Vacancéole, MMV, etc.)
-- "particulier" → individual host on Airbnb or Booking
-- "hôtel" → hotel or apart-hotel
-
-Return ONLY a raw JSON array, no markdown, no backticks, no other text:
-[{"name":"...","property_type":"résidence","platform":"Booking.com","price_week":595,"price_night":85,"capacity":6,"rating":8.2,"url":"https://..."}]
-
-Use EUR. price_week = total for 7 nights. Estimate if exact price unavailable.`;
 
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("/api/scrape-market", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 2000,
-          system: "You are a vacation rental price analyst for La Foux d'Allos, France. Use web search to find current real prices on Booking.com and Airbnb. Return ONLY valid raw JSON arrays, absolutely no other text, no backticks.",
-          messages: [{ role: "user", content: prompt }],
-          tools: [{ type: "web_search_20250305", name: "web_search" }],
+          weekLabel: w?.label || "",
+          weekStart: w?.week_start || "",
+          capacity: capNum,
         }),
       });
 
       const data = await res.json();
-      if (data.error) throw new Error(data.error.message);
-
-      const text = (data.content || [])
-        .filter(b => b.type === "text")
-        .map(b => b.text)
-        .join("\n");
-
-      const match = text.match(/\[[\s\S]*\]/);
-      if (!match) throw new Error("Aucune donnée JSON. Réessayez.");
-
-      const listings = JSON.parse(match[0]);
-      if (!listings.length) throw new Error("Aucun logement trouvé.");
-      setScrapedRates(listings);
+      if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+      if (data.warning) setScrapeError("⚠ " + data.warning);
+      if (!data.listings?.length) throw new Error("Aucun logement trouvé. Réessayez.");
+      setScrapedRates(data.listings);
 
     } catch(e) {
       setScrapeError("Erreur : " + e.message);
