@@ -202,14 +202,26 @@ function stripUserId(rate) {
 
 async function getCompetitorRates({ weekId, capacity, showExamples = false }, allCompetitors) {
   let raw = [];
+
   if (SB_READY) {
-    let q = `week_id=eq.${weekId}&capacity=eq.${capacity}&order=collected_at.desc`;
-    q += `&select=*,competitors(id,name,property_type,comparability_score,has_pool,has_ski_access)`;
-    if (!showExamples) q += `&is_example=eq.false`;
+    const q = [
+      `week_id=eq.${encodeURIComponent(weekId)}`,
+      `capacity=eq.${encodeURIComponent(capacity)}`,
+      `order=collected_at.desc`,
+      `select=*`
+    ].join("&");
+
     raw = await sb.select("competitor_rates", q);
+
+    if (!showExamples) {
+      raw = (raw || []).filter(r => r.is_example !== true);
+    }
   } else {
-    raw = ls.get(`rates_${weekId}_${capacity}`).filter(r => showExamples || !r.is_example);
+    raw = ls
+      .get(`rates_${weekId}_${capacity}`)
+      .filter(r => showExamples || !r.is_example);
   }
+
   return enrichRates(raw || [], allCompetitors);
 }
 
