@@ -227,24 +227,101 @@ async function getCompetitorRates({ weekId, capacity, showExamples = false }, al
 
 async function saveCompetitorRate(rate, allCompetitors) {
   const clean = stripUserId(rate);
-  if (SB_READY) {
-    if (clean.competitor_id) {
-      const ex = await sb.select("competitor_rates",
-        `week_id=eq.${clean.week_id}&competitor_id=eq.${clean.competitor_id}&capacity=eq.${clean.capacity}&collected_at=eq.${clean.collected_at}&source=eq.${encodeURIComponent(clean.source)}&select=id`);
-      if (ex?.length) throw new Error("DUPLICATE");
-    } else if (clean.property_name) {
-      const ex = await sb.select("competitor_rates",
-        `week_id=eq.${clean.week_id}&property_name=eq.${encodeURIComponent(clean.property_name)}&source=eq.${encodeURIComponent(clean.source)}&capacity=eq.${clean.capacity}&collected_at=eq.${clean.collected_at}&competitor_id=is.null&select=id`);
-      if (ex?.length) throw new Error("DUPLICATE");
-    }
-    return sb.insert("competitor_rates", clean);
+
+  const competitorName =
+    clean.competitor ||
+    clean.property_name ||
+    clean.competitor_name ||
+    clean.source ||
+    "Concurrent";
+
+  const priceValue = Number(
+    clean.price ??
+    clean.price_week ??
+    clean.priceWeek ??
+    0
+  );
+
+  const collectedAt =
+    clean.collected_at ||
+    clean.collectedAt ||
+    new Date().toISOString().slice(0, 10);
+
+  const sourceValue =
+    clean.source ||
+    clean.platform ||
+    clean.collection_type ||
+    "Scraping";
+
+  const sourceUrl =
+    clean.source_url ||
+    clean.url ||
+    "";
+
+  const propertyType =
+    clean.property_type ||
+    clean.type ||
+    "particulier";
+
+  if (!priceValue) {
+    throw new Error("Prix manquant : impossible d’enregistrer ce relevé.");
   }
-  const id    = "r_" + Date.now();
-  const full  = { ...clean, id };
-  const key   = `rates_${clean.week_id}_${clean.capacity}`;
-  const existing = ls.get(key);
-  if (isDuplicate(existing, clean)) throw new Error("DUPLICATE");
+
+  if (SB_READY) {
+    const duplicateQuery = [
+      `week_id=eq.${encodeURIComponent(clean.week_id)}`,
+      `capacity=eq.${encodeURIComponent(clean.capacity)}`,
+      `competitor=eq.${encodeURIComponent(competitorName)}`,
+      `source=eq.${encodeURIComponent(sourceValue)}`,
+      `collected_at=eq.${encodeURIComponent(collectedAt)}`,
+      `select=id`
+    ].join("&");
+
+    const existing = await sb.select("competitor_rates", duplicateQuery);
+
+    if (existing?.length) {
+      throw new Error("DUPLICATE");
+    }
+
+    const payload = {
+      week_id: clean.week_id,
+      capacity: Number(clean.capacity),
+      competitor: competitorName,
+      price: priceValue,
+      source: sourceValue,
+      source_url: sourceUrl,
+      collected_at: collectedAt
+    };
+
+    return sb.insert("competitor_rates", payload);
+  }
+
+  const id = "r_" + Date.now();
+
+  const full = {
+    ...clean,
+    id,
+    competitor: competitorName,
+    property_name: competitorName,
+    property_type: propertyType,
+    price: priceValue,
+    price_week: priceValue,
+    price_night: Math.round(priceValue / 7),
+    source: sourceValue,
+    source_url: sourceUrl,
+    url: sourceUrl,
+    collected_at: collectedAt
+  };
+
+  const key = `rates_${clean.week_id}_${clean.capacity}`;
+  const existingLocal = ls.get(key);
+
+  if (isDuplicate(existingLocal, full)) {
+    throw new Error("DUPLICATE");
+  }
+
   ls.push(key, full);
+
   return full;
 }
 
@@ -519,15 +596,28 @@ export default function App() {
 
   // ── Charger relevés ───────────────────────────────────────────
   const loadRates = useCallback(async () => {
-    if (!selWeekId || !capNum) return;
-    setRL(true);
-    setScrapedRates([]);
-    setScrapeSaved({});
-    setScrapeError("");
-    try { const d = await getCompetitorRates({ weekId:selWeekId, capacity:capNum, showExamples }, competitors); setRates(d||[]); }
-    catch(e) { console.error(e); setRates([]); }
-    setRL(false);
-  }, [selWeekId, capNum, showExamples, competitors]);
+  if (!selWeekId || !capNum) return;
+
+  setRL(true);
+
+  try {
+    const d = await getCompetitorRates(
+      {
+        weekId: selWeekId,
+        capacity: capNum,
+        showExamples
+      },
+      competitors
+    );
+
+    setRates(d || []);
+  } catch(e) {
+    console.error(e);
+    setRates([]);
+  }
+
+  setRL(false);
+}, [selWeekId, capNum, showExamples, competitors]);
 
   useEffect(() => { if (user) loadRates(); }, [loadRates, user]);
 
