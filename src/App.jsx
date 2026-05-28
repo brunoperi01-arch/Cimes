@@ -402,11 +402,21 @@ export default function App() {
   const [csvResult, setCsvResult] = useState(null);
   const [csvLoading, setCsvLoad]  = useState(false);
 
-  // ── NOUVEAU : état scraping automatique ──────────────────────
+  // ── Scraping simple ──────────────────────────────────────────
   const [scraping, setScraping]       = useState(false);
   const [scrapedRates, setScrapedRates] = useState([]);
   const [scrapeError, setScrapeError]   = useState("");
   const [scrapeSaved, setScrapeSaved]   = useState({});
+
+  // ── Scraping batch ───────────────────────────────────────────
+  const [showBatch, setShowBatch]           = useState(false);
+  const [batchWeeks, setBatchWeeks]         = useState([]);
+  const [batchCaps, setBatchCaps]           = useState([]);
+  const [batchTypes, setBatchTypes]         = useState(["résidence", "particulier"]);
+  const [batchLoading, setBatchLoading]     = useState(false);
+  const [batchResults, setBatchResults]     = useState(null);
+  const [batchSaved, setBatchSaved]         = useState({});
+  const [batchError, setBatchError]         = useState("");
 
   const emptyForm = { weekId:"2026_w7", competitorId:"cv", source:"", type:"résidence", capacity:6, priceWeek:"", priceNight:"", originalPrice:"", promoLabel:"", promoPercent:"", cleaningFee:"", url:"", collectedAt:new Date().toISOString().slice(0,10), notes:"" };
   const [form, setForm] = useState(emptyForm);
@@ -714,6 +724,72 @@ ANALYSE 4 BLOCS séparés par "---" (2 phrases max chacun) :
       loadRates();
     } catch(e) {
       setScrapeSaved(prev => ({ ...prev, [idx]: e.message?.includes("DUPLICATE") ? "dup" : "err" }));
+    }
+  }
+
+  // ── Scraping batch ────────────────────────────────────────────
+  async function scrapeMarketBatch() {
+    setBatchLoading(true);
+    setBatchError("");
+    setBatchResults(null);
+    setBatchSaved({});
+
+    const selectedWeeks = STATIC_WEEKS.filter(w => batchWeeks.includes(w.id));
+
+    try {
+      const res = await fetch("/api/scrape-market-batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          weeks: selectedWeeks.map(w => ({ id: w.id, label: w.label, week_start: w.week_start })),
+          capacities: batchCaps,
+          propertyTypes: batchTypes,
+          maxListingsPerSearch: 8,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+      setBatchResults(data.results || []);
+    } catch(e) {
+      setBatchError("Erreur : " + e.message);
+    }
+    setBatchLoading(false);
+  }
+
+  async function saveBatchRate(item, weekId, capacity, key) {
+    const pw = item.price_week ? Math.round(item.price_week) : item.price_night ? Math.round(item.price_night * 7) : 0;
+    const pn = item.price_night ? Math.round(item.price_night) : pw ? Math.round(pw / 7) : 0;
+    try {
+      await saveCompetitorRate({
+        week_id: weekId,
+        source: item.platform || "Scraping",
+        property_name: item.name,
+        property_type: item.property_type || "particulier",
+        competitor_id: null,
+        capacity,
+        price_week: pw,
+        price_night: pn,
+        booking_rating: item.rating || null,
+        url: item.url || "",
+        collected_at: new Date().toISOString().slice(0, 10),
+        collection_type: "scraping-batch",
+        reliability_status: "à vérifier",
+        is_example: false,
+        notes: `Collecté via batch web search depuis ${item.platform || "Booking/Airbnb"}.`,
+      }, competitors);
+      setBatchSaved(prev => ({ ...prev, [key]: "ok" }));
+      if (weekId === selWeekId && capacity === capNum) loadRates();
+    } catch(e) {
+      setBatchSaved(prev => ({ ...prev, [key]: e.message?.includes("DUPLICATE") ? "dup" : "err" }));
+    }
+  }
+
+  async function saveAllBatchGroup(result) {
+    for (let i = 0; i < result.listings.length; i++) {
+      const key = `${result.week_id}_${result.capacity}_${i}`;
+      if (!batchSaved[key]) {
+        await saveBatchRate(result.listings[i], result.week_id, result.capacity, key);
+      }
     }
   }
 
@@ -1075,6 +1151,196 @@ ANALYSE 4 BLOCS séparés par "---" (2 phrases max chacun) :
                   })}
                 </div>
               )}
+            </div>
+            {/* ══ RECHERCHE GROUPÉE (BATCH) ══════════════════════════ */}
+            <div style={{ marginTop:6 }}>
+              <button
+                onClick={() => { setShowBatch(p => !p); if (showBatch) { setBatchResults(null); setBatchError(""); } }}
+                style={{ width:"100%", display:"flex", justifyContent:"space-between", alignItems:"center", padding:"9px 13px", background:showBatch?C.bluePale:C.white, border:`1px solid ${showBatch?C.blueL:C.grayM}`, borderRadius:10, cursor:"pointer", marginBottom: showBatch?0:0 }}
+              >
+                <span style={{ fontSize:12, fontWeight:600, color:showBatch?C.blue:C.text }}>🔎 Recherche groupée (multi-semaines)</span>
+                <span style={{ fontSize:10, color:C.gray }}>{showBatch?"▲ Fermer":"▼ Ouvrir"}</span>
+              </button>
+
+              {showBatch && (() => {
+                const wsYear = STATIC_WEEKS.filter(w => w.year === yr);
+                const combos = batchWeeks.length * batchCaps.length;
+                const tooMany = combos > 6;
+                const canLaunch = !tooMany && combos > 0 && !batchLoading;
+                return (
+                  <div style={{ background:C.white, border:`1px solid ${C.grayM}`, borderTop:"none", borderRadius:"0 0 10px 10px", padding:"10px 13px", marginBottom:8 }}>
+
+                    {/* Semaines */}
+                    <p style={{ ...sml, margin:"0 0 5px" }}>Semaines</p>
+                    <div style={{ maxHeight:120, overflowY:"auto", border:`1px solid ${C.grayM}`, borderRadius:8, marginBottom:8 }}>
+                      {wsYear.map((w, i) => {
+                        const sel = batchWeeks.includes(w.id);
+                        return (
+                          <label key={w.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"5px 10px", borderBottom: i < wsYear.length-1 ? `0.5px solid ${C.grayL}` : "none", cursor:"pointer", background: sel ? C.bluePale : "transparent" }}>
+                            <input type="checkbox" checked={sel} onChange={() => setBatchWeeks(prev => sel ? prev.filter(x => x !== w.id) : [...prev, w.id])} style={{ accentColor: C.blue }}/>
+                            <span style={{ fontSize:11, color: sel ? C.blue : C.text, flex:1 }}>{w.label}</span>
+                            <span style={{ fontSize:9, color:CAT_C[w.season_type], fontWeight:600 }}>{CAT_L[w.season_type]}</span>
+                            {w.event_label && <span style={{ fontSize:8, background:C.purpleL, color:C.purple, padding:"1px 4px", borderRadius:3 }}>{w.event_label.slice(0,8)}</span>}
+                          </label>
+                        );
+                      })}
+                    </div>
+
+                    {/* Capacités */}
+                    <p style={{ ...sml, margin:"0 0 5px" }}>Capacités</p>
+                    <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:4, marginBottom:8 }}>
+                      {[2,4,6,8].map(c => {
+                        const sel = batchCaps.includes(c);
+                        return (
+                          <button key={c} onClick={() => setBatchCaps(prev => sel ? prev.filter(x => x !== c) : [...prev, c])}
+                            style={{ padding:"6px 0", background: sel ? C.blue : C.grayL, border:"none", borderRadius:8, cursor:"pointer", fontSize:11, fontWeight: sel ? 700 : 400, color: sel ? C.white : C.text }}>
+                            {c}P
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Typologies */}
+                    <p style={{ ...sml, margin:"0 0 5px" }}>Typologies</p>
+                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:4, marginBottom:10 }}>
+                      {[["résidence","Résidences"],["particulier","Particuliers"],["hôtel","Hôtels"]].map(([val,lbl]) => {
+                        const sel = batchTypes.includes(val);
+                        return (
+                          <button key={val} onClick={() => setBatchTypes(prev => sel ? prev.filter(x => x !== val) : [...prev, val])}
+                            style={{ padding:"6px 4px", background: sel ? C.blue : C.grayL, border:"none", borderRadius:8, cursor:"pointer", fontSize:10, fontWeight: sel ? 700 : 400, color: sel ? C.white : C.text }}>
+                            {lbl}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Résumé et lancement */}
+                    <div style={{ background: tooMany ? C.redL : combos === 0 ? C.grayL : C.greenL, borderRadius:8, padding:"7px 10px", marginBottom:8 }}>
+                      <p style={{ margin:0, fontSize:11, fontWeight:700, color: tooMany ? C.red : combos === 0 ? C.gray : C.green }}>
+                        {combos === 0
+                          ? "Sélectionner des semaines et capacités"
+                          : tooMany
+                          ? `⚠ ${batchWeeks.length} semaines × ${batchCaps.length} capacités = ${combos} recherches — max 6`
+                          : `✓ ${batchWeeks.length} semaine${batchWeeks.length>1?"s":""} × ${batchCaps.length} capacité${batchCaps.length>1?"s":""} = ${combos} recherche${combos>1?"s":""}`
+                        }
+                      </p>
+                      {combos > 0 && !tooMany && <p style={{ margin:"1px 0 0", fontSize:9, color: C.green }}>Durée estimée : ~{combos*30}s · {combos} appels Claude web search</p>}
+                    </div>
+
+                    <button
+                      onClick={scrapeMarketBatch}
+                      disabled={!canLaunch}
+                      style={{ ...btn(!canLaunch, C.blue), background: !canLaunch ? "#93C5FD" : C.blue, margin:0 }}
+                    >
+                      {batchLoading ? `⏳ Recherche en cours (${combos} combinaisons)…` : "🚀 Lancer recherche groupée"}
+                    </button>
+
+                    {batchError && (
+                      <div style={{ ...cd(9), padding:"8px 12px", background:C.redL, marginTop:6, marginBottom:0 }}>
+                        <p style={{ margin:0, fontSize:11, color:C.red }}>{batchError}</p>
+                      </div>
+                    )}
+
+                    {/* Résultats batch */}
+                    {batchResults && batchResults.length > 0 && (
+                      <div style={{ marginTop:10 }}>
+                        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
+                          <p style={{ ...sml, margin:0 }}>Résultats ({batchResults.reduce((s,r)=>s+r.listings.length,0)} logements)</p>
+                          <span style={{ fontSize:9, color:C.gray, fontStyle:"italic" }}>À vérifier avant usage tarifaire</span>
+                        </div>
+                        {batchResults.map((result, ri) => {
+                          const groupSaved = result.listings.map((_,i) => batchSaved[`${result.week_id}_${result.capacity}_${i}`]);
+                          const allDone = groupSaved.length > 0 && groupSaved.every(s => s === "ok" || s === "dup");
+                          return (
+                            <div key={`${result.week_id}_${result.capacity}`} style={{ ...cd(10,6) }}>
+                              {/* En-tête groupe */}
+                              <div style={{ padding:"7px 12px", background:C.bluePale, display:"flex", justifyContent:"space-between", alignItems:"center", borderBottom:`0.5px solid ${C.grayM}` }}>
+                                <div>
+                                  <p style={{ margin:0, fontSize:11, fontWeight:700, color:C.blue }}>{result.week_label}</p>
+                                  <p style={{ margin:0, fontSize:9, color:C.blueL }}>{result.capacity}P · {result.listings.length} logements</p>
+                                </div>
+                                {result.error ? (
+                                  <span style={{ fontSize:10, color:C.red }}>✗ Erreur</span>
+                                ) : result.warning ? (
+                                  <span style={{ fontSize:10, color:C.gold }}>⚠</span>
+                                ) : (
+                                  <button
+                                    onClick={() => saveAllBatchGroup(result)}
+                                    disabled={allDone || result.listings.length === 0}
+                                    style={{ padding:"4px 9px", background: allDone ? C.greenL : C.blue, color: allDone ? C.green : C.white, border:"none", borderRadius:6, fontSize:10, fontWeight:600, cursor: allDone ? "default" : "pointer" }}
+                                  >
+                                    {allDone ? "✓ Enregistré" : "Tout enregistrer"}
+                                  </button>
+                                )}
+                              </div>
+
+                              {/* Erreur groupe */}
+                              {result.error && (
+                                <div style={{ padding:"8px 12px" }}>
+                                  <p style={{ margin:0, fontSize:11, color:C.red }}>! {result.error}</p>
+                                </div>
+                              )}
+                              {result.warning && !result.error && (
+                                <div style={{ padding:"8px 12px" }}>
+                                  <p style={{ margin:0, fontSize:11, color:C.gold }}>⚠ {result.warning}</p>
+                                </div>
+                              )}
+
+                              {/* Lignes par type */}
+                              {["résidence","particulier","hôtel"].map(cat => {
+                                const items = result.listings.filter(l => l.property_type === cat);
+                                if (!items.length) return null;
+                                const catLabel = { résidence:"Résidences", particulier:"Particuliers", hôtel:"Hôtels" }[cat];
+                                return (
+                                  <div key={cat}>
+                                    <div style={{ padding:"3px 12px", background:C.grayL, borderBottom:`0.5px solid ${C.grayM}` }}>
+                                      <span style={{ fontSize:9, fontWeight:700, textTransform:"uppercase", letterSpacing:".05em", color:C.gray }}>{catLabel} ({items.length})</span>
+                                    </div>
+                                    {items.map((item, i) => {
+                                      const globalIdx = result.listings.indexOf(item);
+                                      const key = `${result.week_id}_${result.capacity}_${globalIdx}`;
+                                      const state = batchSaved[key];
+                                      const pw = item.price_week ? Math.round(item.price_week) : item.price_night ? Math.round(item.price_night * 7) : 0;
+                                      return (
+                                        <div key={i} style={{ display:"flex", alignItems:"center", gap:8, padding:"7px 12px", borderBottom: i < items.length-1 ? `0.5px solid ${C.grayL}` : "none" }}>
+                                          <div style={{ flex:1, minWidth:0 }}>
+                                            <p style={{ margin:0, fontSize:11, fontWeight:500, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                                              {item.url
+                                                ? <a href={item.url} target="_blank" rel="noreferrer" style={{ color:C.text, textDecoration:"none" }}>{item.name}</a>
+                                                : item.name}
+                                            </p>
+                                            <p style={{ margin:0, fontSize:9, color:C.gray }}>{item.platform}{item.rating ? ` · ${item.rating}★` : ""}</p>
+                                          </div>
+                                          <p style={{ margin:0, fontSize:12, fontWeight:700, color:C.text, flexShrink:0 }}>
+                                            {pw ? `${pw}€` : "—"}<span style={{ fontSize:9, fontWeight:400, color:C.gray }}>/sem</span>
+                                          </p>
+                                          <button
+                                            onClick={() => saveBatchRate(item, result.week_id, result.capacity, key)}
+                                            disabled={!!state}
+                                            style={{
+                                              width:26, height:26, borderRadius:7, border:"none", flexShrink:0,
+                                              background: state==="dup" ? C.goldL : state==="ok" ? C.greenL : state==="err" ? C.redL : C.bluePale,
+                                              color: state==="dup" ? C.gold : state==="ok" ? C.green : state==="err" ? C.red : C.blue,
+                                              fontWeight:700, fontSize:14, cursor: state ? "default" : "pointer",
+                                              display:"flex", alignItems:"center", justifyContent:"center",
+                                            }}
+                                          >
+                                            {state==="dup" ? "=" : state==="ok" ? "✓" : state==="err" ? "!" : "+"}
+                                          </button>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           </>)}
 
