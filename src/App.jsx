@@ -846,32 +846,59 @@ ANALYSE 4 BLOCS séparés par "---" (2 phrases max chacun) :
   }
 
   async function saveScrapedRate(item, idx) {
-    const pw = item.price_week ? Math.round(item.price_week) : item.price_night ? Math.round(item.price_night * 7) : 0;
-    const pn = item.price_night ? Math.round(item.price_night) : pw ? Math.round(pw / 7) : 0;
-    try {
-      await saveCompetitorRate({
-        week_id: selWeekId,
-        source: item.platform || "Scraping",
-        property_name: item.name,
-        property_type: item.property_type || "particulier",
-        competitor_id: null,
-        capacity: capNum,
-        price_week: pw,
-        price_night: pn,
-        booking_rating: item.rating || null,
-        url: item.url || "",
-        collected_at: new Date().toISOString().slice(0, 10),
-        collection_type: "scraping-auto",
-        reliability_status: "à vérifier",
-        is_example: false,
-        notes: `Collecté automatiquement via web search depuis ${item.platform || "Booking/Airbnb"}.`,
-      }, competitors);
-      setScrapeSaved(prev => ({ ...prev, [idx]: "ok" }));
-      loadRates();
-    } catch(e) {
-      setScrapeSaved(prev => ({ ...prev, [idx]: e.message?.includes("DUPLICATE") ? "dup" : "err" }));
+  const pw = item.price_week
+    ? Math.round(item.price_week)
+    : item.price_night
+      ? Math.round(item.price_night * 7)
+      : 0;
+
+  const pn = item.price_night
+    ? Math.round(item.price_night)
+    : pw
+      ? Math.round(pw / 7)
+      : 0;
+
+  try {
+    await saveCompetitorRate({
+      week_id: selWeekId,
+      source: item.platform || "Scraping",
+      property_name: item.name,
+      competitor: item.name,
+      property_type: item.property_type || "particulier",
+      competitor_id: null,
+      capacity: capNum,
+      price_week: pw,
+      price: pw,
+      price_night: pn,
+      booking_rating: item.rating || null,
+      url: item.url || "",
+      source_url: item.url || "",
+      collected_at: new Date().toISOString().slice(0, 10),
+      collection_type: "scraping-auto",
+      reliability_status: "à vérifier",
+      is_example: false,
+      notes: `Collecté automatiquement via web search depuis ${item.platform || "Booking/Airbnb"}.`,
+    }, competitors);
+
+    setScrapeSaved(prev => ({
+      ...prev,
+      [idx]: "ok"
+    }));
+
+    loadRates();
+  } catch(e) {
+    const status = e.message?.includes("DUPLICATE") ? "dup" : "err";
+
+    setScrapeSaved(prev => ({
+      ...prev,
+      [idx]: status
+    }));
+
+    if (status === "err") {
+      setScrapeError(`Erreur enregistrement "${item.name}" : ${e.message}`);
     }
   }
+}
 
   // ── Scraping batch ────────────────────────────────────────────
   async function scrapeMarketBatch() {
