@@ -134,13 +134,57 @@ function isDuplicate(existing, rate) {
 }
 
 function enrichRates(rawRates, competitors) {
-  return rawRates.map(r => {
-    const comp = competitors.find(c => c.id === r.competitor_id || c.source === r.source);
+  return (rawRates || []).map(r => {
+    const priceWeek = Number(r.price_week ?? r.price ?? 0);
+    const priceNight = Number(
+      r.price_night ??
+      (priceWeek ? Math.round(priceWeek / 7) : 0)
+    );
+
+    const comp = competitors.find(c =>
+      c.id === r.competitor_id ||
+      c.source === r.source ||
+      c.name === r.competitor ||
+      c.name === r.property_name
+    );
+
     return {
       ...r,
-      comparability_score: r.competitors?.comparability_score ?? comp?.comparability_score ?? 50,
-      property_type: r.competitors?.property_type ?? comp?.property_type ?? r.type ?? "particulier",
-      competitor_name: r.competitors?.name ?? comp?.name ?? r.property_name ?? r.source,
+
+      price_week: priceWeek,
+      price_night: priceNight,
+
+      property_name: r.property_name ?? r.competitor ?? r.source,
+      competitor_name:
+        r.competitor_name ??
+        r.property_name ??
+        r.competitor ??
+        comp?.name ??
+        r.source,
+
+      competitor: r.competitor ?? r.property_name ?? r.source,
+      price: Number(r.price ?? r.price_week ?? 0),
+      source_url: r.source_url ?? r.url ?? "",
+
+      comparability_score:
+        r.competitors?.comparability_score ??
+        comp?.comparability_score ??
+        50,
+
+      property_type:
+        r.competitors?.property_type ??
+        comp?.property_type ??
+        r.property_type ??
+        r.type ??
+        "particulier",
+
+      reliability_status:
+        r.reliability_status ??
+        "à vérifier",
+
+      collection_type:
+        r.collection_type ??
+        "scraping"
     };
   });
 }
