@@ -903,32 +903,61 @@ ANALYSE 4 BLOCS séparés par "---" (2 phrases max chacun) :
   }
 
   async function saveBatchRate(item, weekId, capacity, key) {
-    const pw = item.price_week ? Math.round(item.price_week) : item.price_night ? Math.round(item.price_night * 7) : 0;
-    const pn = item.price_night ? Math.round(item.price_night) : pw ? Math.round(pw / 7) : 0;
-    try {
-      await saveCompetitorRate({
-        week_id: weekId,
-        source: item.platform || "Scraping",
-        property_name: item.name,
-        property_type: item.property_type || "particulier",
-        competitor_id: null,
-        capacity,
-        price_week: pw,
-        price_night: pn,
-        booking_rating: item.rating || null,
-        url: item.url || "",
-        collected_at: new Date().toISOString().slice(0, 10),
-        collection_type: "scraping-batch",
-        reliability_status: "à vérifier",
-        is_example: false,
-        notes: `Collecté via batch web search depuis ${item.platform || "Booking/Airbnb"}.`,
-      }, competitors);
-      setBatchSaved(prev => ({ ...prev, [key]: "ok" }));
-      if (weekId === selWeekId && capacity === capNum) loadRates();
-    } catch(e) {
-      setBatchSaved(prev => ({ ...prev, [key]: e.message?.includes("DUPLICATE") ? "dup" : "err" }));
+  const pw = item.price_week
+    ? Math.round(item.price_week)
+    : item.price_night
+      ? Math.round(item.price_night * 7)
+      : 0;
+
+  const pn = item.price_night
+    ? Math.round(item.price_night)
+    : pw
+      ? Math.round(pw / 7)
+      : 0;
+
+  try {
+    await saveCompetitorRate({
+      week_id: weekId,
+      source: item.platform || "Scraping",
+      property_name: item.name,
+      competitor: item.name,
+      property_type: item.property_type || "particulier",
+      competitor_id: null,
+      capacity,
+      price_week: pw,
+      price: pw,
+      price_night: pn,
+      booking_rating: item.rating || null,
+      url: item.url || "",
+      source_url: item.url || "",
+      collected_at: new Date().toISOString().slice(0, 10),
+      collection_type: "scraping-batch",
+      reliability_status: "à vérifier",
+      is_example: false,
+      notes: `Collecté via batch web search depuis ${item.platform || "Booking/Airbnb"}.`,
+    }, competitors);
+
+    setBatchSaved(prev => ({
+      ...prev,
+      [key]: "ok"
+    }));
+
+    if (weekId === selWeekId && capacity === capNum) {
+      loadRates();
+    }
+  } catch(e) {
+    const status = e.message?.includes("DUPLICATE") ? "dup" : "err";
+
+    setBatchSaved(prev => ({
+      ...prev,
+      [key]: status
+    }));
+
+    if (status === "err") {
+      setBatchError(`Erreur enregistrement "${item.name}" : ${e.message}`);
     }
   }
+}
 
   async function saveAllBatchGroup(result) {
     for (let i = 0; i < result.listings.length; i++) {
