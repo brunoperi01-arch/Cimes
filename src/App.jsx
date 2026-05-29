@@ -287,7 +287,7 @@ return { medAll, medRes, medPart, medHot, ref, low, target, high, action, urgenc
 
 function parsePaste(text, source, weekId, capacity) {
 const full = text.toLowerCase();
-const priceRe = /(\d[\d\s]{1,5})\s*€|€\s*(\d[\d\s]{1,5})|\b(\d{2,4})\b(?=\s*(?:€|eur|\s*\/\s*(?:nuit|sem|semaine)))/gi;
+const priceRe = /(\d[\d\s]{1,5})\s*€|€\s*(\d[\d\s]{1,5})|\b(\d{2,4})\b(?=\s*(?:€|eur|\s*/\s*(?:nuit|sem|semaine)))/gi;
 const pricesSet=new Set(); let m;
 while((m=priceRe.exec(text))!==null){ const v=parseFloat((m[1]||m[2]||m[3]).replace(/\s/g,"")); if(v>=30&&v<=8000) pricesSet.add(v); }
 const prices=[...pricesSet].sort((a,b)=>a-b);
@@ -296,7 +296,7 @@ let promoLabel=null, promoPercent=0;
 if(/genius/i.test(full)){ promoLabel="Genius -10%"; promoPercent=10; } else if(/last[\s-]?minute/i.test(full)){ promoLabel="Last minute"; promoPercent=15; } else if(/early[\s-]?booking/i.test(full)){ promoLabel="Early booking"; promoPercent=10; } else if(/petit[\s-]?d[eé]j/i.test(full)){ promoLabel="PDJ inclus"; } else if(/annulation\s*gratuite/i.test(full)){ promoLabel="Annulation gratuite"; } else { const pm=full.match(/-(\d{1,2})\s*%/); if(pm){ promoPercent=parseInt(pm[1]); promoLabel=`-${promoPercent}%`; } }
 const ratingM=text.match(/(\d[,.]?\d?)\s*/\s*10|note\s*[^:]*:\s*(\d[,.]?\d?)/i); const rating=ratingM?parseFloat((ratingM[1]||ratingM[2]).replace(",",".")):null;
 const feeM=text.match(/(?:frais\s*(?:de\s*)?m[eé]nage|cleaning fee)\s*:?\s*([\d\s]+)\s*€/i); const cleaningFee=feeM?parseFloat(feeM[1].replace(/\s/g,"")):0;
-const capM=text.match(/(\d)\s*(?:personnes?|pers.|voyageurs?|guests?)/i); const detectedCap=capM?parseInt(capM[1]):capacity;
+const capM=text.match(/(\d)\s*(?:personnes?|pers\.|voyageurs?|guests?)/i); const detectedCap=capM?parseInt(capM[1]):capacity;
 const isNight=/par nuit|/nuit|per night|nightly/i.test(text); const nightPrices=prices.filter(p=>p<500); const weekPrices=prices.filter(p=>p>=200&&p<=5000);
 let priceWeek=0, priceNight=0;
 if(isNight&&nightPrices.length){ priceNight=nightPrices[Math.floor(nightPrices.length/2)]; priceWeek=Math.round(priceNight*7); } else if(weekPrices.length){ priceWeek=weekPrices[Math.floor(weekPrices.length/2)]; priceNight=Math.round(priceWeek/7); } else if(prices.length){ priceWeek=prices[0]; priceNight=Math.round(priceWeek/7); }
@@ -1221,7 +1221,7 @@ if(collectMode==="copier-coller") return (
 <div><p style={sml}>Semaine</p><select value={pasteWeekId} onChange={e=>setPWId(e.target.value)} style={inp()}>{STATIC_WEEKS.map(w=><option key={w.id} value={w.id}>{w.label?.slice(0,14)} {w.year}</option>)}</select></div>
 </div>
 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:6 }}>
-<div><p style={sml}>Capacité</p><select value={pasteCap} onChange={e=>setPCap(parseInt(e.target.value))} style={inp()}>{[2,4,6,8].map(n=><option key={n} value={n}>{n} pers.</option>)}</select></div>
+<div><p style={sml}>Capacité</p><select value={pasteCap} onChange={e=>setPCap(parseInt(e.target.value))} style={inp()}>{[2,4,6,8].map(n=><option key={n} value={n}>{n} pers\.</option>)}</select></div>
 <div><p style={sml}>Concurrent</p><select value={pasteCompId} onChange={e=>setPComp(e.target.value)} style={inp()}>{competitors.map(c=><option key={c.id} value={c.id}>{c.name.slice(0,22)}</option>)}</select></div>
 </div>
 <p style={sml}>Texte collé</p>
@@ -1273,7 +1273,7 @@ return (
 <select value={form.competitorId} onChange={e=>{ const c=competitors.find(x=>x.id===e.target.value); setForm({ ...form, competitorId:e.target.value, source:c?.source||"", type:c?.property_type||"résidence" }); }} style={{ ...inp(), marginBottom:6 }}>{competitors.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select>
 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:6 }}>
 <div><p style={sml}>Source</p><input style={inp()} placeholder="Booking..." value={form.source} onChange={e=>setForm({ ...form, source:e.target.value })}/></div>
-<div><p style={sml}>Capacité</p><select value={form.capacity} onChange={e=>setForm({ ...form, capacity:parseInt(e.target.value) })} style={inp()}>{[2,4,6,8].map(n=><option key={n} value={n}>{n} pers.</option>)}</select></div>
+<div><p style={sml}>Capacité</p><select value={form.capacity} onChange={e=>setForm({ ...form, capacity:parseInt(e.target.value) })} style={inp()}>{[2,4,6,8].map(n=><option key={n} value={n}>{n} pers\.</option>)}</select></div>
 </div>
 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:6 }}>
 <div><p style={sml}>Prix / semaine € *</p><input type="number" style={inp()} placeholder="650" value={form.priceWeek} onChange={e=>setForm({ ...form, priceWeek:e.target.value, priceNight:e.target.value?Math.round(parseFloat(e.target.value)/7):"" })}/></div>
