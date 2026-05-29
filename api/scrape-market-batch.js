@@ -2,24 +2,26 @@
 // Vercel serverless — NE PAS modifier VITE_* côté serveur
 // Variables requises : ANTHROPIC_API_KEY, VITE_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 
-const ANTHROPIC_KEY  = process.env.ANTHROPIC_API_KEY;
-const SB_URL         = process.env.VITE_SUPABASE_URL  || process.env.SUPABASE_URL  || "";
-const SB_KEY         = process.env.SUPABASE_SERVICE_ROLE_KEY
-                    || process.env.VITE_SUPABASE_ANON_KEY || "";
+const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+const SB_URL = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "";
+const SB_KEY =
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.VITE_SUPABASE_ANON_KEY ||
+  "";
 
-const MAX_COMBOS          = 1;     // max combinaisons par appel pour éviter les rate limits
-const MAX_WEB_SEARCH_USES = 1;     // max web_search à l'intérieur d'un appel Claude
-const MAX_LISTINGS        = 5;     // max logements retournés par recherche
-const MAX_TOKENS          = 900;
-const CACHE_TTL_DAYS      = 7;
-const MODEL               = "claude-sonnet-4-6";
+const MAX_COMBOS = 1;              // 1 période × 1 capacité
+const MAX_WEB_SEARCH_USES = 1;     // 1 recherche web Claude
+const MAX_LISTINGS = 5;            // 5 logements max
+const MAX_TOKENS = 900;
+const CACHE_TTL_DAYS = 7;
+const MODEL = "claude-sonnet-4-6";
 
 // ── Supabase REST helpers ──────────────────────────────────────
 const sbH = () => ({
-  "apikey":        SB_KEY,
-  "Authorization": `Bearer ${SB_KEY}`,
-  "Content-Type":  "application/json",
-  "Prefer":        "return=representation",
+  apikey: SB_KEY,
+  Authorization: `Bearer ${SB_KEY}`,
+  "Content-Type": "application/json",
+  Prefer: "return=representation",
 });
 
 async function cacheGet(cacheKey) {
@@ -27,14 +29,15 @@ async function cacheGet(cacheKey) {
 
   try {
     const r = await fetch(
-      `${SB_URL}/rest/v1/scrape_cache?cache_key=eq.${encodeURIComponent(cacheKey)}&select=listings,updated_at&limit=1`,
+      `${SB_URL}/rest/v1/scrape_cache?cache_key=eq.${encodeURIComponent(
+        cacheKey
+      )}&select=listings,updated_at&limit=1`,
       { headers: sbH() }
     );
 
     if (!r.ok) return null;
 
     const rows = await r.json();
-
     if (!rows?.length) return null;
 
     const ageDays =
@@ -56,7 +59,7 @@ async function cacheSet(payload) {
       method: "POST",
       headers: {
         ...sbH(),
-        "Prefer": "resolution=merge-duplicates,return=minimal",
+        Prefer: "resolution=merge-duplicates,return=minimal",
       },
       body: JSON.stringify({
         ...payload,
@@ -64,11 +67,11 @@ async function cacheSet(payload) {
       }),
     });
   } catch {
-    // cache failure non bloquante
+    // Échec cache non bloquant
   }
 }
 
-// ── Helpers ───────────────────────────────────────────────────
+// ── Helpers dates / cache ──────────────────────────────────────
 function addDays(dateStr, days) {
   const d = new Date(dateStr + "T12:00:00Z");
   d.setUTCDate(d.getUTCDate() + days);
@@ -95,38 +98,200 @@ function buildCacheKey(
   ].join("|");
 }
 
-function normalizeListings(raw, stayNights) {
-  return (Array.isArray(raw) ? raw : []).map(item => {
-    let total = item.price_total ?? item.price_week ?? null;
-    let night = item.price_night ?? null;
+// ── Normalisation ──────────────────────────────────────────────
+function parseNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
 
-    if (!total && night) {
-      total = Math.round(night * stayNights);
-    }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
 
-    if (!night && total) {
-      night = Math.round(total / stayNights);
-    }
+  const cleaned = String(value)
+    .replace(/\s/g, "")
+    .replace("€", "")
+    .replace(",", ".")
+    .replace(/[^\d.]/g, "");
 
-    const equiv = night ? Math.round(night * 7) : null;
-
-    return {
-      name: String(item.name || "Inconnu"),
-      property_type: item.property_type || "particulier",
-      platform: item.platform || "",
-      price_total: total,
-      price: total,
-      price_week: total,
-      price_night: night,
-      price_week_equiv: equiv,
-      stay_nights: stayNights,
-      capacity: item.capacity ?? null,
-      rating: item.rating ?? null,
-      url: item.url || "",
-    };
-  });
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? n : null;
 }
 
+function normalizePropertyType(value) {
+  const v = String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+  if (v.includes("residence") || v.includes("vacanceole") || v.includes("goelia")) {
+    return "résidence";
+  }
+
+  if (v.includes("hotel") || v.includes("hôtel") || v.includes("apart-hotel")) {
+    return "hôtel";
+  }
+
+  return "particulier";
+}
+
+function normalizePlatform(value, allowedPlatforms = ["Booking.com"]) {
+  const v = String(value || "").toLowerCase();
+
+  if (v.includes("booking")) return "Booking.com";
+  if (v.includes("airbnb")) return "Airbnb";
+  if (v.includes("abritel") || v.includes("vrbo")) return "Abritel";
+
+  return allowedPlatforms[0] || "Booking.com";
+}
+
+function normalizeListings(raw, stayNights, allowedPlatforms, propertyTypes) {
+  return (Array.isArray(raw) ? raw : [])
+    .map(item => {
+      const platform = normalizePlatform(item.platform || item.source, allowedPlatforms);
+      const propertyType = normalizePropertyType(item.property_type || item.type);
+
+      let total = parseNumber(item.price_total ?? item.price_week ?? item.price);
+      let night = parseNumber(item.price_night ?? item.night_price);
+
+      if (!total && night) {
+        total = Math.round(night * stayNights);
+      }
+
+      if (!night && total) {
+        night = Math.round(total / stayNights);
+      }
+
+      const equiv = night ? Math.round(night * 7) : null;
+
+      return {
+        name: String(item.name || item.title || "Inconnu").trim(),
+        property_type: propertyType,
+        platform,
+        price_total: total,
+        price: total,
+        price_week: total,
+        price_night: night,
+        price_week_equiv: equiv,
+        stay_nights: stayNights,
+        capacity: parseNumber(item.capacity) || null,
+        rating: parseNumber(item.rating),
+        url: String(item.url || "").trim(),
+      };
+    })
+    .filter(item => item.name && item.price_total)
+    .filter(item => {
+      return !propertyTypes?.length || propertyTypes.includes(item.property_type);
+    })
+    .filter(item => {
+      return !allowedPlatforms?.length || allowedPlatforms.includes(item.platform);
+    });
+}
+
+// ── Extraction JSON robuste ────────────────────────────────────
+function extractFirstJsonArray(text) {
+  if (!text || typeof text !== "string") return null;
+
+  const cleaned = text
+    .replace(/```json/gi, "")
+    .replace(/```/g, "")
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .trim();
+
+  let start = -1;
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+
+  for (let i = 0; i < cleaned.length; i++) {
+    const ch = cleaned[i];
+
+    if (escape) {
+      escape = false;
+      continue;
+    }
+
+    if (ch === "\\") {
+      escape = true;
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+
+    if (inString) continue;
+
+    if (ch === "[") {
+      if (depth === 0) start = i;
+      depth++;
+      continue;
+    }
+
+    if (ch === "]") {
+      depth--;
+      if (depth === 0 && start !== -1) {
+        return cleaned.slice(start, i + 1);
+      }
+    }
+  }
+
+  return null;
+}
+
+function safeJsonParseArray(text) {
+  const jsonText = extractFirstJsonArray(text);
+
+  if (!jsonText) {
+    return {
+      ok: false,
+      error: "Aucun tableau JSON trouvé.",
+      raw: String(text || "").slice(0, 1000),
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(jsonText);
+
+    if (!Array.isArray(parsed)) {
+      return {
+        ok: false,
+        error: "Le JSON trouvé n'est pas un tableau.",
+        raw: jsonText.slice(0, 1000),
+      };
+    }
+
+    return { ok: true, data: parsed };
+  } catch (firstError) {
+    try {
+      const repaired = jsonText
+        .replace(/,\s*]/g, "]")
+        .replace(/,\s*}/g, "}")
+        .replace(/[“”]/g, '"')
+        .replace(/[‘’]/g, "'");
+
+      const parsed = JSON.parse(repaired);
+
+      if (!Array.isArray(parsed)) {
+        return {
+          ok: false,
+          error: "Le JSON réparé n'est pas un tableau.",
+          raw: repaired.slice(0, 1000),
+        };
+      }
+
+      return { ok: true, data: parsed };
+    } catch (secondError) {
+      return {
+        ok: false,
+        error: secondError.message || firstError.message,
+        raw: jsonText.slice(0, 1000),
+      };
+    }
+  }
+}
+
+// ── Prompt Claude ──────────────────────────────────────────────
 function buildPrompt(
   week,
   capacity,
@@ -138,24 +303,28 @@ function buildPrompt(
   maxListings,
   platforms
 ) {
-  const seasonLabel = season === "hiver" ? "hiver (ski)" : "été";
+  const seasonLabel = season === "hiver" ? "hiver ski" : "été";
   const types = propertyTypes.join(", ");
   const plats = platforms && platforms.length ? platforms : ["Booking.com"];
 
-  const platLine =
+  const platformLine =
     plats.length === 1
-      ? `Search ONLY ${plats[0]} for real vacation rental prices.`
-      : `Search ONLY these platforms: ${plats.join(", ")}. Do not use any other site.`;
+      ? `Search ONLY ${plats[0]}. Do not use any other website.`
+      : `Search ONLY these platforms: ${plats.join(", ")}. Do not use any other website.`;
 
   return (
-    `La Foux d'Allos (Val d'Allos), Alpes-de-Haute-Provence, France. Saison ${seasonLabel}.\n` +
-    `${platLine}\n` +
-    `Check-in ${periodStart}, check-out ${periodEnd}, ${stayNights} nuit(s), ${capacity} pers.\n` +
-    `Types: ${types}. Max ${maxListings} logements.\n` +
-    `Le champ "platform" doit contenir uniquement une des plateformes demandées : ${plats.join(", ")}.\n` +
-    `JSON uniquement, sans backticks, sans texte autour :\n` +
-    `[{"name":"...","property_type":"résidence","platform":"${plats[0]}",` +
-    `"price_total":595,"price_night":85,"stay_nights":${stayNights},"capacity":${capacity},"rating":8.2,"url":"https://..."}]`
+    `Find real accommodation prices in La Foux d'Allos / Val d'Allos, France.\n` +
+    `Season: ${seasonLabel}.\n` +
+    `${platformLine}\n` +
+    `Check-in: ${periodStart}. Check-out: ${periodEnd}. Nights: ${stayNights}. Guests: ${capacity}.\n` +
+    `Types: ${types}. Return maximum ${maxListings} listings.\n\n` +
+    `Return ONLY valid JSON.\n` +
+    `No markdown. No comments. No citations. No explanations. No trailing commas.\n` +
+    `Use double quotes for all keys and string values.\n` +
+    `The response must start with [ and end with ].\n` +
+    `The field "platform" must be exactly one of: ${plats.join(", ")}.\n\n` +
+    `JSON schema:\n` +
+    `[{"name":"Nom du logement","property_type":"résidence","platform":"${plats[0]}","price_total":595,"price_night":85,"stay_nights":${stayNights},"capacity":${capacity},"rating":8.2,"url":"https://..."}]`
   );
 }
 
@@ -186,7 +355,7 @@ export default async function handler(req, res) {
     capacities = [6],
     propertyTypes = ["résidence", "particulier"],
     platforms = ["Booking.com"],
-    maxListingsPerSearch = 6,
+    maxListingsPerSearch = 5,
     forceRefresh = false,
   } = req.body || {};
 
@@ -212,7 +381,7 @@ export default async function handler(req, res) {
     return res.status(400).json({
       error:
         `Trop large : ${requestedCombos} combinaison(s). ` +
-        `Maximum ${MAX_COMBOS} par lancement pour éviter les rate limits Anthropic. ` +
+        `Maximum ${MAX_COMBOS} par lancement. ` +
         `Lance 1 période × 1 capacité.`,
     });
   }
@@ -235,6 +404,18 @@ export default async function handler(req, res) {
 
   for (const { week, capacity } of combos) {
     const periodStart = week.week_start;
+
+    if (!periodStart) {
+      results.push({
+        week_id: week.id,
+        week_label: week.label,
+        listings: [],
+        error: "week_start manquant pour cette période.",
+        warning: null,
+      });
+      continue;
+    }
+
     const periodEnd = addDays(periodStart, nights);
 
     const cacheKey = buildCacheKey(
@@ -263,7 +444,6 @@ export default async function handler(req, res) {
       warning: null,
     };
 
-    // ── Cache lookup ───────────────────────────────────────────
     if (!forceRefresh) {
       const cached = await cacheGet(cacheKey);
 
@@ -277,13 +457,12 @@ export default async function handler(req, res) {
       }
     }
 
-    // ── Limite appels Anthropic ────────────────────────────────
     if (anthropicCalls >= MAX_COMBOS) {
       results.push({
         ...base,
         error:
           `Limite ${MAX_COMBOS} appel Anthropic atteinte pour ce lancement. ` +
-          `Relancez plus tard ou utilisez le cache.`,
+          `Relance plus tard ou utilise le cache.`,
       });
       continue;
     }
@@ -309,12 +488,13 @@ export default async function handler(req, res) {
           "Content-Type": "application/json",
           "x-api-key": ANTHROPIC_KEY,
           "anthropic-version": "2023-06-01",
+          "anthropic-beta": "web-search-2025-03-05",
         },
         body: JSON.stringify({
           model: MODEL,
           max_tokens: MAX_TOKENS,
           system:
-            "Tu es un analyste prix locations vacances. Utilise web search pour trouver des prix réels. Réponds UNIQUEMENT avec un tableau JSON valide, sans backticks, sans aucun texte avant ou après.",
+            "You are a vacation rental price analyst. Use web search when needed. Return only a valid JSON array. No markdown. No explanation.",
           messages: [
             {
               role: "user",
@@ -346,8 +526,8 @@ export default async function handler(req, res) {
 
       const data = await aRes.json();
 
-      if (data.error) {
-        throw new Error(data.error.message);
+      if (!aRes.ok || data.error) {
+        throw new Error(data?.error?.message || `Erreur Anthropic HTTP ${aRes.status}`);
       }
 
       const text = (data.content || [])
@@ -355,38 +535,25 @@ export default async function handler(req, res) {
         .map(block => block.text)
         .join("\n");
 
-      const match = text.match(/\[[\s\S]*\]/);
+      const parsed = safeJsonParseArray(text);
 
-      if (!match) {
-        results.push({
-          ...base,
-          warning: "Aucun JSON trouvé dans la réponse Claude. Réessayez.",
-        });
-
-        continue;
-      }
-
-      let rawListings;
-
-      try {
-        rawListings = JSON.parse(match[0]);
-      } catch {
+      if (!parsed.ok) {
         results.push({
           ...base,
           warning: "JSON malformé dans la réponse Claude.",
+          parse_error: parsed.error,
+          raw_response: parsed.raw,
         });
 
         continue;
       }
 
-      const listings = normalizeListings(rawListings, nights)
-        .filter(item => {
-          return !propertyTypes?.length || propertyTypes.includes(item.property_type);
-        })
-        .filter(item => {
-          return !plats?.length || plats.includes(item.platform);
-        })
-        .slice(0, maxListings);
+      const listings = normalizeListings(
+        parsed.data,
+        nights,
+        plats,
+        propertyTypes
+      ).slice(0, maxListings);
 
       await cacheSet({
         cache_key: cacheKey,
@@ -405,6 +572,10 @@ export default async function handler(req, res) {
       results.push({
         ...base,
         listings,
+        warning:
+          listings.length === 0
+            ? "Aucun logement exploitable trouvé dans la réponse Claude."
+            : null,
       });
     } catch (err) {
       results.push({
