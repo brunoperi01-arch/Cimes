@@ -376,7 +376,7 @@ export default function App() {
   const [planSeason, setPlanSeason]       = useState("ete");
   const [planNights, setPlanNights]       = useState(7);
   const [planPeriods, setPlanPeriods]     = useState([]);
-  const [planCaps, setPlanCaps]           = useState([4]);
+  const [planCaps, setPlanCaps]           = useState([6]);
   const [planTypes, setPlanTypes]         = useState(["résidence", "particulier"]);
   const [planPlatforms, setPlanPlatforms] = useState(["Booking.com"]);
   const [planForceRefresh, setPlanForce]  = useState(false);
@@ -432,6 +432,22 @@ export default function App() {
   useEffect(()=>{ if(user) loadRates(); },[loadRates,user]);
   useEffect(()=>{ if(user) getImports().then(setImports).catch(()=>{}); },[user]);
 
+  // ── Plan de collecte : auto-sélection de la période courante ──
+  useEffect(()=>{
+    const p = ALL_PERIODS.find(x=>x.id===selWeekId);
+    if(!p) return;
+    const s = p.season || "ete";
+    const n = p.stay_nights || 7;
+    setPlanSeason(s);
+    setPlanNights(n);
+    setPlanMode(s==="ete" ? "ete_7n" : n===2 ? "hiver_2n" : "hiver_7n");
+    setPlanPeriods([selWeekId]);   // coche la période courante à l'ouverture d'une fiche
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[selWeekId]);
+
+  // ── Plan de collecte : capacité courante cochée ───────────────
+  useEffect(()=>{ setPlanCaps([capNum]); },[capNum]);
+
   // ── Sauver saisie manuelle ────────────────────────────────────
   async function handleSaveForm() {
     if(!form.priceWeek) return; const comp=competitors.find(c=>c.id===form.competitorId);
@@ -479,7 +495,7 @@ export default function App() {
     try {
       let res=await fetch(IA_ENDPOINT,{ method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
       if(res.status===404){
-        res=await fetch("https://api.anthropic.com/v1/messages",{ method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ model:"claude-sonnet-4-6", max_tokens:800, messages:[{ role:"user", content:buildIAPrompt(payload) }] }) });
+        res=await fetch("https://api.anthropic.com/v1/messages",{ method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:800, messages:[{ role:"user", content:buildIAPrompt(payload) }] }) });
         if(!res.ok){ const d=await res.json().catch(()=>({})); throw new Error((d.error?.message||`HTTP ${res.status}`)+"\n→ Déployer api/analyse-reco.js avec ANTHROPIC_API_KEY."); }
         const d=await res.json(); const raw=d.content?.map(b=>b.text||"").join("")||"";
         setIaText(raw.split("---").map(s=>s.replace(/^\s*\d\.\s*(POSITIONNEMENT|RISQUES|RECOMMANDATION|ACTION.*?)\s*:?\s*/i,"").trim()));
@@ -526,13 +542,25 @@ export default function App() {
   }
 
   async function launchPlan() {
-    const allP = PLAN_PERIODS[planMode] || PLAN_PERIODS[`${planSeason}_${planNights}n`] || [];
+    const staticP = PLAN_PERIODS[planMode] || PLAN_PERIODS[`${planSeason}_${planNights}n`] || [];
+    // Période courante depuis selWeek (toujours candidate)
+    const _curStart = selWeek?.period_start || selWeek?.week_start;
+    const currentP = selWeek && _curStart ? {
+      id:           selWeek.id,
+      label:        selWeek.label || selWeek.subtitle || "Période courante",
+      period_start: _curStart,
+      period_end:   selWeek.period_end || addDaysStr(_curStart, selWeek.stay_nights || 7),
+      week_start:   selWeek.week_start || _curStart,
+      season:       selWeek.season || "ete",
+      stay_nights:  selWeek.stay_nights || 7,
+    } : null;
+    const allP = currentP ? [currentP, ...staticP.filter(p=>p.id!==currentP.id)] : staticP;
     const selected = allP.filter(p=>planPeriods.includes(p.id));
     const combos = selected.length * planCaps.length;
-    if(!selected.length||!planCaps.length||combos>1) return;
+    if(!selected.length||!planCaps.length||!planPlatforms.length||combos>2) return;
     setPlanLoading(true); setPlanError(""); setPlanResults(null); setPlanSaved({});
     try {
-      const res=await fetch("/api/scrape-market-batch",{ method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ season:planSeason, stayNights:planNights, weeks:selected.map(p=>({ id:p.id, label:p.label, week_start:p.period_start })), capacities:planCaps, propertyTypes:planTypes, platforms:planPlatforms, maxListingsPerSearch:5, forceRefresh:planForceRefresh }) });
+      const res=await fetch("/api/scrape-market-batch",{ method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ season:planSeason, stayNights:planNights, weeks:selected.map(p=>({ id:p.id, label:p.label, week_start:p.period_start||p.week_start })), capacities:planCaps, propertyTypes:planTypes, platforms:planPlatforms, maxListingsPerSearch:6, forceRefresh:planForceRefresh }) });
       const data=await res.json();
       if(!res.ok||data.error) throw new Error(data.error||`HTTP ${res.status}`);
       setPlanResults(data.results||[]);
@@ -761,15 +789,28 @@ export default function App() {
     const oPct=allMax>allMin&&ourPrice?Math.min(96,Math.max(4,Math.round((ourPrice-allMin)/(allMax-allMin)*100))):50;
     const mPct=allMax>allMin&&reco.ref?Math.min(96,Math.max(4,Math.round((reco.ref-allMin)/(allMax-allMin)*100))):50;
     const wColor=CAT_C[w?.season_type]||C.blue;
-    const scrapePrices=scrapedRates.map(i=>i.price_week||(i.price_night*7)).filter(p=>p>0);
-    const scrapeMedian=median(scrapePrices);
 
     // Plan de collecte — logique UI
     const planKey = planMode === "custom" ? null : planMode;
-    const availablePeriods = planKey ? (PLAN_PERIODS[planKey]||[]) : (PLAN_PERIODS[`${planSeason}_${planNights}n`]||[]);
+    const staticPeriods = planKey ? (PLAN_PERIODS[planKey]||[]) : (PLAN_PERIODS[`${planSeason}_${planNights}n`]||[]);
+    // Période courante construite depuis selWeek (toujours en premier)
+    const _curStart = selWeek?.period_start || selWeek?.week_start;
+    const currentPlanPeriod = selWeek && _curStart ? {
+      id:           selWeek.id,
+      label:        selWeek.label || selWeek.subtitle || "Période courante",
+      period_start: _curStart,
+      period_end:   selWeek.period_end || addDaysStr(_curStart, selWeek.stay_nights || 7),
+      week_start:   selWeek.week_start || _curStart,
+      season:       selWeek.season || "ete",
+      stay_nights:  selWeek.stay_nights || 7,
+      isCurrent:    true,
+    } : null;
+    const availablePeriods = currentPlanPeriod
+      ? [currentPlanPeriod, ...staticPeriods.filter(p=>p.id!==currentPlanPeriod.id)]
+      : staticPeriods;
     const selectedPlanPeriods = availablePeriods.filter(p=>planPeriods.includes(p.id));
     const planCombos = selectedPlanPeriods.length * planCaps.length;
-    const planTooMany = planCombos > 1;
+    const planTooMany = planCombos > 2;
     const planCanLaunch = !planTooMany && planCombos > 0 && planPlatforms.length > 0 && !planLoading;
 
     return (
@@ -888,45 +929,7 @@ export default function App() {
               })}
             </div>
 
-            {/* ── SCRAPING SIMPLE ── */}
-            <div style={{ marginTop:8 }}>
-              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
-                <p style={{ ...sml, margin:0 }}>Recherche rapide</p>
-                {scrapeMedian&&<span style={{ fontSize:10, color:C.blueL, fontWeight:600 }}>Médiane : {fmt(scrapeMedian)}€/sem</span>}
-              </div>
-              <button style={{ ...btn(scraping,C.blueL), background:scraping?"#93C5FD":C.blueL }} onClick={scrapeMarket} disabled={scraping}>
-                {scraping?"⏳ Recherche en cours…":`🔍 Booking & Airbnb · ${w?.label}${is2n?" · 2 nuits":""}`}
-              </button>
-              {scrapeError&&<div style={{ ...cd(9), padding:"8px 12px", background:C.redL, marginBottom:6 }}><p style={{ margin:0, fontSize:11, color:C.red }}>{scrapeError}</p></div>}
-              {scrapedRates.length>0&&(
-                <div style={{ ...cd(), marginBottom:6 }}>
-                  <div style={{ padding:"8px 13px", background:C.bluePale, borderBottom:`0.5px solid ${C.grayM}` }}>
-                    <p style={{ margin:0, fontSize:11, fontWeight:600, color:C.blueL }}>{scrapedRates.length} logements · <strong style={{ color:C.blue }}>+</strong> pour enregistrer</p>
-                    <p style={{ margin:"2px 0 0", fontSize:9, color:C.gray, fontStyle:"italic" }}>Données web search — à vérifier</p>
-                  </div>
-                  {["résidence","particulier","hôtel"].map(cat=>{ const items=scrapedRates.filter(i=>i.property_type===cat); if(!items.length) return null; const catLabel={résidence:"Résidences",particulier:"Particuliers",hôtel:"Hôtels"}[cat];
-                    return (<div key={cat}>
-                      <div style={{ padding:"4px 13px", background:C.grayL, borderBottom:`0.5px solid ${C.grayM}` }}><span style={{ fontSize:9, fontWeight:700, textTransform:"uppercase", letterSpacing:".06em", color:C.gray }}>{catLabel} ({items.length})</span></div>
-                      {items.map((item,i)=>{ const globalIdx=scrapedRates.indexOf(item); const pw=item.price_week?Math.round(item.price_week):item.price_night?Math.round(item.price_night*7):0; const pn=item.price_night?Math.round(item.price_night):pw?Math.round(pw/7):0; const diff=ourPrice&&pw?ourPrice-pw:null; const state=scrapeSaved[globalIdx];
-                        return (<div key={i} style={{ ...rw(i===items.length-1), padding:"8px 13px", gap:8 }}>
-                          <div style={{ flex:1, minWidth:0 }}>
-                            <p style={{ margin:0, fontSize:12, fontWeight:500, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{item.url?<a href={item.url} target="_blank" rel="noreferrer" style={{ color:C.text, textDecoration:"none" }}>{item.name}</a>:item.name}</p>
-                            <p style={{ margin:0, fontSize:9, color:C.gray }}>{item.platform}{item.rating?` · ${item.rating}★`:""}</p>
-                          </div>
-                          <div style={{ textAlign:"right", flexShrink:0 }}>
-                            <p style={{ margin:0, fontSize:12, fontWeight:700, color:C.text }}>{fmt(pw)}€<span style={{ fontSize:9, fontWeight:400, color:C.gray }}>/sem</span></p>
-                            {diff!==null&&<p style={{ margin:0, fontSize:9, fontWeight:700, color:diff>0?C.green:C.red }}>{diff>0?"+":""}{fmt(diff)}€</p>}
-                          </div>
-                          <button onClick={()=>saveScrapedRate(item,globalIdx)} disabled={!!state} style={{ width:28, height:28, borderRadius:8, border:"none", flexShrink:0, background:state==="dup"?C.goldL:state==="ok"?C.greenL:C.bluePale, color:state==="dup"?C.gold:state==="ok"?C.green:C.blue, fontWeight:700, fontSize:16, cursor:state?"default":"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>
-                            {state==="dup"?"=":state==="ok"?"✓":"+"}
-                          </button>
-                        </div>);
-                      })}
-                    </div>);
-                  })}
-                </div>
-              )}
-            </div>
+            {/* ── SCRAPING SIMPLE : retiré de l'UI, le Plan de collecte est la seule méthode ── */}
 
             {/* ══ PLAN DE COLLECTE ══════════════════════════════════ */}
             <div style={{ marginTop:6 }}>
@@ -974,15 +977,18 @@ export default function App() {
                       <div style={{ border:`1px solid ${C.grayM}`, borderRadius:8, marginBottom:10, overflow:"hidden" }}>
                         {availablePeriods.map((p,i)=>{
                           const sel=planPeriods.includes(p.id);
-                          const endDate=addDaysStr(p.period_start,p.stay_nights);
+                          const endDate=p.period_end||addDaysStr(p.period_start,p.stay_nights);
                           return (
-                            <label key={p.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"7px 10px", borderBottom:i<availablePeriods.length-1?`0.5px solid ${C.grayL}`:"none", cursor:"pointer", background:sel?C.bluePale:"transparent" }}>
+                            <label key={p.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"7px 10px", borderBottom:i<availablePeriods.length-1?`0.5px solid ${C.grayL}`:"none", cursor:"pointer", background:sel?C.bluePale:p.isCurrent?"#F0FDF4":"transparent" }}>
                               <input type="checkbox" checked={sel} onChange={()=>setPlanPeriods(prev=>sel?prev.filter(x=>x!==p.id):[...prev,p.id])} style={{ accentColor:C.blue }}/>
-                              <div style={{ flex:1 }}>
-                                <span style={{ fontSize:12, fontWeight:sel?600:400, color:sel?C.blue:C.text }}>{p.label}</span>
-                                <span style={{ fontSize:9, color:C.gray, marginLeft:6 }}>{fmtDateShort(p.period_start)} → {fmtDateShort(endDate)} · {p.stay_nights}n</span>
+                              <div style={{ flex:1, minWidth:0 }}>
+                                <div style={{ display:"flex", alignItems:"center", gap:5, flexWrap:"wrap" }}>
+                                  <span style={{ fontSize:12, fontWeight:sel?600:400, color:sel?C.blue:C.text }}>{p.label}</span>
+                                  {p.isCurrent&&<span style={{ fontSize:8, fontWeight:700, background:C.greenL, color:C.green, padding:"1px 5px", borderRadius:4 }}>Période courante</span>}
+                                </div>
+                                <span style={{ fontSize:9, color:C.gray }}>{fmtDateShort(p.period_start)} → {fmtDateShort(endDate)} · {p.season==="hiver"?"Hiver":"Été"} · {p.stay_nights} nuits</span>
                               </div>
-                              <span style={{ fontSize:9, fontWeight:600, color:p.season==="hiver"?"#0EA5E9":C.orange }}>{p.season==="hiver"?"Hiver":"Été"}</span>
+                              <span style={{ fontSize:9, fontWeight:600, color:p.season==="hiver"?"#0EA5E9":C.orange, flexShrink:0 }}>{p.season==="hiver"?"Hiver":"Été"}</span>
                             </label>
                           );
                         })}
@@ -1027,7 +1033,7 @@ export default function App() {
                         {planCombos===0
                           ? "Sélectionner au moins 1 période et 1 capacité"
                           : planTooMany
-                          ? `⚠ Trop large : ${selectedPlanPeriods.length} périodes × ${planCaps.length} capacités = ${planCombos} — max 1. Lance 1 période × 1 capacité.`
+                          ? `⚠ Trop large : ${selectedPlanPeriods.length} périodes × ${planCaps.length} capacités = ${planCombos} — max 2. Lance 1×1 ou 2×1.`
                           : `✓ ${selectedPlanPeriods.length} période${selectedPlanPeriods.length>1?"s":""} × ${planCaps.length} capacité${planCaps.length>1?"s":""} = ${planCombos} recherche${planCombos>1?"s":""}`}
                       </p>
                       {planCombos>0&&!planTooMany&&<p style={{ margin:"1px 0 0", fontSize:9, color:C.green }}>Durée estimée : ~{planCombos*30}s</p>}
