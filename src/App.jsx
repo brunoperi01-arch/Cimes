@@ -9,10 +9,88 @@ const IA_ENDPOINT = "/api/analyse-reco";
 
 // ══ SUPABASE REST WRAPPER ════════════════════════════════════════
 let _token = null;
-const authHeaders = () => ({
-  "apikey": SB_KEY, "Authorization": `Bearer ${_token || SB_KEY}`,
-  "Content-Type": "application/json", "Prefer": "return=representation",
-});
+let _refreshToken = null;
+let _expiresAt = 0;
+
+function clearStoredSession() {
+  _token = null;
+  _refreshToken = null;
+  _expiresAt = 0;
+
+  try {
+    sessionStorage.removeItem("sb_token");
+    sessionStorage.removeItem("sb_refresh");
+    sessionStorage.removeItem("sb_expires_at");
+    sessionStorage.removeItem("sb_user");
+  } catch {}
+}
+
+function storeSession(data) {
+  _token = data.access_token;
+  _refreshToken = data.refresh_token || _refreshToken;
+  _expiresAt = Date.now() + ((data.expires_in || 3600) * 1000);
+
+  try {
+    sessionStorage.setItem("sb_token", _token);
+    sessionStorage.setItem("sb_refresh", _refreshToken || "");
+    sessionStorage.setItem("sb_expires_at", String(_expiresAt));
+
+    if (data.user) {
+      sessionStorage.setItem(
+        "sb_user",
+        JSON.stringify({
+          email: data.user?.email,
+          id: data.user?.id,
+        })
+      );
+    }
+  } catch {}
+}
+
+async function refreshSessionIfNeeded() {
+  if (!SB_READY || !_token) return;
+
+  const now = Date.now();
+
+  // On rafraîchit 60 secondes avant expiration
+  if (_expiresAt && now < _expiresAt - 60000) return;
+
+  if (!_refreshToken) {
+    clearStoredSession();
+    throw new Error("Session expirée. Déconnecte-toi puis reconnecte-toi.");
+  }
+
+  const r = await fetch(`${SB_URL}/auth/v1/token?grant_type=refresh_token`, {
+    method: "POST",
+    headers: {
+      "apikey": SB_KEY,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      refresh_token: _refreshToken,
+    }),
+  });
+
+  const d = await r.json();
+
+  if (!r.ok) {
+    clearStoredSession();
+    throw new Error("Session expirée. Déconnecte-toi puis reconnecte-toi.");
+  }
+
+  storeSession(d);
+}
+
+const authHeaders = async () => {
+  await refreshSessionIfNeeded();
+
+  return {
+    "apikey": SB_KEY,
+    "Authorization": `Bearer ${_token || SB_KEY}`,
+    "Content-Type": "application/json",
+    "Prefer": "return=representation",
+  };
+};
 const sbErrors = [];
 const sb = {
   async rpc(path, body) { const r = await fetch(`${SB_URL}${path}`, { method:"POST", headers:authHeaders(), body:JSON.stringify(body) }); const d = await r.json(); if (!r.ok) { sbErrors.push({ ts:new Date().toISOString(), msg:d?.message||r.statusText, path }); throw new Error(d?.message||r.statusText); } return d; },
