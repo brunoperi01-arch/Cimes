@@ -190,31 +190,31 @@ const dupQ=[
 const existing=await sb.select("competitor_rates",dupQ);
 if (existing?.length) throw new Error("DUPLICATE");
 
-```
 // Payload enrichi avec les nouvelles colonnes (compatibilité rétroactive)
+const stayNightsValue = Number(clean.stay_nights || 7);
+const priceTotalValue = Number(clean.price_total ?? priceValue);
+const priceNightValue = Number(clean.price_night ?? (priceTotalValue ? Math.round(priceTotalValue / stayNightsValue) : 0));
+const priceWeekEquivValue = Number(clean.price_week_equiv ?? (priceNightValue ? Math.round(priceNightValue * 7) : 0));
+
 const payload = {
-  week_id:       clean.week_id,
-  capacity:      Number(clean.capacity),
-  competitor:    competitorName,
-  price:         priceValue,
-  source:        sourceValue,
-  source_url:    sourceUrl,
-  collected_at:  collectedAt,
-  property_type: propertyType,
-  ...(clean.collection_type   && { collection_type:   clean.collection_type }),
-  ...(clean.reliability_status && { reliability_status: clean.reliability_status }),
-  ...(clean.is_example != null && { is_example: clean.is_example }),
-  // Nouvelles colonnes V2
-  ...(clean.price_total      != null && { price_total:      Number(clean.price_total) }),
-  ...(clean.price_night      != null && { price_night:      Number(clean.price_night) }),
-  ...(clean.price_week_equiv != null && { price_week_equiv: Number(clean.price_week_equiv) }),
-  ...(clean.stay_nights      != null && { stay_nights:      Number(clean.stay_nights) }),
-  ...(clean.period_start     && { period_start: clean.period_start }),
-  ...(clean.period_end       && { period_end:   clean.period_end }),
-  ...(clean.season           && { season:        clean.season }),
+  week_id:      clean.week_id,
+  capacity:     Number(clean.capacity),
+  competitor:   competitorName,
+  price:        priceTotalValue,
+  source:       sourceValue,
+  source_url:   sourceUrl,
+  collected_at: collectedAt,
+
+  // Colonnes V2 ajoutées par la migration Supabase
+  price_total:      priceTotalValue,
+  price_night:      priceNightValue,
+  price_week_equiv: priceWeekEquivValue,
+  stay_nights:      stayNightsValue,
+  period_start:     clean.period_start || null,
+  period_end:       clean.period_end || null,
+  season:           clean.season || "ete",
 };
 return sb.insert("competitor_rates", payload);
-```
 
 }
 
@@ -571,10 +571,10 @@ const payload={ weekLabel:selWeek?.label, weekYear:selWeek?.year, seasonType:CAT
 try {
 let res=await fetch(IA_ENDPOINT,{ method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
 if(res.status===404){
-res=await fetch("https://api.anthropic.com/v1/messages",{ method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:800, messages:[{ role:"user", content:buildIAPrompt(payload) }] }) });
+res=await fetch("https://api.anthropic.com/v1/messages",{ method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ model:"claude-sonnet-4-6", max_tokens:800, messages:[{ role:"user", content:buildIAPrompt(payload) }] }) });
 if(!res.ok){ const d=await res.json().catch(()=>({})); throw new Error((d.error?.message||`HTTP ${res.status}`)+"\n→ Déployer api/analyse-reco.js avec ANTHROPIC_API_KEY."); }
 const d=await res.json(); const raw=d.content?.map(b=>b.text||"").join("")||"";
-setIaText(raw.split("—").map(s=>s.replace(/^\s*\d.\s*(POSITIONNEMENT|RISQUES|RECOMMANDATION|ACTION.*?)\s*:?\s*/i,"").trim()));
+setIaText(raw.split("---").map(s=>s.replace(/^\s*\d.\s*(POSITIONNEMENT|RISQUES|RECOMMANDATION|ACTION.*?)\s*:?\s*/i,"").trim()));
 } else {
 if(!res.ok){ const d=await res.json().catch(()=>{}); throw new Error(d?.error||`HTTP ${res.status}`); }
 const d=await res.json(); setIaText(d.parts||[]);
@@ -856,10 +856,10 @@ const wColor=CAT_C[w?.season_type]||C.blue;
 const scrapePrices=scrapedRates.map(i=>i.price_week||(i.price_night*7)).filter(p=>p>0);
 const scrapeMedian=median(scrapePrices);
 
-```
 // Plan de collecte — logique UI
 const planKey = planMode === "custom" ? null : planMode;
-const availablePeriods = planKey ? (PLAN_PERIODS[planKey]||[]) : (PLAN_PERIODS[`${planSeason}_${planNights}n`]||[]);
+const fallbackPlanKey = planSeason + "_" + planNights + "n";
+const availablePeriods = planKey ? (PLAN_PERIODS[planKey]||[]) : (PLAN_PERIODS[fallbackPlanKey]||[]);
 const selectedPlanPeriods = availablePeriods.filter(p=>planPeriods.includes(p.id));
 const planCombos = selectedPlanPeriods.length * planCaps.length;
 const planTooMany = planCombos > 2;
@@ -1291,7 +1291,6 @@ return (
     </div><BNav/>
   </div>
 );
-```
 
 };
 
