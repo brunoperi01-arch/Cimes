@@ -694,7 +694,18 @@ export default function App() {
       },competitors);
       setPlanSaved(p=>({ ...p, [key]:"ok" }));
       if(result.week_id===selWeekId&&result.capacity===capNum) loadRates();
-    } catch(e) { setPlanSaved(p=>({ ...p, [key]:e.message?.includes("DUPLICATE")?"dup":"err" })); }
+    } catch(e) {
+  const status = e.message?.includes("DUPLICATE") ? "dup" : "err";
+
+  setPlanSaved(p => ({
+    ...p,
+    [key]: status,
+  }));
+
+  if (status === "err") {
+    setPlanError(`Erreur enregistrement "${item.name}" : ${e.message}`);
+  }
+}
   }
 
   async function savePlanGroup(result) {
