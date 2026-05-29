@@ -65,6 +65,12 @@ const OUR_TARIFS = {
   "8p":{ haute:489, moyenne:390, basse:290 },
 };
 
+// Métadonnées de notre grille interne
+const OUR_TARIFS_META = { source:"Tarif interne validé", verified_at:"avril 2026", status:"réel" };
+
+// Statuts considérés comme fiables pour les calculs / recommandations / IA
+const TRUSTED_STATUSES = ["réel", "validé", "saisi manuellement", "importé CSV"];
+
 // ══ PLAN DE COLLECTE — PÉRIODES STATIQUES ═══════════════════════
 const PLAN_PERIODS = {
   ete_7n: [
@@ -169,7 +175,6 @@ async function getCompetitorRates({ weekId, capacity, showExamples=false }, allC
 
 function isMissingColumnError(error) {
   const msg = String(error?.message || error || "");
-
   return (
     msg.includes("PGRST204") ||
     msg.includes("Could not find") ||
@@ -219,15 +224,8 @@ async function saveCompetitorRate(rate, allCompetitors) {
     clean.collection_type ||
     "Scraping";
 
-  const sourceUrl =
-    clean.source_url ||
-    clean.url ||
-    "";
-
-  const propertyType =
-    clean.property_type ||
-    clean.type ||
-    "particulier";
+  const sourceUrl = clean.source_url || clean.url || "";
+  const propertyType = clean.property_type || clean.type || "particulier";
 
   if (!priceValue) {
     throw new Error("Prix manquant : impossible d'enregistrer ce relevé.");
@@ -244,12 +242,8 @@ async function saveCompetitorRate(rate, allCompetitors) {
     ].join("&");
 
     const existing = await sb.select("competitor_rates", dupQ);
+    if (existing?.length) throw new Error("DUPLICATE");
 
-    if (existing?.length) {
-      throw new Error("DUPLICATE");
-    }
-
-    // Payload minimal compatible avec ta table actuelle
     const basePayload = {
       week_id: clean.week_id,
       capacity: Number(clean.capacity),
@@ -260,19 +254,16 @@ async function saveCompetitorRate(rate, allCompetitors) {
       collected_at: collectedAt,
     };
 
-    // Payload complet avec les colonnes V2
     const fullPayload = {
       ...basePayload,
       property_type: propertyType,
       collection_type: clean.collection_type || "scraping-batch",
       reliability_status: clean.reliability_status || "à vérifier",
       is_example: clean.is_example ?? false,
-
       price_total: priceValue,
       price_night: priceNight,
       price_week_equiv: priceWeekEquiv,
       stay_nights: stayNights,
-
       ...(clean.period_start && { period_start: clean.period_start }),
       ...(clean.period_end && { period_end: clean.period_end }),
       ...(clean.season && { season: clean.season }),
@@ -281,18 +272,15 @@ async function saveCompetitorRate(rate, allCompetitors) {
     try {
       return await sb.insert("competitor_rates", fullPayload);
     } catch (e) {
-      // Si une colonne V2 manque encore dans Supabase,
-      // on tente quand même l'enregistrement minimal.
+      // Si une colonne V2 manque encore dans Supabase, on sauvegarde au minimum.
       if (isMissingColumnError(e)) {
         return await sb.insert("competitor_rates", basePayload);
       }
-
       throw e;
     }
   }
 
   const id = "r_" + Date.now();
-
   const full = {
     ...clean,
     id,
@@ -313,11 +301,7 @@ async function saveCompetitorRate(rate, allCompetitors) {
 
   const key = `rates_${clean.week_id}_${clean.capacity}`;
   const existingLocal = ls.get(key);
-
-  if (isDuplicate(existingLocal, full)) {
-    throw new Error("DUPLICATE");
-  }
-
+  if (isDuplicate(existingLocal, full)) throw new Error("DUPLICATE");
   ls.push(key, full);
   return full;
 }
@@ -352,19 +336,28 @@ function median(arr) {
 function calcReco(ourPrice, rates, settings={}) {
   const { thresholdLow=15, thresholdHigh=20, obsoleteDays=7, minScore=70 }=settings;
   const now=new Date(); const age=d=>d?Math.floor((now-new Date(d))/864e5):999;
-  const qualified=rates.filter(r=>!r.is_example&&(r.comparability_score??50)>=minScore);
-  const excluded=rates.filter(r=>!r.is_example&&(r.comparability_score??50)<minScore);
+  const pendingCount=rates.filter(r=>!r.is_example&&r.reliability_status==="à vérifier").length;
+  const rejectedCount=rates.filter(r=>!r.is_example&&r.reliability_status==="rejeté").length;
+  // Seuls les relevés au statut fiable entrent dans le calcul
+  const trusted=rates.filter(r=>!r.is_example&&TRUSTED_STATUSES.includes(r.reliability_status??"à vérifier"));
+  const qualified=trusted.filter(r=>(r.comparability_score??50)>=minScore);
+  const excluded=trusted.filter(r=>(r.comparability_score??50)<minScore);
   const recent=qualified.filter(r=>age(r.collected_at)<=obsoleteDays);
   const hasOld=qualified.some(r=>age(r.collected_at)>obsoleteDays);
   const maxAge=qualified.length?Math.max(...qualified.map(r=>age(r.collected_at))):null;
   const byType=t=>qualified.filter(r=>r.property_type===t); const prices=arr=>arr.map(r=>Number(r.price_week)).filter(Boolean);
   const medAll=median(prices(qualified)); const medRes=median(prices(byType("résidence"))); const medPart=median(prices(byType("particulier"))); const medHot=median(prices(byType("hôtel"))); const ref=medRes??medAll;
-  const hasEnough=qualified.length>=3; const promoCount=rates.filter(r=>r.promo_label).length;
+  const hasEnough=qualified.length>=3; const promoCount=trusted.filter(r=>r.promo_label).length;
   const confidence=!hasEnough?"faible":(qualified.length>=5&&recent.length>=3)?"fort":"moyen";
   const confScore={faible:20,moyen:55,fort:85}[confidence];
   let action="Maintenir", urgency="normal", explanation="";
   const low=ref?Math.round(ref*0.95):(ourPrice||0); const target=ref?Math.round(ref*1.02):(ourPrice||0); const high=ref?Math.round(ref*1.18):(ourPrice||0);
-  if (!ref) { action="Relevé insuffisant"; urgency="haut"; explanation=`${qualified.length} concurrent(s) qualifié(s) (score ≥${minScore}). Minimum 3 requis.`; }
+  if (!ref) {
+    action="Relevé insuffisant"; urgency="haut";
+    explanation = qualified.length===0 && pendingCount>0
+      ? `Relevés à vérifier : ${pendingCount}. Validez au moins 3 relevés pour obtenir une recommandation fiable.`
+      : `${qualified.length} relevé(s) validé(s) qualifié(s) (score ≥${minScore}). Minimum 3 requis.`;
+  }
   else if (ourPrice) {
     const pct=(ourPrice-ref)/ref*100;
     if (pct<-thresholdLow) { action="Augmenter le tarif"; urgency="haut"; explanation=`Tarif ${Math.abs(Math.round(pct))}% sous la médiane résidences (${ref.toLocaleString("fr-FR")}€). Potentiel +${(ref-ourPrice).toLocaleString("fr-FR")}€/sem.`; }
@@ -373,7 +366,7 @@ function calcReco(ourPrice, rates, settings={}) {
     else { action="Maintenir"; urgency="normal"; explanation=`Bien positionné (${pct>=0?"+":""}${Math.round(pct)}% vs ${ref.toLocaleString("fr-FR")}€ médiane).`; }
   }
   if (hasOld) explanation+=" ⚠ Relevés partiellement obsolètes.";
-  return { medAll, medRes, medPart, medHot, ref, low, target, high, action, urgency, confidence, confScore, explanation, hasEnough, promoCount, ratesCount:qualified.length, excludedCount:excluded.length, recentCount:recent.length, dataAgeDays:maxAge, hasOld };
+  return { medAll, medRes, medPart, medHot, ref, low, target, high, action, urgency, confidence, confScore, explanation, hasEnough, promoCount, ratesCount:qualified.length, excludedCount:excluded.length, recentCount:recent.length, dataAgeDays:maxAge, hasOld, pendingCount, rejectedCount, trustedCount:trusted.length };
 }
 
 function parsePaste(text, source, weekId, capacity) {
@@ -402,7 +395,7 @@ const CAT_C={ haute:"#D45400", moyenne:C.blueL, basse:C.green };
 const CAT_L={ haute:"Haute saison", moyenne:"Moy. saison", basse:"Basse saison" };
 
 function Badge({ label, color, bg, size=10 }) { return <span style={{ fontSize:size, fontWeight:700, background:bg, color, padding:"2px 6px", borderRadius:4, whiteSpace:"nowrap" }}>{label}</span>; }
-function ReliaBadge({ status }) { const m={ réel:{bg:C.greenL,c:C.green}, "saisi manuellement":{bg:C.bluePale,c:C.blue}, "importé CSV":{bg:C.purpleL,c:C.purple}, "copier-coller":{bg:"#F3E8FF",c:C.purple}, "à vérifier":{bg:C.goldL,c:C.orange}, estimé:{bg:C.goldL,c:C.gold}, "scraping-auto":{bg:"#F0FDF4",c:"#166534"}, "scraping-batch":{bg:"#F0FDF4",c:"#166534"} }[status]||{bg:C.grayL,c:C.gray}; return <span style={{ fontSize:9, fontWeight:600, background:m.bg, color:m.c, padding:"1px 5px", borderRadius:4 }}>{status}</span>; }
+function ReliaBadge({ status }) { const m={ réel:{bg:C.greenL,c:C.green}, "validé":{bg:C.greenL,c:C.green}, "saisi manuellement":{bg:C.bluePale,c:C.blue}, "importé CSV":{bg:C.purpleL,c:C.purple}, "copier-coller":{bg:"#F3E8FF",c:C.purple}, "à vérifier":{bg:C.goldL,c:C.orange}, "rejeté":{bg:C.redL,c:C.red}, estimé:{bg:C.goldL,c:C.gold}, "scraping-auto":{bg:"#F0FDF4",c:"#166534"}, "scraping-batch":{bg:"#F0FDF4",c:"#166534"} }[status]||{bg:C.grayL,c:C.gray}; return <span style={{ fontSize:9, fontWeight:600, background:m.bg, color:m.c, padding:"1px 5px", borderRadius:4 }}>{status}</span>; }
 function PromoBadge({ label }) { if(!label) return null; const m={ "Genius -10%":{bg:"#DBEAFE",c:"#1D40AE"}, "Last minute":{bg:C.redL,c:C.red}, "Early booking":{bg:C.greenL,c:C.green}, "PDJ inclus":{bg:C.purpleL,c:C.purple}, "Annulation gratuite":{bg:C.greenL,c:C.green} }[label]||{bg:C.orangeL,c:C.orange}; const short=label.replace("Genius -10%","GENIUS").replace("Last minute","LAST MIN").replace("Early booking","EARLY").replace("PDJ inclus","PDJ").replace("Annulation gratuite","ANNUL.").slice(0,12); return <span style={{ fontSize:9, fontWeight:700, background:m.bg, color:m.c, padding:"2px 5px", borderRadius:4 }}>{short}</span>; }
 
 // ══ LOGIN SCREEN (hors App pour éviter re-mount) ═════════════════
@@ -582,10 +575,48 @@ export default function App() {
 
   async function handleDelete(rate) { await deleteCompetitorRate(rate.id,rate.week_id,rate.capacity); setDC(null); loadRates(); }
 
+  // ── Validation d'un relevé (à vérifier → validé / rejeté) ─────
+  async function updateRateStatus(rate, status) {
+    const validatedAt = (status === "validé" || status === "rejeté") ? new Date().toISOString() : null;
+
+    try {
+      if (SB_READY) {
+        try {
+          await sb.update("competitor_rates", `id=eq.${rate.id}`, {
+            reliability_status: status,
+            validated_at: validatedAt,
+          });
+        } catch (e) {
+          // Si validated_at n'existe pas encore, on met à jour seulement le statut.
+          if (isMissingColumnError(e)) {
+            await sb.update("competitor_rates", `id=eq.${rate.id}`, {
+              reliability_status: status,
+            });
+          } else {
+            throw e;
+          }
+        }
+      } else {
+        const key = `rates_${rate.week_id}_${rate.capacity}`;
+        const arr = ls.get(key).map(r =>
+          r.id === rate.id
+            ? { ...r, reliability_status: status, validated_at: validatedAt }
+            : r
+        );
+        ls.set(key, arr);
+      }
+      loadRates();
+    } catch (e) {
+      console.error("updateRateStatus", e);
+      setPlanError("Erreur statut : " + e.message);
+    }
+  }
+
   // ── Analyse IA ────────────────────────────────────────────────
   async function runIA() {
     setIaL(true); setIaText(null); setIaError(null);
-    const payload={ weekLabel:selWeek?.label, weekYear:selWeek?.year, seasonType:CAT_L[selWeek?.season_type]||"", eventLabel:selWeek?.event_label||"", cap, ourPrice, ourNight, rates:rates.slice(0,8).map(r=>({ source:r.source, competitor_name:r.competitor_name, price_week:r.price_week, promo_label:r.promo_label, reliability_status:r.reliability_status, collected_at:r.collected_at, comparability_score:r.comparability_score })), reco:{ medRes:reco.medRes, medPart:reco.medPart, medAll:reco.medAll, action:reco.action, confidence:reco.confidence, confScore:reco.confScore, ratesCount:reco.ratesCount, excludedCount:reco.excludedCount, recentCount:reco.recentCount, hasOld:reco.hasOld }, settings };
+    const trustedRates=rates.filter(r=>!r.is_example&&TRUSTED_STATUSES.includes(r.reliability_status??"à vérifier"));
+    const payload={ weekLabel:selWeek?.label, weekYear:selWeek?.year, seasonType:CAT_L[selWeek?.season_type]||"", eventLabel:selWeek?.event_label||"", cap, ourPrice, ourNight, rates:trustedRates.slice(0,8).map(r=>({ source:r.source, competitor_name:r.competitor_name, price_week:r.price_week, promo_label:r.promo_label, reliability_status:r.reliability_status, collected_at:r.collected_at, comparability_score:r.comparability_score })), reco:{ medRes:reco.medRes, medPart:reco.medPart, medAll:reco.medAll, action:reco.action, confidence:reco.confidence, confScore:reco.confScore, ratesCount:reco.ratesCount, excludedCount:reco.excludedCount, recentCount:reco.recentCount, hasOld:reco.hasOld }, settings };
     try {
       let res=await fetch(IA_ENDPOINT,{ method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
       if(res.status===404){
@@ -695,23 +726,18 @@ export default function App() {
       setPlanSaved(p=>({ ...p, [key]:"ok" }));
       if(result.week_id===selWeekId&&result.capacity===capNum) loadRates();
     } catch(e) {
-  const status = e.message?.includes("DUPLICATE") ? "dup" : "err";
-
-  setPlanSaved(p => ({
-    ...p,
-    [key]: status,
-  }));
-
-  if (status === "err") {
-    setPlanError(`Erreur enregistrement "${item.name}" : ${e.message}`);
-  }
-}
+      const status = e.message?.includes("DUPLICATE") ? "dup" : "err";
+      setPlanSaved(p=>({ ...p, [key]:status }));
+      if (status === "err") {
+        setPlanError(`Erreur enregistrement "${item.name}" : ${e.message}`);
+      }
+    }
   }
 
   async function savePlanGroup(result) {
     for(let i=0;i<result.listings.length;i++){
       const key=`${result.week_id}_${result.capacity}_${i}`;
-      if(!planSaved[key]) await savePlanRate(result.listings[i],result,key);
+      if(planSaved[key] !== "ok" && planSaved[key] !== "dup") await savePlanRate(result.listings[i],result,key);
     }
   }
 
@@ -936,13 +962,18 @@ export default function App() {
 
           {/* ── TAB RÉSUMÉ ── */}
           {tab==="detail"&&!ratesLoading&&(<>
+            {reco.pendingCount>0&&reco.trustedCount<reco.pendingCount&&(
+              <div style={{ ...cd(10), padding:"8px 11px", background:C.goldL, marginBottom:8 }}>
+                <p style={{ margin:0, fontSize:10, fontWeight:600, color:C.orange }}>⚠ Les résultats issus du scraping doivent être validés avant d'influencer la recommandation. ({reco.pendingCount} à vérifier)</p>
+              </div>
+            )}
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:8 }}>
               <div style={{ ...cd(11,0), padding:"10px 11px", background:C.bluePale }}>
                 <p style={{ margin:"0 0 1px", fontSize:8, color:C.blueL, fontWeight:700, textTransform:"uppercase" }}>Nos tarifs · {cap}</p>
                 {ourPrice>0 ? (
                   <>
                     <p style={{ margin:0, fontSize:18, fontWeight:700, color:C.blue }}>{fmt(ourNight)}€/n</p>
-                    <p style={{ margin:0, fontSize:10, color:C.blueL }}>{fmt(ourPrice)}{priceLabel} · Goélia -19%</p>
+                    <p style={{ margin:0, fontSize:10, color:C.blueL }}>{fmt(ourPrice)}{priceLabel} · {OUR_TARIFS_META.source}</p>
                   </>
                 ) : (
                   <>
@@ -993,7 +1024,7 @@ export default function App() {
             </div>
             <div style={cd()}>
               <div style={{ ...rw(false), background:C.bluePale }}>
-                <div><div style={{ display:"flex", alignItems:"center", gap:5 }}><span style={{ fontSize:11, fontWeight:700, color:C.blue }}>Les Cimes (nous)</span><ReliaBadge status="réel"/></div><p style={{ margin:0, fontSize:9, color:C.blueL }}>Goélia -19% · vérifié avr. 2026</p></div>
+                <div><div style={{ display:"flex", alignItems:"center", gap:5 }}><span style={{ fontSize:11, fontWeight:700, color:C.blue }}>Les Cimes (nous)</span><ReliaBadge status="réel"/></div><p style={{ margin:0, fontSize:9, color:C.blueL }}>{OUR_TARIFS_META.source} · {OUR_TARIFS_META.verified_at}</p></div>
                 <div style={{ textAlign:"right" }}><p style={{ margin:0, fontSize:12, fontWeight:700, color:C.blue }}>{fmt(ourNight)}€/n</p><p style={{ margin:0, fontSize:9, color:C.blueL }}>{fmt(ourPrice)}€/sem</p></div>
               </div>
               {rates.map((r,i)=>{ const diff=ourPrice?ourPrice-Number(r.price_week):null; const age=daysSince(r.collected_at);
@@ -1005,13 +1036,19 @@ export default function App() {
                       <button onClick={()=>setDC(null)} style={{ fontSize:11, color:C.text, background:C.grayL, border:"none", borderRadius:6, padding:"4px 10px", cursor:"pointer" }}>Non</button>
                     </div>
                   </div>
-                ):(
-                  <div key={r.id} style={rw(i===rates.length-1)}>
+                ):(()=>{
+                  const st=r.reliability_status||"à vérifier";
+                  const isRejected=st==="rejeté";
+                  const isPending=st==="à vérifier";
+                  const isValidated=st==="validé";
+                  return (
+                  <div key={r.id} style={{ ...rw(i===rates.length-1), flexDirection:"column", alignItems:"stretch", opacity:isRejected?0.5:1 }}>
+                    <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
                     <div style={{ flex:1, minWidth:0 }}>
                       <div style={{ display:"flex", alignItems:"center", gap:4, marginBottom:2, flexWrap:"wrap" }}>
-                        <span style={{ fontSize:11, fontWeight:500, color:C.text }}>{r.competitor_name||r.source}</span>
+                        <span style={{ fontSize:11, fontWeight:500, color:C.text, textDecoration:isRejected?"line-through":"none" }}>{r.competitor_name||r.source}</span>
                         {r.promo_label&&<PromoBadge label={r.promo_label}/>}
-                        <ReliaBadge status={r.reliability_status}/>
+                        <ReliaBadge status={st}/>
                         <span style={{ fontSize:9, color:C.gray }}>score {r.comparability_score||"?"}/100</span>
                       </div>
                       <div style={{ display:"flex", gap:5 }}>
@@ -1029,8 +1066,28 @@ export default function App() {
                       </div>
                       <button onClick={()=>setDC(r.id)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:14, color:C.gray, padding:2 }}>🗑</button>
                     </div>
+                    </div>
+                    {/* Boutons de validation */}
+                    {isPending&&(
+                      <div style={{ display:"flex", gap:6, marginTop:6 }}>
+                        <button onClick={()=>updateRateStatus(r,"validé")} style={{ flex:1, padding:"5px 0", background:C.greenL, color:C.green, border:`1px solid ${C.green}`, borderRadius:7, fontSize:11, fontWeight:700, cursor:"pointer" }}>✓ Valider</button>
+                        <button onClick={()=>updateRateStatus(r,"rejeté")} style={{ flex:1, padding:"5px 0", background:C.redL, color:C.red, border:`1px solid ${C.red}`, borderRadius:7, fontSize:11, fontWeight:700, cursor:"pointer" }}>✕ Rejeter</button>
+                      </div>
+                    )}
+                    {isValidated&&(
+                      <div style={{ marginTop:5 }}>
+                        <button onClick={()=>updateRateStatus(r,"à vérifier")} style={{ fontSize:9, color:C.gray, background:"none", border:"none", cursor:"pointer", textDecoration:"underline", padding:0 }}>repasser à vérifier</button>
+                      </div>
+                    )}
+                    {isRejected&&(
+                      <div style={{ marginTop:5 }}>
+                        <button onClick={()=>updateRateStatus(r,"à vérifier")} style={{ fontSize:9, color:C.gray, background:"none", border:"none", cursor:"pointer", textDecoration:"underline", padding:0 }}>réactiver</button>
+                      </div>
+                    )}
                   </div>
-                );
+                  );
+                })()
+                ;
               })}
             </div>
 
@@ -1208,7 +1265,7 @@ export default function App() {
                                           <p style={{ margin:0, fontSize:12, fontWeight:700, color:C.text }}>{fmt(pt)}€<span style={{ fontSize:9, fontWeight:400, color:C.gray }}>/{is2n?"2n":"sem"}</span></p>
                                           {pn>0&&<p style={{ margin:0, fontSize:9, color:C.gray }}>{fmt(pn)}€/n</p>}
                                         </div>
-                                        <button onClick={()=>savePlanRate(item,result,key)} disabled={!!state} style={{ width:26, height:26, borderRadius:7, border:"none", flexShrink:0, background:state==="dup"?C.goldL:state==="ok"?C.greenL:state==="err"?C.redL:C.bluePale, color:state==="dup"?C.gold:state==="ok"?C.green:state==="err"?C.red:C.blue, fontWeight:700, fontSize:14, cursor:state?"default":"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>
+                                        <button onClick={()=>savePlanRate(item,result,key)} disabled={state==="ok"||state==="dup"} style={{ width:26, height:26, borderRadius:7, border:"none", flexShrink:0, background:state==="dup"?C.goldL:state==="ok"?C.greenL:state==="err"?C.redL:C.bluePale, color:state==="dup"?C.gold:state==="ok"?C.green:state==="err"?C.red:C.blue, fontWeight:700, fontSize:14, cursor:(state==="ok"||state==="dup")?"default":"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>
                                           {state==="dup"?"=":state==="ok"?"✓":state==="err"?"!":"+"}
                                         </button>
                                       </div>
@@ -1288,7 +1345,7 @@ export default function App() {
             <div style={{ ...cd(11), padding:"10px 13px", background:C.bluePale, marginTop:4, marginBottom:8 }}>
               <p style={{ margin:"0 0 2px", fontSize:11, fontWeight:700, color:C.blueL }}>Analyse IA</p>
               <p style={{ margin:0, fontSize:10, color:C.blueL, lineHeight:1.5 }}>L'IA analyse uniquement les relevés validés pour cette semaine et cette capacité. Ne mélange pas 7 nuits et 2 nuits.</p>
-              {reco.ratesCount<3&&<p style={{ margin:"4px 0 0", fontSize:10, color:C.orange, fontWeight:600 }}>⚠ Il faut au moins 3 relevés qualifiés (actuellement {reco.ratesCount}) pour une analyse fiable.</p>}
+              {reco.trustedCount<3&&<p style={{ margin:"4px 0 0", fontSize:10, color:C.orange, fontWeight:600 }}>⚠ Il faut au moins 3 relevés validés pour lancer une analyse IA fiable (actuellement {reco.trustedCount}).{reco.pendingCount>0?` ${reco.pendingCount} à vérifier dans l'onglet Concurrents.`:""}</p>}
             </div>
             <div style={{ ...cd(13), padding:"12px" }}>
               <p style={{ margin:"0 0 6px", fontSize:9, fontWeight:700, color:C.gray, textTransform:"uppercase" }}>Recommandation · médiane statistique</p>
@@ -1313,7 +1370,7 @@ export default function App() {
               </div>
             </div>
             {iaError&&<div style={{ ...cd(10), padding:"9px 12px", background:C.redL, marginBottom:6 }}><p style={{ margin:0, fontSize:11, color:C.red }}>✗ {iaError}</p></div>}
-            {!iaText&&<button style={btn(iaLoading,C.blue)} onClick={runIA} disabled={iaLoading}>{iaLoading?"Analyse…":"Analyse IA →"}</button>}
+            {!iaText&&<button style={btn(iaLoading||reco.trustedCount<3,C.blue)} onClick={runIA} disabled={iaLoading||reco.trustedCount<3}>{iaLoading?"Analyse…":reco.trustedCount<3?`Validez ${3-reco.trustedCount} relevé(s) de plus`:"Analyse IA →"}</button>}
             {iaLoading&&<div style={{ height:3, background:C.grayM, borderRadius:3, overflow:"hidden", marginBottom:8 }}><div style={{ height:"100%", background:C.blue, borderRadius:3, animation:"prog 4s linear forwards" }}/><style>{`@keyframes prog{from{width:0}to{width:100%}}`}</style></div>}
             {iaText&&<div>{[{t:"Positionnement",i:"📊"},{t:"Risques",i:"⚠"},{t:"Recommandation",i:"💡"},{t:"Action",i:"📱"}].map((s,idx)=>iaText[idx]&&<div key={idx} style={{ ...cd(11), padding:"10px 12px" }}><p style={{ margin:"0 0 3px", fontSize:9, fontWeight:700, color:C.gray, textTransform:"uppercase" }}>{s.i} {s.t}</p><p style={{ margin:0, fontSize:12, lineHeight:1.6, color:C.text }}>{iaText[idx]}</p></div>)}<button style={btn(false,C.grayL,C.blue)} onClick={()=>setIaText(null)}>Relancer</button></div>}
           </>)}
