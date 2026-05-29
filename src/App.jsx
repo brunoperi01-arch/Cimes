@@ -286,7 +286,8 @@ return { medAll, medRes, medPart, medHot, ref, low, target, high, action, urgenc
 }
 
 function parsePaste(text, source, weekId, capacity) {
-const full=text.toLowerCase(); const priceRe=/(\d[\d\s]{1,5})\s*€|€\s*(\d[\d\s]{1,5})|\b(\d{2,4})\b(?=\s*(?:€|eur|\s*/\s*(?:nuit|sem|semaine)))/gi;
+const full = text.toLowerCase();
+const priceRe = /(\d[\d\s]{1,5})\s*€|€\s*(\d[\d\s]{1,5})|\b(\d{2,4})\b(?=\s*(?:€|eur|\s*\/\s*(?:nuit|sem|semaine)))/gi;
 const pricesSet=new Set(); let m;
 while((m=priceRe.exec(text))!==null){ const v=parseFloat((m[1]||m[2]||m[3]).replace(/\s/g,"")); if(v>=30&&v<=8000) pricesSet.add(v); }
 const prices=[...pricesSet].sort((a,b)=>a-b);
