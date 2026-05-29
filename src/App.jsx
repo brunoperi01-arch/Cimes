@@ -167,19 +167,74 @@ async function getCompetitorRates({ weekId, capacity, showExamples=false }, allC
   return enrichRates(raw||[],allCompetitors);
 }
 
-async function saveCompetitorRate(rate, allCompetitors) {
-  const clean=stripUserId(rate);
-  const competitorName=clean.competitor||clean.property_name||clean.competitor_name||clean.source||"Concurrent";
-  const priceValue=Number(clean.price??clean.price_week??clean.priceWeek??0);
-  const collectedAt=clean.collected_at||clean.collectedAt||new Date().toISOString().slice(0,10);
-  const sourceValue=clean.source||clean.platform||clean.collection_type||"Scraping";
-  const sourceUrl=clean.source_url||clean.url||"";
-  const propertyType=clean.property_type||clean.type||"particulier";
+function isMissingColumnError(error) {
+  const msg = String(error?.message || error || "");
 
-  if (!priceValue) throw new Error("Prix manquant : impossible d'enregistrer ce relevé.");
+  return (
+    msg.includes("PGRST204") ||
+    msg.includes("Could not find") ||
+    msg.includes("column") ||
+    msg.includes("schema cache")
+  );
+}
+
+async function saveCompetitorRate(rate, allCompetitors) {
+  const clean = stripUserId(rate);
+
+  const competitorName =
+    clean.competitor ||
+    clean.property_name ||
+    clean.competitor_name ||
+    clean.source ||
+    "Concurrent";
+
+  const priceValue = Number(
+    clean.price_total ??
+    clean.price ??
+    clean.price_week ??
+    clean.priceWeek ??
+    0
+  );
+
+  const stayNights = Number(clean.stay_nights || 7);
+
+  const priceNight = Number(
+    clean.price_night ??
+    (priceValue ? Math.round(priceValue / stayNights) : 0)
+  );
+
+  const priceWeekEquiv = Number(
+    clean.price_week_equiv ??
+    (priceNight ? Math.round(priceNight * 7) : 0)
+  );
+
+  const collectedAt =
+    clean.collected_at ||
+    clean.collectedAt ||
+    new Date().toISOString().slice(0, 10);
+
+  const sourceValue =
+    clean.source ||
+    clean.platform ||
+    clean.collection_type ||
+    "Scraping";
+
+  const sourceUrl =
+    clean.source_url ||
+    clean.url ||
+    "";
+
+  const propertyType =
+    clean.property_type ||
+    clean.type ||
+    "particulier";
+
+  if (!priceValue) {
+    throw new Error("Prix manquant : impossible d'enregistrer ce relevé.");
+  }
 
   if (SB_READY) {
-    const dupQ=[
+    const dupQ = [
       `week_id=eq.${encodeURIComponent(clean.week_id)}`,
       `capacity=eq.${encodeURIComponent(clean.capacity)}`,
       `competitor=eq.${encodeURIComponent(competitorName)}`,
@@ -187,44 +242,83 @@ async function saveCompetitorRate(rate, allCompetitors) {
       `collected_at=eq.${encodeURIComponent(collectedAt)}`,
       `select=id`,
     ].join("&");
-    const existing=await sb.select("competitor_rates",dupQ);
-    if (existing?.length) throw new Error("DUPLICATE");
 
-    // Payload enrichi avec les nouvelles colonnes (compatibilité rétroactive)
-    const payload = {
-      week_id:       clean.week_id,
-      capacity:      Number(clean.capacity),
-      competitor:    competitorName,
-      price:         priceValue,
-      source:        sourceValue,
-      source_url:    sourceUrl,
-      collected_at:  collectedAt,
-      property_type: propertyType,
-      ...(clean.collection_type   && { collection_type:   clean.collection_type }),
-      ...(clean.reliability_status && { reliability_status: clean.reliability_status }),
-      ...(clean.is_example != null && { is_example: clean.is_example }),
-      // Nouvelles colonnes V2
-      ...(clean.price_total      != null && { price_total:      Number(clean.price_total) }),
-      ...(clean.price_night      != null && { price_night:      Number(clean.price_night) }),
-      ...(clean.price_week_equiv != null && { price_week_equiv: Number(clean.price_week_equiv) }),
-      ...(clean.stay_nights      != null && { stay_nights:      Number(clean.stay_nights) }),
-      ...(clean.period_start     && { period_start: clean.period_start }),
-      ...(clean.period_end       && { period_end:   clean.period_end }),
-      ...(clean.season           && { season:        clean.season }),
+    const existing = await sb.select("competitor_rates", dupQ);
+
+    if (existing?.length) {
+      throw new Error("DUPLICATE");
+    }
+
+    // Payload minimal compatible avec ta table actuelle
+    const basePayload = {
+      week_id: clean.week_id,
+      capacity: Number(clean.capacity),
+      competitor: competitorName,
+      price: priceValue,
+      source: sourceValue,
+      source_url: sourceUrl,
+      collected_at: collectedAt,
     };
-    return sb.insert("competitor_rates", payload);
+
+    // Payload complet avec les colonnes V2
+    const fullPayload = {
+      ...basePayload,
+      property_type: propertyType,
+      collection_type: clean.collection_type || "scraping-batch",
+      reliability_status: clean.reliability_status || "à vérifier",
+      is_example: clean.is_example ?? false,
+
+      price_total: priceValue,
+      price_night: priceNight,
+      price_week_equiv: priceWeekEquiv,
+      stay_nights: stayNights,
+
+      ...(clean.period_start && { period_start: clean.period_start }),
+      ...(clean.period_end && { period_end: clean.period_end }),
+      ...(clean.season && { season: clean.season }),
+    };
+
+    try {
+      return await sb.insert("competitor_rates", fullPayload);
+    } catch (e) {
+      // Si une colonne V2 manque encore dans Supabase,
+      // on tente quand même l'enregistrement minimal.
+      if (isMissingColumnError(e)) {
+        return await sb.insert("competitor_rates", basePayload);
+      }
+
+      throw e;
+    }
   }
 
-  const id="r_"+Date.now();
-  const pn = Number(clean.price_night ?? (priceValue ? Math.round(priceValue / (clean.stay_nights || 7)) : 0));
-  const full={
-    ...clean, id, competitor:competitorName, property_name:competitorName, property_type:propertyType,
-    price:priceValue, price_week:priceValue, price_night:pn, source:sourceValue, source_url:sourceUrl, url:sourceUrl, collected_at:collectedAt,
+  const id = "r_" + Date.now();
+
+  const full = {
+    ...clean,
+    id,
+    competitor: competitorName,
+    property_name: competitorName,
+    property_type: propertyType,
+    price: priceValue,
+    price_week: priceValue,
+    price_total: priceValue,
+    price_night: priceNight,
+    price_week_equiv: priceWeekEquiv,
+    stay_nights: stayNights,
+    source: sourceValue,
+    source_url: sourceUrl,
+    url: sourceUrl,
+    collected_at: collectedAt,
   };
-  const key=`rates_${clean.week_id}_${clean.capacity}`;
-  const existingLocal=ls.get(key);
-  if (isDuplicate(existingLocal,full)) throw new Error("DUPLICATE");
-  ls.push(key,full);
+
+  const key = `rates_${clean.week_id}_${clean.capacity}`;
+  const existingLocal = ls.get(key);
+
+  if (isDuplicate(existingLocal, full)) {
+    throw new Error("DUPLICATE");
+  }
+
+  ls.push(key, full);
   return full;
 }
 
