@@ -98,9 +98,50 @@ const sb = {
   async insert(table, body) { const r = await fetch(`${SB_URL}/rest/v1/${table}`, { method:"POST", headers: await authHeaders(), body:JSON.stringify(body) }); if (!r.ok) { const t=await r.text(); if (t.includes("unique")||t.includes("duplicate")||t.includes("23505")) throw new Error("DUPLICATE:"+t); sbErrors.push({ ts:new Date().toISOString(), msg:t, path:table }); throw new Error(t); } return r.json(); },
   async update(table, filter, body) { const r = await fetch(`${SB_URL}/rest/v1/${table}?${filter}`, { method:"PATCH", headers: await authHeaders(), body:JSON.stringify(body) }); if (!r.ok) { const t=await r.text(); throw new Error(t); } return r.json(); },
   async delete(table, filter) { const r = await fetch(`${SB_URL}/rest/v1/${table}?${filter}`, { method:"DELETE", headers: await authHeaders() }); if (!r.ok) throw new Error(await r.text()); return true; },
-  async signIn(email, pwd) { const r = await fetch(`${SB_URL}/auth/v1/token?grant_type=password`, { method:"POST", headers:{"apikey":SB_KEY,"Content-Type":"application/json"}, body:JSON.stringify({ email, password:pwd }) }); const d = await r.json(); if (!r.ok) throw new Error(d.error_description||d.message||"Identifiants incorrects"); _token=d.access_token; try { sessionStorage.setItem("sb_token",d.access_token); sessionStorage.setItem("sb_user",JSON.stringify({ email:d.user?.email, id:d.user?.id })); } catch {} return d; },
-  signOut() { _token=null; try { sessionStorage.removeItem("sb_token"); sessionStorage.removeItem("sb_user"); } catch {} },
-  restoreSession() { try { const t=sessionStorage.getItem("sb_token"); const u=sessionStorage.getItem("sb_user"); if (t&&u) { _token=t; return JSON.parse(u); } } catch {} return null; },
+  async signIn(email, pwd) {
+    const r = await fetch(`${SB_URL}/auth/v1/token?grant_type=password`, {
+      method:"POST",
+      headers:{ "apikey":SB_KEY, "Content-Type":"application/json" },
+      body:JSON.stringify({ email, password:pwd })
+    });
+
+    const d = await r.json();
+
+    if (!r.ok) {
+      throw new Error(d.error_description || d.message || "Identifiants incorrects");
+    }
+
+    storeSession(d);
+    return d;
+  },
+
+  signOut() {
+    clearStoredSession();
+  },
+
+  restoreSession() {
+    try {
+      const t = sessionStorage.getItem("sb_token");
+      const r = sessionStorage.getItem("sb_refresh");
+      const e = sessionStorage.getItem("sb_expires_at");
+      const u = sessionStorage.getItem("sb_user");
+
+      // Anciennes sessions sans refresh_token : on force une reconnexion propre.
+      if (t && u && !r) {
+        clearStoredSession();
+        return null;
+      }
+
+      if (t && u) {
+        _token = t;
+        _refreshToken = r || null;
+        _expiresAt = Number(e || 0);
+        return JSON.parse(u);
+      }
+    } catch {}
+
+    return null;
+  },
 };
 
 // ══ DONNÉES STATIQUES ═══════════════════════════════════════════
