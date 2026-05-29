@@ -116,8 +116,8 @@ const WINTER_PERIODS = [
 // Périodes combinées (été normalisé + hiver) pour selWeek lookup
 function _d(s,n){ const d=new Date(s+"T12:00:00Z"); d.setUTCDate(d.getUTCDate()+n); return d.toISOString().slice(0,10); }
 const ALL_PERIODS = [
-…STATIC_WEEKS.map(w=>({ …w, season:"ete", stay_nights:7, period_start:w.week_start, period_end:_d(w.week_start,7), subtitle:w.label })),
-…WINTER_PERIODS,
+...STATIC_WEEKS.map(w=>({ ...w, season:"ete", stay_nights:7, period_start:w.week_start, period_end:_d(w.week_start,7), subtitle:w.label })),
+...WINTER_PERIODS,
 ];
 
 // ══ HELPERS ══════════════════════════════════════════════════════
@@ -143,17 +143,17 @@ return (rawRates||[]).map(r=>{
 const priceWeek=Number(r.price_week??r.price??0);
 const priceNight=Number(r.price_night??(priceWeek?Math.round(priceWeek/7):0));
 const comp=competitors.find(c=>c.id===r.competitor_id||c.source===r.source||c.name===r.competitor||c.name===r.property_name);
-return { …r, price_week:priceWeek, price_night:priceNight, property_name:r.property_name??r.competitor??r.source, competitor_name:r.competitor_name??r.property_name??r.competitor??comp?.name??r.source, competitor:r.competitor??r.property_name??r.source, price:Number(r.price??r.price_week??0), source_url:r.source_url??r.url??"", comparability_score:r.competitors?.comparability_score??comp?.comparability_score??50, property_type:r.competitors?.property_type??comp?.property_type??r.property_type??r.type??"particulier", reliability_status:r.reliability_status??"à vérifier", collection_type:r.collection_type??"scraping" };
+return { ...r, price_week:priceWeek, price_night:priceNight, property_name:r.property_name??r.competitor??r.source, competitor_name:r.competitor_name??r.property_name??r.competitor??comp?.name??r.source, competitor:r.competitor??r.property_name??r.source, price:Number(r.price??r.price_week??0), source_url:r.source_url??r.url??"", comparability_score:r.competitors?.comparability_score??comp?.comparability_score??50, property_type:r.competitors?.property_type??comp?.property_type??r.property_type??r.type??"particulier", reliability_status:r.reliability_status??"à vérifier", collection_type:r.collection_type??"scraping" };
 });
 }
 
 const ls = {
 get: k=>{ try { return JSON.parse(localStorage.getItem(k)||"[]"); } catch { return []; } },
 set: (k,v)=>{ try { localStorage.setItem(k,JSON.stringify(v)); } catch {} },
-push: (k,item)=>{ const arr=ls.get(k); ls.set(k,[…arr.filter(x=>x.id!==item.id),item]); },
+push: (k,item)=>{ const arr=ls.get(k); ls.set(k,[...arr.filter(x=>x.id!==item.id),item]); },
 };
 
-function stripUserId(rate) { const { user_id, …rest } = rate; return rest; }
+function stripUserId(rate) { const { user_id, ...rest } = rate; return rest; }
 
 async function getCompetitorRates({ weekId, capacity, showExamples=false }, allCompetitors) {
 let raw=[];
@@ -221,7 +221,7 @@ return sb.insert("competitor_rates", payload);
 const id="r_"+Date.now();
 const pn = Number(clean.price_night ?? (priceValue ? Math.round(priceValue / (clean.stay_nights || 7)) : 0));
 const full={
-…clean, id, competitor:competitorName, property_name:competitorName, property_type:propertyType,
+...clean, id, competitor:competitorName, property_name:competitorName, property_type:propertyType,
 price:priceValue, price_week:priceValue, price_night:pn, source:sourceValue, source_url:sourceUrl, url:sourceUrl, collected_at:collectedAt,
 };
 const key=`rates_${clean.week_id}_${clean.capacity}`;
@@ -249,12 +249,12 @@ return ls.get("imports").slice(-5).reverse();
 
 async function saveImportLog(log) {
 if (SB_READY) return sb.insert("imports",log);
-ls.push("imports",{ …log, id:"imp_"+Date.now() });
+ls.push("imports",{ ...log, id:"imp_"+Date.now() });
 }
 
 function median(arr) {
 if (!arr.length) return null;
-const sorted=[…arr].sort((a,b)=>a-b); const mid=Math.floor(sorted.length/2);
+const sorted=[...arr].sort((a,b)=>a-b); const mid=Math.floor(sorted.length/2);
 return sorted.length%2!==0 ? sorted[mid] : Math.round((sorted[mid-1]+sorted[mid])/2);
 }
 
@@ -265,7 +265,7 @@ const qualified=rates.filter(r=>!r.is_example&&(r.comparability_score??50)>=minS
 const excluded=rates.filter(r=>!r.is_example&&(r.comparability_score??50)<minScore);
 const recent=qualified.filter(r=>age(r.collected_at)<=obsoleteDays);
 const hasOld=qualified.some(r=>age(r.collected_at)>obsoleteDays);
-const maxAge=qualified.length?Math.max(…qualified.map(r=>age(r.collected_at))):null;
+const maxAge=qualified.length?Math.max(...qualified.map(r=>age(r.collected_at))):null;
 const byType=t=>qualified.filter(r=>r.property_type===t); const prices=arr=>arr.map(r=>Number(r.price_week)).filter(Boolean);
 const medAll=median(prices(qualified)); const medRes=median(prices(byType("résidence"))); const medPart=median(prices(byType("particulier"))); const medHot=median(prices(byType("hôtel"))); const ref=medRes??medAll;
 const hasEnough=qualified.length>=3; const promoCount=rates.filter(r=>r.promo_label).length;
@@ -289,7 +289,7 @@ function parsePaste(text, source, weekId, capacity) {
 const full=text.toLowerCase(); const priceRe=/(\d[\d\s]{1,5})\s*€|€\s*(\d[\d\s]{1,5})|\b(\d{2,4})\b(?=\s*(?:€|eur|\s*/\s*(?:nuit|sem|semaine)))/gi;
 const pricesSet=new Set(); let m;
 while((m=priceRe.exec(text))!==null){ const v=parseFloat((m[1]||m[2]||m[3]).replace(/\s/g,"")); if(v>=30&&v<=8000) pricesSet.add(v); }
-const prices=[…pricesSet].sort((a,b)=>a-b);
+const prices=[...pricesSet].sort((a,b)=>a-b);
 let originalPrice=null; const barreM=text.match(/(?:de|était|barré|avant|au lieu de)\s*:?\s*([\d\s]{3,6})\s*€/i); if(barreM){ const v=parseFloat(barreM[1].replace(/\s/g,"")); if(v>0) originalPrice=v; }
 let promoLabel=null, promoPercent=0;
 if(/genius/i.test(full)){ promoLabel="Genius -10%"; promoPercent=10; } else if(/last[\s-]?minute/i.test(full)){ promoLabel="Last minute"; promoPercent=15; } else if(/early[\s-]?booking/i.test(full)){ promoLabel="Early booking"; promoPercent=10; } else if(/petit[\s-]?d[eé]j/i.test(full)){ promoLabel="PDJ inclus"; } else if(/annulation\s*gratuite/i.test(full)){ promoLabel="Annulation gratuite"; } else { const pm=full.match(/-(\d{1,2})\s*%/); if(pm){ promoPercent=parseInt(pm[1]); promoLabel=`-${promoPercent}%`; } }
@@ -317,7 +317,7 @@ function PromoBadge({ label }) { if(!label) return null; const m={ "Genius -10%"
 // ══ LOGIN SCREEN (hors App pour éviter re-mount) ═════════════════
 function LoginScreen({ loginErr, SB_READY, loginEmail, setLE, loginPwd, setLP, loginLoading, handleLogin }) {
 const sml={ fontSize:10, fontWeight:700, color:C.gray, margin:"12px 2px 5px", letterSpacing:"0.06em", textTransform:"uppercase" };
-const inp=(extra={})=>({ width:"100%", padding:"8px 10px", fontSize:13, border:`1px solid ${C.grayM}`, borderRadius:9, background:C.white, color:C.text, boxSizing:"border-box", …extra });
+const inp=(extra={})=>({ width:"100%", padding:"8px 10px", fontSize:13, border:`1px solid ${C.grayM}`, borderRadius:9, background:C.white, color:C.text, boxSizing:"border-box", ...extra });
 const btn=(dis,bg=C.blue,fg=C.white)=>({ width:"100%", padding:"12px", fontSize:14, fontWeight:600, background:dis?"#C7C7CC":bg, color:fg, border:"none", borderRadius:11, cursor:dis?"not-allowed":"pointer", marginBottom:6 });
 return (
 <div style={{ padding:"60px 28px 0" }}>
@@ -327,10 +327,10 @@ return (
 {loginErr&&<div style={{ background:C.redL, borderRadius:9, padding:"9px 12px", marginBottom:10 }}><p style={{ margin:0, fontSize:12, color:C.red, fontWeight:600 }}>✗ {loginErr}</p></div>}
 {!SB_READY&&<div style={{ background:C.goldL, borderRadius:9, padding:"9px 12px", marginBottom:10 }}><p style={{ margin:0, fontSize:10, color:C.gold }}>Mode démo — saisir n'importe quel email/mot de passe.</p></div>}
 <p style={sml}>Email</p>
-<input type="email" style={{ …inp(), marginBottom:10 }} value={loginEmail} onChange={e=>setLE(e.target.value)} placeholder="votre@email.com" autoComplete="email"/>
+<input type="email" style={{ ...inp(), marginBottom:10 }} value={loginEmail} onChange={e=>setLE(e.target.value)} placeholder="votre@email.com" autoComplete="email"/>
 <p style={sml}>Mot de passe</p>
-<input type="password" style={{ …inp(), marginBottom:16 }} value={loginPwd} onChange={e=>setLP(e.target.value)} placeholder="••••••••" autoComplete="current-password" onKeyDown={e=>e.key==="Enter"&&handleLogin()}/>
-<button style={btn(loginLoading)} onClick={handleLogin} disabled={loginLoading}>{loginLoading?"Connexion…":"Se connecter →"}</button>
+<input type="password" style={{ ...inp(), marginBottom:16 }} value={loginPwd} onChange={e=>setLP(e.target.value)} placeholder="••••••••" autoComplete="current-password" onKeyDown={e=>e.key==="Enter"&&handleLogin()}/>
+<button style={btn(loginLoading)} onClick={handleLogin} disabled={loginLoading}>{loginLoading?"Connexion...":"Se connecter →"}</button>
 <p style={{ fontSize:9, color:C.gray, textAlign:"center", marginTop:12, lineHeight:1.5 }}>Application privée · Données confidentielles<br/>Config : VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY</p>
 </div>
 );
@@ -439,7 +439,7 @@ async function handleSaveForm() {
 if(!form.priceWeek) return; const comp=competitors.find(c=>c.id===form.competitorId);
 try {
 await saveCompetitorRate({ week_id:form.weekId, competitor_id:form.competitorId||null, source:form.source||comp?.source||"", property_name:comp?.name||form.source, property_type:comp?.property_type||form.type, capacity:parseInt(form.capacity)||capNum, price_week:parseFloat(form.priceWeek)||0, price_night:form.priceNight?parseFloat(form.priceNight):Math.round((parseFloat(form.priceWeek)||0)/7), original_price:form.originalPrice?parseFloat(form.originalPrice):null, promo_label:form.promoLabel||null, promo_percent:parseFloat(form.promoPercent)||0, cleaning_fee:parseFloat(form.cleaningFee)||0, url:form.url, collected_at:form.collectedAt, notes:form.notes, collection_type:"manuelle", reliability_status:"saisi manuellement", is_example:false },competitors);
-setFS("ok"); setForm({ …emptyForm, weekId:form.weekId }); loadRates();
+setFS("ok"); setForm({ ...emptyForm, weekId:form.weekId }); loadRates();
 } catch(e) { setFS(e.message.includes("DUPLICATE")?"duplicate":"error"); }
 setTimeout(()=>setFS(null),3000);
 }
@@ -516,8 +516,8 @@ const pw=item.price_week?Math.round(item.price_week):item.price_night?Math.round
 const pn=item.price_night?Math.round(item.price_night):pw?Math.round(pw/7):0;
 try {
 await saveCompetitorRate({ week_id:selWeekId, source:item.platform||"Scraping", property_name:item.name, competitor:item.name, property_type:item.property_type||"particulier", competitor_id:null, capacity:capNum, price_week:pw, price:pw, price_night:pn, booking_rating:item.rating||null, url:item.url||"", source_url:item.url||"", collected_at:new Date().toISOString().slice(0,10), collection_type:"scraping-auto", reliability_status:"à vérifier", is_example:false },competitors);
-setScrapeSaved(p=>({ …p, [idx]:"ok" })); loadRates();
-} catch(e) { setScrapeSaved(p=>({ …p, [idx]:e.message?.includes("DUPLICATE")?"dup":"err" })); }
+setScrapeSaved(p=>({ ...p, [idx]:"ok" })); loadRates();
+} catch(e) { setScrapeSaved(p=>({ ...p, [idx]:e.message?.includes("DUPLICATE")?"dup":"err" })); }
 }
 
 // ── Plan de collecte ──────────────────────────────────────────
@@ -572,9 +572,9 @@ collection_type:    "scraping-batch",
 reliability_status: "à vérifier",
 is_example:         false,
 },competitors);
-setPlanSaved(p=>({ …p, [key]:"ok" }));
+setPlanSaved(p=>({ ...p, [key]:"ok" }));
 if(result.week_id===selWeekId&&result.capacity===capNum) loadRates();
-} catch(e) { setPlanSaved(p=>({ …p, [key]:e.message?.includes("DUPLICATE")?"dup":"err" })); }
+} catch(e) { setPlanSaved(p=>({ ...p, [key]:e.message?.includes("DUPLICATE")?"dup":"err" })); }
 }
 
 async function savePlanGroup(result) {
@@ -592,7 +592,7 @@ const cd  =(r=14,mb=8)=>({ background:C.white, borderRadius:r, overflow:"hidden"
 const rw  =last=>({ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 13px", borderBottom:last?"none":`0.5px solid ${C.grayL}` });
 const btn =(dis,bg=C.blue,fg=C.white)=>({ width:"100%", padding:"12px", fontSize:14, fontWeight:600, background:dis?"#C7C7CC":bg, color:fg, border:"none", borderRadius:11, cursor:dis?"not-allowed":"pointer", marginBottom:6 });
 const sml ={ fontSize:10, fontWeight:700, color:C.gray, margin:"12px 2px 5px", letterSpacing:"0.06em", textTransform:"uppercase" };
-const inp =(extra={})=>({ width:"100%", padding:"8px 10px", fontSize:13, border:`1px solid ${C.grayM}`, borderRadius:9, background:C.white, color:C.text, boxSizing:"border-box", …extra });
+const inp =(extra={})=>({ width:"100%", padding:"8px 10px", fontSize:13, border:`1px solid ${C.grayM}`, borderRadius:9, background:C.white, color:C.text, boxSizing:"border-box", ...extra });
 const tabB=a=>({ flex:1, padding:"8px 2px", fontSize:11, fontWeight:a?700:400, background:a?C.white:"transparent", color:a?C.blue:C.gray, border:"none", borderRadius:8, cursor:"pointer" });
 
 const SBar=({ title })=>(
@@ -605,7 +605,7 @@ const SBar=({ title })=>(
 </div>
 );
 const SaveFeedback=()=>formSaved?(
-<div style={{ …cd(9), padding:"9px 12px", background:formSaved==="ok"?C.greenL:formSaved==="duplicate"?C.goldL:C.redL, marginBottom:6 }}>
+<div style={{ ...cd(9), padding:"9px 12px", background:formSaved==="ok"?C.greenL:formSaved==="duplicate"?C.goldL:C.redL, marginBottom:6 }}>
 <p style={{ margin:0, fontSize:12, fontWeight:700, color:formSaved==="ok"?C.green:formSaved==="duplicate"?C.gold:C.red }}>
 {formSaved==="ok"?`✓ Enregistré dans ${SB_READY?"Supabase":"mémoire locale"}`:formSaved==="duplicate"?"⚠ Doublon — relevé déjà existant":"✗ Erreur d'enregistrement"}
 </p>
@@ -647,11 +647,11 @@ const Dashboard=()=>(
 </div>
 </div>
 </div>
-<div style={{ …cd(11), padding:"10px 13px", background:SB_READY?C.greenL:C.goldL, marginTop:8 }}>
+<div style={{ ...cd(11), padding:"10px 13px", background:SB_READY?C.greenL:C.goldL, marginTop:8 }}>
 <p style={{ margin:"0 0 1px", fontSize:11, fontWeight:700, color:SB_READY?C.green:C.gold }}>{SB_READY?"✓ Données persistées en Supabase":"⚠ Mode local — données non persistées"}</p>
 <p style={{ margin:0, fontSize:10, color:SB_READY?C.green:C.gold }}>{SB_READY?"Session restaurée au refresh.":"Configurer VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY."}</p>
 </div>
-<div style={{ …cd(11), padding:"10px 13px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+<div style={{ ...cd(11), padding:"10px 13px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
 <div><p style={{ margin:0, fontSize:13, fontWeight:500, color:C.text }}>Données exemple</p><p style={{ margin:0, fontSize:10, color:C.textS }}>Désactiver en production</p></div>
 <button onClick={()=>setSE(p=>!p)} style={{ width:44, height:26, borderRadius:13, background:showExamples?C.blue:C.grayM, border:"none", cursor:"pointer", position:"relative" }}>
 <div style={{ position:"absolute", top:3, left:showExamples?21:3, width:20, height:20, borderRadius:"50%", background:C.white, transition:"left 0.15s" }}/>
@@ -660,7 +660,7 @@ const Dashboard=()=>(
 <p style={sml}>Accès rapides</p>
 <div style={cd()}>
 {[{ icon:"✏️", l:"Saisir un relevé", s:"collect", m:"manuelle" },{ icon:"📋", l:"Copier-coller Booking/Airbnb", s:"collect", m:"copier-coller" },{ icon:"📥", l:"Importer un CSV", s:"import" },{ icon:"🔬", l:"Diagnostic système", s:"diag" }].map((item,i,arr)=>(
-<div key={i} style={{ …rw(i===arr.length-1), cursor:"pointer" }} onClick={()=>{ setScreen(item.s); if(item.m) setCM(item.m); }}>
+<div key={i} style={{ ...rw(i===arr.length-1), cursor:"pointer" }} onClick={()=>{ setScreen(item.s); if(item.m) setCM(item.m); }}>
 <div style={{ display:"flex", alignItems:"center", gap:10 }}><span style={{ fontSize:16 }}>{item.icon}</span><span style={{ fontSize:13, fontWeight:500, color:C.text }}>{item.l}</span></div>
 <svg width="7" height="12" viewBox="0 0 7 12" fill="none"><path d="M1 1l5 5-5 5" stroke={C.gray} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
 </div>
@@ -676,7 +676,7 @@ let displayPeriods;
 if (periodMode === "ete_7") {
 displayPeriods = STATIC_WEEKS
 .filter(w => w.year === yr)
-.map(w => ({ …w, season:"ete", stay_nights:7, period_start:w.week_start, period_end:_d(w.week_start,7), subtitle:w.label }));
+.map(w => ({ ...w, season:"ete", stay_nights:7, period_start:w.week_start, period_end:_d(w.week_start,7), subtitle:w.label }));
 } else if (periodMode === "hiver_7") {
 displayPeriods = WINTER_PERIODS.filter(p => p.stay_nights === 7);
 } else {
@@ -703,7 +703,7 @@ return (
 </div>
 )}
 </div>
-<div style={{ …cnt, paddingTop:2 }}>
+<div style={{ ...cnt, paddingTop:2 }}>
 {displayPeriods.length===0&&<p style={{ fontSize:12, color:C.gray, textAlign:"center", padding:20 }}>Aucune période disponible.</p>}
 {Object.entries(grouped).map(([ml, periods])=>(
 <div key={ml}><p style={sml}>{ml}</p>
@@ -713,7 +713,7 @@ const op = !isHiver ? (OUR_TARIFS[cap]?.[p.season_type]||0) : 0;
 const opNight = op ? Math.round(op / (p.stay_nights||7)) : 0;
 const pIs2n = p.stay_nights === 2;
 return (
-<div key={p.id} onClick={()=>{ setSWId(p.id); setTab("detail"); setIaText(null); setScreen("week"); }} style={{ …rw(i===periods.length-1), cursor:"pointer" }}>
+<div key={p.id} onClick={()=>{ setSWId(p.id); setTab("detail"); setIaText(null); setScreen("week"); }} style={{ ...rw(i===periods.length-1), cursor:"pointer" }}>
 <div style={{ flex:1 }}>
 <div style={{ display:"flex", alignItems:"center", gap:5, marginBottom:2, flexWrap:"wrap" }}>
 <div style={{ width:5, height:5, borderRadius:"50%", flexShrink:0, background:CAT_C[p.season_type] }}/>
@@ -759,7 +759,7 @@ const nightsLabel = is2n ? "2 nuits" : "7 nuits";
 const priceLabel  = is2n ? "€/séjour" : "€/sem";
 const pct=reco.ref?Math.round((ourPrice-reco.ref)/reco.ref*100):null;
 const allP=rates.map(r=>Number(r.price_week)).filter(Boolean);
-const allMin=allP.length?Math.min(…allP):0, allMax=allP.length?Math.max(…allP):0;
+const allMin=allP.length?Math.min(...allP):0, allMax=allP.length?Math.max(...allP):0;
 const oPct=allMax>allMin&&ourPrice?Math.min(96,Math.max(4,Math.round((ourPrice-allMin)/(allMax-allMin)*100))):50;
 const mPct=allMax>allMin&&reco.ref?Math.min(96,Math.max(4,Math.round((reco.ref-allMin)/(allMax-allMin)*100))):50;
 const wColor=CAT_C[w?.season_type]||C.blue;
@@ -789,7 +789,7 @@ return (
       ))}
     </div>
     <div style={{ ...cnt, paddingTop:0 }}>
-      {ratesLoading&&<p style={{ textAlign:"center", padding:20, color:C.gray, fontSize:13 }}>Chargement…</p>}
+      {ratesLoading&&<p style={{ textAlign:"center", padding:20, color:C.gray, fontSize:13 }}>Chargement...</p>}
 
       {/* ── TAB RÉSUMÉ ── */}
       {tab==="detail"&&!ratesLoading&&(<>
@@ -898,7 +898,7 @@ return (
             {scrapeMedian&&<span style={{ fontSize:10, color:C.blueL, fontWeight:600 }}>Médiane : {fmt(scrapeMedian)}€/sem</span>}
           </div>
           <button style={{ ...btn(scraping,C.blueL), background:scraping?"#93C5FD":C.blueL }} onClick={scrapeMarket} disabled={scraping}>
-            {scraping?"⏳ Recherche en cours…":`🔍 Booking & Airbnb · ${w?.label}${is2n?" · 2 nuits":""}`}
+            {scraping?"⏳ Recherche en cours...":`🔍 Booking & Airbnb · ${w?.label}${is2n?" · 2 nuits":""}`}
           </button>
           {scrapeError&&<div style={{ ...cd(9), padding:"8px 12px", background:C.redL, marginBottom:6 }}><p style={{ margin:0, fontSize:11, color:C.red }}>{scrapeError}</p></div>}
           {scrapedRates.length>0&&(
@@ -1028,7 +1028,7 @@ return (
                 </div>
 
                 <button onClick={launchPlan} disabled={!planCanLaunch} style={{ ...btn(!planCanLaunch,C.blue), margin:0 }}>
-                  {planLoading?`⏳ Recherche en cours…`:"🚀 Lancer le plan de collecte"}
+                  {planLoading?`⏳ Recherche en cours...`:"🚀 Lancer le plan de collecte"}
                 </button>
 
                 {planError&&<div style={{ ...cd(9), padding:"8px 12px", background:C.redL, marginTop:6, marginBottom:0 }}><p style={{ margin:0, fontSize:11, color:C.red }}>{planError}</p></div>}
@@ -1193,7 +1193,7 @@ return (
           </div>
         </div>
         {iaError&&<div style={{ ...cd(10), padding:"9px 12px", background:C.redL, marginBottom:6 }}><p style={{ margin:0, fontSize:11, color:C.red }}>✗ {iaError}</p></div>}
-        {!iaText&&<button style={btn(iaLoading,C.blue)} onClick={runIA} disabled={iaLoading}>{iaLoading?"Analyse…":"Analyse IA →"}</button>}
+        {!iaText&&<button style={btn(iaLoading,C.blue)} onClick={runIA} disabled={iaLoading}>{iaLoading?"Analyse...":"Analyse IA →"}</button>}
         {iaLoading&&<div style={{ height:3, background:C.grayM, borderRadius:3, overflow:"hidden", marginBottom:8 }}><div style={{ height:"100%", background:C.blue, borderRadius:3, animation:"prog 4s linear forwards" }}/><style>{`@keyframes prog{from{width:0}to{width:100%}}`}</style></div>}
         {iaText&&<div>{[{t:"Positionnement",i:"📊"},{t:"Risques",i:"⚠"},{t:"Recommandation",i:"💡"},{t:"Action",i:"📱"}].map((s,idx)=>iaText[idx]&&<div key={idx} style={{ ...cd(11), padding:"10px 12px" }}><p style={{ margin:"0 0 3px", fontSize:9, fontWeight:700, color:C.gray, textTransform:"uppercase" }}>{s.i} {s.t}</p><p style={{ margin:0, fontSize:12, lineHeight:1.6, color:C.text }}>{iaText[idx]}</p></div>)}<button style={btn(false,C.grayL,C.blue)} onClick={()=>setIaText(null)}>Relancer</button></div>}
       </>)}
@@ -1211,7 +1211,7 @@ if(collectMode==="copier-coller") return (
 <div style={cnt}>
 <button onClick={()=>{ setCM(null); setPasteEdit(null); setPasteRaw(""); }} style={{ background:"none", border:"none", cursor:"pointer", color:C.blue, fontSize:13, padding:"8px 0" }}>← Retour</button>
 {!pasteEdit?(<>
-<div style={{ …cd(11), padding:"10px 13px", background:C.bluePale, marginBottom:8 }}>
+<div style={{ ...cd(11), padding:"10px 13px", background:C.bluePale, marginBottom:8 }}>
 <p style={{ margin:"0 0 2px", fontSize:11, fontWeight:700, color:C.blueL }}>Mode copier-coller</p>
 <p style={{ margin:0, fontSize:10, color:C.blueL, lineHeight:1.5 }}>1. Ouvre Booking/Airbnb<br/>2. Sélectionne tout (Ctrl+A, Ctrl+C)<br/>3. Colle ici → extraction auto<br/>4. Valide avant enregistrement</p>
 </div>
@@ -1224,28 +1224,28 @@ if(collectMode==="copier-coller") return (
 <div><p style={sml}>Concurrent</p><select value={pasteCompId} onChange={e=>setPComp(e.target.value)} style={inp()}>{competitors.map(c=><option key={c.id} value={c.id}>{c.name.slice(0,22)}</option>)}</select></div>
 </div>
 <p style={sml}>Texte collé</p>
-<textarea value={pasteRaw} onChange={e=>setPasteRaw(e.target.value)} placeholder="Colle ici le texte de la page Booking, Airbnb…" style={{ width:"100%", minHeight:110, padding:"9px", fontSize:11, border:`1px solid ${C.grayM}`, borderRadius:10, background:C.grayL, color:C.text, resize:"vertical", boxSizing:"border-box", marginBottom:6 }}/>
+<textarea value={pasteRaw} onChange={e=>setPasteRaw(e.target.value)} placeholder="Colle ici le texte de la page Booking, Airbnb..." style={{ width:"100%", minHeight:110, padding:"9px", fontSize:11, border:`1px solid ${C.grayM}`, borderRadius:10, background:C.grayL, color:C.text, resize:"vertical", boxSizing:"border-box", marginBottom:6 }}/>
 <button style={btn(!pasteRaw.trim(),C.purple)} onClick={handleParse} disabled={!pasteRaw.trim()}>🔍 Analyser le texte →</button>
 </>):(<>
-<div style={{ …cd(11), padding:"10px 13px", background:pasteEdit.warning?C.orangeL:C.greenL, marginBottom:8 }}>
+<div style={{ ...cd(11), padding:"10px 13px", background:pasteEdit.warning?C.orangeL:C.greenL, marginBottom:8 }}>
 <p style={{ margin:"0 0 2px", fontSize:11, fontWeight:700, color:pasteEdit.warning?C.orange:C.green }}>{pasteEdit.warning?`⚠ ${pasteEdit.warning}`:"✓ Extraction réussie — vérifiez si nécessaire"}</p>
 {pasteEdit.allPrices?.length>0&&<p style={{ margin:0, fontSize:10, color:C.textS }}>Détectés : {pasteEdit.allPrices.map(p=>`${p}€`).join(" · ")}</p>}
 </div>
 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:6 }}>
-<div><p style={sml}>Prix / semaine € *</p><input type="number" style={inp()} value={pasteEdit.priceWeek} onChange={e=>setPasteEdit({ …pasteEdit, priceWeek:e.target.value, priceNight:Math.round(parseFloat(e.target.value||0)/7) })}/></div>
-<div><p style={sml}>Prix / nuit €</p><input type="number" style={inp()} value={pasteEdit.priceNight} onChange={e=>setPasteEdit({ …pasteEdit, priceNight:e.target.value })}/></div>
+<div><p style={sml}>Prix / semaine € *</p><input type="number" style={inp()} value={pasteEdit.priceWeek} onChange={e=>setPasteEdit({ ...pasteEdit, priceWeek:e.target.value, priceNight:Math.round(parseFloat(e.target.value||0)/7) })}/></div>
+<div><p style={sml}>Prix / nuit €</p><input type="number" style={inp()} value={pasteEdit.priceNight} onChange={e=>setPasteEdit({ ...pasteEdit, priceNight:e.target.value })}/></div>
 </div>
 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:6 }}>
-<div><p style={sml}>Prix barré €</p><input type="number" style={inp()} value={pasteEdit.originalPrice} onChange={e=>setPasteEdit({ …pasteEdit, originalPrice:e.target.value })}/></div>
-<div><p style={sml}>Frais ménage €</p><input type="number" style={inp()} value={pasteEdit.cleaningFee} onChange={e=>setPasteEdit({ …pasteEdit, cleaningFee:e.target.value })}/></div>
+<div><p style={sml}>Prix barré €</p><input type="number" style={inp()} value={pasteEdit.originalPrice} onChange={e=>setPasteEdit({ ...pasteEdit, originalPrice:e.target.value })}/></div>
+<div><p style={sml}>Frais ménage €</p><input type="number" style={inp()} value={pasteEdit.cleaningFee} onChange={e=>setPasteEdit({ ...pasteEdit, cleaningFee:e.target.value })}/></div>
 </div>
 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:6 }}>
-<div><p style={sml}>Promotion</p><select value={pasteEdit.promoLabel} onChange={e=>setPasteEdit({ …pasteEdit, promoLabel:e.target.value })} style={inp()}><option value="">Aucune</option>{["Genius -10%","Last minute","Early booking","PDJ inclus","Annulation gratuite","-5%","-8%","-10%","-15%","-19%","-20%"].map(p=><option key={p} value={p}>{p}</option>)}</select></div>
-<div><p style={sml}>Note (/10)</p><input type="number" step="0.1" min="0" max="10" style={inp()} value={pasteEdit.rating} onChange={e=>setPasteEdit({ …pasteEdit, rating:e.target.value })}/></div>
+<div><p style={sml}>Promotion</p><select value={pasteEdit.promoLabel} onChange={e=>setPasteEdit({ ...pasteEdit, promoLabel:e.target.value })} style={inp()}><option value="">Aucune</option>{["Genius -10%","Last minute","Early booking","PDJ inclus","Annulation gratuite","-5%","-8%","-10%","-15%","-19%","-20%"].map(p=><option key={p} value={p}>{p}</option>)}</select></div>
+<div><p style={sml}>Note (/10)</p><input type="number" step="0.1" min="0" max="10" style={inp()} value={pasteEdit.rating} onChange={e=>setPasteEdit({ ...pasteEdit, rating:e.target.value })}/></div>
 </div>
 <SaveFeedback/>
-<button style={btn(pasteSaving||!pasteEdit.priceWeek,C.blue)} onClick={handleSavePaste} disabled={pasteSaving||!pasteEdit.priceWeek}>{pasteSaving?"Enregistrement…":"Valider et enregistrer ✓"}</button>
-<button style={{ …btn(false,C.grayL,C.textS), marginTop:-2 }} onClick={()=>setPasteEdit(null)}>← Recommencer</button>
+<button style={btn(pasteSaving||!pasteEdit.priceWeek,C.blue)} onClick={handleSavePaste} disabled={pasteSaving||!pasteEdit.priceWeek}>{pasteSaving?"Enregistrement...":"Valider et enregistrer ✓"}</button>
+<button style={{ ...btn(false,C.grayL,C.textS), marginTop:-2 }} onClick={()=>setPasteEdit(null)}>← Recommencer</button>
 </>)}
 </div><BNav/>
 </div>
@@ -1255,36 +1255,36 @@ return (
 <div style={cnt}>
 <SaveFeedback/>
 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:10 }}>
-<div style={{ …cd(12,0), padding:"11px 13px", cursor:"pointer", border:`1.5px solid ${collectMode==="manuelle"?C.blue:C.grayM}` }} onClick={()=>setCM("manuelle")}>
+<div style={{ ...cd(12,0), padding:"11px 13px", cursor:"pointer", border:`1.5px solid ${collectMode==="manuelle"?C.blue:C.grayM}` }} onClick={()=>setCM("manuelle")}>
 <p style={{ margin:"0 0 2px", fontSize:18 }}>✏️</p>
 <p style={{ margin:"0 0 1px", fontSize:13, fontWeight:600, color:C.text }}>Saisie manuelle</p>
 <p style={{ margin:0, fontSize:10, color:C.textS }}>Formulaire complet</p>
 </div>
-<div style={{ …cd(12,0), padding:"11px 13px", cursor:"pointer", border:`1.5px solid ${C.purple}` }} onClick={()=>setCM("copier-coller")}>
+<div style={{ ...cd(12,0), padding:"11px 13px", cursor:"pointer", border:`1.5px solid ${C.purple}` }} onClick={()=>setCM("copier-coller")}>
 <p style={{ margin:"0 0 2px", fontSize:18 }}>📋</p>
 <p style={{ margin:"0 0 1px", fontSize:13, fontWeight:600, color:C.text }}>Copier-coller</p>
 <p style={{ margin:0, fontSize:10, color:C.textS }}>Booking / Airbnb</p>
 </div>
 </div>
 <p style={sml}>Semaine</p>
-<select value={form.weekId} onChange={e=>setForm({ …form, weekId:e.target.value })} style={{ …inp(), marginBottom:6 }}>{STATIC_WEEKS.map(w=><option key={w.id} value={w.id}>{w.label} {w.year}</option>)}</select>
+<select value={form.weekId} onChange={e=>setForm({ ...form, weekId:e.target.value })} style={{ ...inp(), marginBottom:6 }}>{STATIC_WEEKS.map(w=><option key={w.id} value={w.id}>{w.label} {w.year}</option>)}</select>
 <p style={sml}>Concurrent *</p>
-<select value={form.competitorId} onChange={e=>{ const c=competitors.find(x=>x.id===e.target.value); setForm({ …form, competitorId:e.target.value, source:c?.source||"", type:c?.property_type||"résidence" }); }} style={{ …inp(), marginBottom:6 }}>{competitors.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select>
+<select value={form.competitorId} onChange={e=>{ const c=competitors.find(x=>x.id===e.target.value); setForm({ ...form, competitorId:e.target.value, source:c?.source||"", type:c?.property_type||"résidence" }); }} style={{ ...inp(), marginBottom:6 }}>{competitors.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select>
 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:6 }}>
-<div><p style={sml}>Source</p><input style={inp()} placeholder="Booking…" value={form.source} onChange={e=>setForm({ …form, source:e.target.value })}/></div>
-<div><p style={sml}>Capacité</p><select value={form.capacity} onChange={e=>setForm({ …form, capacity:parseInt(e.target.value) })} style={inp()}>{[2,4,6,8].map(n=><option key={n} value={n}>{n} pers.</option>)}</select></div>
+<div><p style={sml}>Source</p><input style={inp()} placeholder="Booking..." value={form.source} onChange={e=>setForm({ ...form, source:e.target.value })}/></div>
+<div><p style={sml}>Capacité</p><select value={form.capacity} onChange={e=>setForm({ ...form, capacity:parseInt(e.target.value) })} style={inp()}>{[2,4,6,8].map(n=><option key={n} value={n}>{n} pers.</option>)}</select></div>
 </div>
 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:6 }}>
-<div><p style={sml}>Prix / semaine € *</p><input type="number" style={inp()} placeholder="650" value={form.priceWeek} onChange={e=>setForm({ …form, priceWeek:e.target.value, priceNight:e.target.value?Math.round(parseFloat(e.target.value)/7):"" })}/></div>
-<div><p style={sml}>Prix barré €</p><input type="number" style={inp()} placeholder="Optionnel" value={form.originalPrice} onChange={e=>setForm({ …form, originalPrice:e.target.value })}/></div>
+<div><p style={sml}>Prix / semaine € *</p><input type="number" style={inp()} placeholder="650" value={form.priceWeek} onChange={e=>setForm({ ...form, priceWeek:e.target.value, priceNight:e.target.value?Math.round(parseFloat(e.target.value)/7):"" })}/></div>
+<div><p style={sml}>Prix barré €</p><input type="number" style={inp()} placeholder="Optionnel" value={form.originalPrice} onChange={e=>setForm({ ...form, originalPrice:e.target.value })}/></div>
 </div>
 <p style={sml}>Promotion</p>
-<select value={form.promoLabel} onChange={e=>setForm({ …form, promoLabel:e.target.value })} style={{ …inp(), marginBottom:6 }}><option value="">Aucune</option>{["Genius -10%","Remise 7 nuits -5%","Last minute","Early booking","PDJ inclus","Annulation gratuite","Promo -19%","-10%","-15%","-20%"].map(p=><option key={p} value={p}>{p}</option>)}</select>
+<select value={form.promoLabel} onChange={e=>setForm({ ...form, promoLabel:e.target.value })} style={{ ...inp(), marginBottom:6 }}><option value="">Aucune</option>{["Genius -10%","Remise 7 nuits -5%","Last minute","Early booking","PDJ inclus","Annulation gratuite","Promo -19%","-10%","-15%","-20%"].map(p=><option key={p} value={p}>{p}</option>)}</select>
 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:6 }}>
-<div><p style={sml}>Frais ménage €</p><input type="number" style={inp()} placeholder="0" value={form.cleaningFee} onChange={e=>setForm({ …form, cleaningFee:e.target.value })}/></div>
-<div><p style={sml}>Date relevé *</p><input type="date" style={inp()} value={form.collectedAt} onChange={e=>setForm({ …form, collectedAt:e.target.value })}/></div>
+<div><p style={sml}>Frais ménage €</p><input type="number" style={inp()} placeholder="0" value={form.cleaningFee} onChange={e=>setForm({ ...form, cleaningFee:e.target.value })}/></div>
+<div><p style={sml}>Date relevé *</p><input type="date" style={inp()} value={form.collectedAt} onChange={e=>setForm({ ...form, collectedAt:e.target.value })}/></div>
 </div>
-<div><p style={sml}>URL annonce</p><input style={{ …inp(), marginBottom:6 }} placeholder="https://…" value={form.url} onChange={e=>setForm({ …form, url:e.target.value })}/></div>
+<div><p style={sml}>URL annonce</p><input style={{ ...inp(), marginBottom:6 }} placeholder="https://..." value={form.url} onChange={e=>setForm({ ...form, url:e.target.value })}/></div>
 <button style={btn(!form.priceWeek)} onClick={handleSaveForm} disabled={!form.priceWeek}>Enregistrer ✓</button>
 <p style={{ fontSize:9, color:C.gray, textAlign:"center" }}>Les anciens relevés ne sont jamais écrasés</p>
 </div><BNav/>
@@ -1295,12 +1295,12 @@ return (
 const ImportScreen=()=>(
 <div><SBar title="Import CSV"/>
 <div style={cnt}>
-<div style={{ …cd(11), padding:"10px 13px", background:C.bluePale, marginBottom:8 }}>
+<div style={{ ...cd(11), padding:"10px 13px", background:C.bluePale, marginBottom:8 }}>
 <p style={{ margin:"0 0 2px", fontSize:11, fontWeight:700, color:C.blueL }}>Colonnes CSV (séparateur ; ou ,)</p>
 <p style={{ margin:0, fontSize:9, color:C.blueL, fontFamily:"monospace", lineHeight:1.6 }}>week_start · source · property_name · property_type · capacity · price_week · price_night · original_price · promo_label · cleaning_fee · url · collected_at</p>
 </div>
 {csvResult&&(
-<div style={{ …cd(10), padding:"10px 12px", background:csvResult.errors.length===0?C.greenL:C.goldL, marginBottom:8 }}>
+<div style={{ ...cd(10), padding:"10px 12px", background:csvResult.errors.length===0?C.greenL:C.goldL, marginBottom:8 }}>
 <p style={{ margin:"0 0 3px", fontSize:12, fontWeight:700, color:csvResult.errors.length===0?C.green:C.gold }}>Résultat de l'import</p>
 <p style={{ margin:"0 0 1px", fontSize:11, color:C.green }}>✓ Importées : {csvResult.ok}</p>
 <p style={{ margin:"0 0 1px", fontSize:11, color:C.gold }}>⊘ Doublons : {csvResult.dup}</p>
@@ -1312,10 +1312,10 @@ const ImportScreen=()=>(
 <textarea value={csvText} onChange={e=>setCsvText(e.target.value)} placeholder={"week_start;source;property_name;property_type;capacity;price_week\n2026-08-01;Airbnb;Appt 6p La Foux;particulier;6;680"} style={{ width:"100%", minHeight:100, padding:"8px", fontSize:10, fontFamily:"monospace", border:`1px solid ${C.grayM}`, borderRadius:9, background:C.grayL, color:C.text, resize:"vertical", boxSizing:"border-box", marginBottom:6 }}/>
 <input ref={fileRef} type="file" accept=".csv,.txt" onChange={e=>{ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=ev=>setCsvText(ev.target.result); r.readAsText(f,"UTF-8"); }} style={{ display:"none" }}/>
 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:6 }}>
-<button onClick={()=>fileRef.current?.click()} style={{ …btn(false,C.grayL,C.text), margin:0 }}>📂 Fichier .CSV</button>
-<button onClick={()=>{ const template=["week_start;source;competitor_id;property_name;property_type;capacity;price_week;price_night;original_price;promo_label;promo_percent;cleaning_fee;url;collected_at;reliability_status","2026-08-01;Booking;cv;Les Chalets du Verdon;résidence;6;620;89;680;Genius -10%;10;0;https://booking.com;"+new Date().toISOString().slice(0,10)+";réel"].join("\n"); const b=new Blob([template],{ type:"text/csv;charset=utf-8" }); const u=URL.createObjectURL(b); const a=document.createElement("a"); a.href=u; a.download="template_benchmark_v2.csv"; a.click(); }} style={{ …btn(false,C.grayL,C.blueL), margin:0, border:`1px solid ${C.blueL}` }}>⬇ Modèle CSV</button>
+<button onClick={()=>fileRef.current?.click()} style={{ ...btn(false,C.grayL,C.text), margin:0 }}>📂 Fichier .CSV</button>
+<button onClick={()=>{ const template=["week_start;source;competitor_id;property_name;property_type;capacity;price_week;price_night;original_price;promo_label;promo_percent;cleaning_fee;url;collected_at;reliability_status","2026-08-01;Booking;cv;Les Chalets du Verdon;résidence;6;620;89;680;Genius -10%;10;0;https://booking.com;"+new Date().toISOString().slice(0,10)+";réel"].join("\n"); const b=new Blob([template],{ type:"text/csv;charset=utf-8" }); const u=URL.createObjectURL(b); const a=document.createElement("a"); a.href=u; a.download="template_benchmark_v2.csv"; a.click(); }} style={{ ...btn(false,C.grayL,C.blueL), margin:0, border:`1px solid ${C.blueL}` }}>⬇ Modèle CSV</button>
 </div>
-<button style={btn(csvLoading||!csvText.trim())} onClick={handleImportCsv} disabled={csvLoading||!csvText.trim()}>{csvLoading?"Import en cours…":"Importer →"}</button>
+<button style={btn(csvLoading||!csvText.trim())} onClick={handleImportCsv} disabled={csvLoading||!csvText.trim()}>{csvLoading?"Import en cours...":"Importer →"}</button>
 {imports.length>0&&(<><p style={sml}>Imports précédents</p><div style={cd()}>{imports.slice(0,3).map((im,i)=><div key={im.id||i} style={rw(i===Math.min(imports.length,3)-1)}><div><p style={{ margin:0, fontSize:12, fontWeight:500, color:C.text }}>{im.import_source}</p><p style={{ margin:0, fontSize:10, color:C.gray }}>{im.imported_at?.slice(0,10)} · {im.rows_imported} lignes</p></div><Badge label={im.status?.toUpperCase()||"OK"} color={im.status==="ok"?C.green:C.orange} bg={im.status==="ok"?C.greenL:C.orangeL}/></div>)}</div></>)}
 </div><BNav/>
 </div>
@@ -1351,7 +1351,7 @@ return (
 <div key={r.l} style={rw(i===arr.length-1)}><span style={{ fontSize:11, color:C.text }}>{r.l}</span><span style={{ fontSize:11, fontWeight:600, color:r.c }}>{r.v}</span></div>
 ))}
 </div>
-{lastImport&&(<><p style={sml}>Dernier import</p><div style={{ …cd(11), padding:"10px 13px" }}><p style={{ margin:"0 0 2px", fontSize:12, fontWeight:500, color:C.text }}>{lastImport.import_source} · {lastImport.imported_at?.slice(0,10)}</p><div style={{ display:"flex", gap:8 }}><Badge label={`✓ ${lastImport.rows_imported}`} color={C.green} bg={C.greenL}/><Badge label={`⊘ ${lastImport.rows_duplicate||0}`} color={C.gold} bg={C.goldL}/></div></div></>)}
+{lastImport&&(<><p style={sml}>Dernier import</p><div style={{ ...cd(11), padding:"10px 13px" }}><p style={{ margin:"0 0 2px", fontSize:12, fontWeight:500, color:C.text }}>{lastImport.import_source} · {lastImport.imported_at?.slice(0,10)}</p><div style={{ display:"flex", gap:8 }}><Badge label={`✓ ${lastImport.rows_imported}`} color={C.green} bg={C.greenL}/><Badge label={`⊘ ${lastImport.rows_duplicate||0}`} color={C.gold} bg={C.goldL}/></div></div></>)}
 {sbErrors.length>0&&(<><p style={sml}>Erreurs Supabase</p><div style={cd()}>{sbErrors.slice(-3).reverse().map((e,i,arr)=><div key={i} style={rw(i===arr.length-1)}><div><p style={{ margin:0, fontSize:11, color:C.red }}>{e.path}</p><p style={{ margin:0, fontSize:10, color:C.textS }}>{e.ts?.slice(11,19)} — {e.msg?.slice(0,60)}</p></div></div>)}</div></>)}
 <p style={sml}>Checklist production</p>
 <div style={cd()}>
