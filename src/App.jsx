@@ -1940,16 +1940,28 @@ export default function App() {
   };
 
   return (
-    <div style={{ padding:"20px 0 40px", display:"flex", justifyContent:"center" }}>
-      <div style={ph}>
-        {!user&&<LoginScreen loginErr={loginErr} SB_READY={SB_READY} loginEmail={loginEmail} setLE={setLE} loginPwd={loginPwd} setLP={setLP} loginLoading={loginLoading} handleLogin={handleLogin}/>}
-        {user&&screen==="dashboard"&&<Dashboard/>}
-        {user&&screen==="weeks"    &&<Weeks/>}
-        {user&&screen==="week"     &&<WeekDetail/>}
-        {user&&screen==="collect"  &&<Collect/>}
-        {user&&screen==="import"   &&<ImportScreen/>}
-        {user&&screen==="diag"     &&<Diagnostic/>}
-      </div>
+  <div style={{ padding:"20px 0 40px", display:"flex", justifyContent:"center" }}>
+    <div style={ph}>
+      {!user && (
+        <LoginScreen
+          loginErr={loginErr}
+          SB_READY={SB_READY}
+          loginEmail={loginEmail}
+          setLE={setLE}
+          loginPwd={loginPwd}
+          setLP={setLP}
+          loginLoading={loginLoading}
+          handleLogin={handleLogin}
+        />
+      )}
+
+      {user && screen === "dashboard" && Dashboard()}
+      {user && screen === "weeks" && Weeks()}
+      {user && screen === "week" && WeekDetail()}
+      {user && screen === "collect" && Collect()}
+      {user && screen === "import" && ImportScreen()}
+      {user && screen === "diag" && Diagnostic()}
     </div>
-  );
+  </div>
+);
 }
