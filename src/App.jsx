@@ -327,6 +327,118 @@ async function saveImportLog(log) {
   ls.push("imports",{ ...log, id:"imp_"+Date.now() });
 }
 
+// ══ TARIFS LES CIMES (our_rates) ════════════════════════════════
+const OUR_RATES_LS = "our_rates";
+
+async function getOurRates() {
+  if (SB_READY) {
+    try { return await sb.select("our_rates", "is_active=eq.true&order=updated_at.desc&select=*"); }
+    catch { return []; }
+  }
+  return ls.get(OUR_RATES_LS);
+}
+
+async function getOurRate(periodId, capacity, stayNights=7) {
+  const all = await getOurRates();
+  return (all||[]).find(r =>
+    r.period_id===periodId &&
+    Number(r.capacity)===Number(capacity) &&
+    Number(r.stay_nights||7)===Number(stayNights) &&
+    r.is_active!==false
+  ) || null;
+}
+
+async function saveOurRate(rate) {
+  const stayNights = Number(rate.stay_nights || 7);
+  const priceTotal = Number(rate.price_total || 0);
+  if (!priceTotal) throw new Error("Prix total manquant.");
+  if (!rate.period_id || !rate.capacity) throw new Error("Période et capacité requises.");
+  const priceNight = rate.price_night ? Number(rate.price_night) : Math.round(priceTotal / stayNights);
+  const payload = {
+    period_id:    rate.period_id,
+    period_label: rate.period_label || null,
+    period_start: rate.period_start || null,
+    period_end:   rate.period_end || null,
+    season:       rate.season || "ete",
+    stay_nights:  stayNights,
+    capacity:     Number(rate.capacity),
+    price_total:  priceTotal,
+    price_night:  priceNight,
+    source:       rate.source || "saisie",
+    notes:        rate.notes || null,
+    is_active:    true,
+  };
+
+  if (SB_READY) {
+    const filter = [
+      `period_id=eq.${encodeURIComponent(payload.period_id)}`,
+      `capacity=eq.${encodeURIComponent(payload.capacity)}`,
+      `stay_nights=eq.${encodeURIComponent(payload.stay_nights)}`,
+      `select=id`,
+    ].join("&");
+    const existing = await sb.select("our_rates", filter);
+    if (existing?.length) {
+      return await sb.update("our_rates", `id=eq.${existing[0].id}`, payload);
+    }
+    return await sb.insert("our_rates", payload);
+  }
+
+  // localStorage : upsert par period_id + capacity + stay_nights
+  const all = ls.get(OUR_RATES_LS);
+  const idx = all.findIndex(r => r.period_id===payload.period_id && Number(r.capacity)===payload.capacity && Number(r.stay_nights||7)===payload.stay_nights);
+  if (idx>=0) { all[idx] = { ...all[idx], ...payload, updated_at:new Date().toISOString() }; }
+  else { all.push({ ...payload, id:"or_"+Date.now(), created_at:new Date().toISOString(), updated_at:new Date().toISOString() }); }
+  ls.set(OUR_RATES_LS, all);
+  return all;
+}
+
+async function deleteOurRate(id) {
+  if (SB_READY) return sb.delete("our_rates", `id=eq.${id}`);
+  ls.set(OUR_RATES_LS, ls.get(OUR_RATES_LS).filter(r=>r.id!==id));
+  return true;
+}
+
+async function importOurRatesCsv(csvText, allPeriods) {
+  const lines = csvText.trim().split("\n").filter(l=>l.trim());
+  if (lines.length<2) return { ok:0, updated:0, skipped:0, errors:["Fichier vide"] };
+  const sep = lines[0].includes(";") ? ";" : ",";
+  const headers = lines[0].split(sep).map(h=>h.trim().toLowerCase().replace(/[^a-z_]/g,""));
+  let ok=0, updated=0, skipped=0; const errors=[];
+
+  for (const line of lines.slice(1)) {
+    const vals = line.split(sep).map(v=>v.trim().replace(/^"|"$/g,""));
+    const o={}; headers.forEach((h,i)=>o[h]=vals[i]||"");
+    // Retrouver la période : par period_id, sinon par period_start
+    let period = allPeriods.find(p=>p.id===o.period_id);
+    if (!period && o.period_start) period = allPeriods.find(p=>(p.period_start||p.week_start)===o.period_start);
+    const periodId = o.period_id || period?.id;
+    const capacity = parseInt(o.capacity)||0;
+    const priceTotal = parseFloat(o.price_total)||0;
+    if (!periodId || !capacity || !priceTotal) { skipped++; continue; }
+    const stayNights = parseInt(o.stay_nights)||period?.stay_nights||7;
+    const periodStart = o.period_start || period?.period_start || period?.week_start || null;
+    const periodEnd = o.period_end || period?.period_end || (periodStart?addDaysStr(periodStart,stayNights):null);
+    try {
+      // détecter update vs insert pour le compteur
+      const existing = await getOurRate(periodId, capacity, stayNights);
+      await saveOurRate({
+        period_id:    periodId,
+        period_label: o.period_label || period?.label || null,
+        period_start: periodStart,
+        period_end:   periodEnd,
+        season:       o.season || period?.season || "ete",
+        stay_nights:  stayNights,
+        capacity,
+        price_total:  priceTotal,
+        notes:        o.notes || null,
+        source:       "import CSV",
+      });
+      if (existing) updated++; else ok++;
+    } catch(e) { errors.push(e.message); }
+  }
+  return { ok, updated, skipped, errors:errors.slice(0,4) };
+}
+
 function median(arr) {
   if (!arr.length) return null;
   const sorted=[...arr].sort((a,b)=>a-b); const mid=Math.floor(sorted.length/2);
@@ -476,6 +588,15 @@ export default function App() {
   // ── Mode vue Périodes ─────────────────────────────────────────
   const [periodMode, setPeriodMode]       = useState("ete_7");
 
+  // ── Tarifs Les Cimes (our_rates) ──────────────────────────────
+  const [ourRates, setOurRates]           = useState([]);
+  const [ourForm, setOurForm]             = useState({ priceTotal:"", notes:"" });
+  const [ourSaving, setOurSaving]         = useState(false);
+  const [ourSaved, setOurSaved]           = useState(null);
+  const [ourCsvText, setOurCsvText]       = useState("");
+  const [ourCsvResult, setOurCsvResult]   = useState(null);
+  const [ourCsvLoading, setOurCsvLoading] = useState(false);
+
   const emptyForm = { weekId:"2026_w7", competitorId:"cv", source:"", type:"résidence", capacity:6, priceWeek:"", priceNight:"", originalPrice:"", promoLabel:"", promoPercent:"", cleaningFee:"", url:"", collectedAt:new Date().toISOString().slice(0,10), notes:"" };
   const [form, setForm]               = useState(emptyForm);
   const [pasteSrc, setPasteSrc]       = useState("Booking");
@@ -490,8 +611,16 @@ export default function App() {
   const selWeek  = ALL_PERIODS.find(p=>p.id===selWeekId) || ALL_PERIODS[0];
   const capNum   = parseInt(cap);
   const _nights  = selWeek?.stay_nights || 7;
-  const ourPrice = OUR_TARIFS[cap]?.[selWeek?.season_type] || 0;
+  const currentOurRate = ourRates.find(r =>
+    r.period_id === selWeekId &&
+    Number(r.capacity) === capNum &&
+    Number(r.stay_nights || 7) === Number(_nights) &&
+    r.is_active !== false
+  );
+  const fallbackOurPrice = OUR_TARIFS[cap]?.[selWeek?.season_type] || 0;
+  const ourPrice = currentOurRate?.price_total ? Number(currentOurRate.price_total) : fallbackOurPrice;
   const ourNight = ourPrice ? Math.round(ourPrice / _nights) : 0;
+  const ourRateSource = currentOurRate ? "Supabase" : "Grille interne fallback";
   const reco     = calcReco(ourPrice,rates,settings);
 
   // ── Auth ──────────────────────────────────────────────────────
@@ -518,6 +647,45 @@ export default function App() {
 
   useEffect(()=>{ if(user) loadRates(); },[loadRates,user]);
   useEffect(()=>{ if(user) getImports().then(setImports).catch(()=>{}); },[user]);
+  useEffect(()=>{ if(user) getOurRates().then(setOurRates).catch(()=>{}); },[user]);
+
+  async function reloadOurRates() { try { const d=await getOurRates(); setOurRates(d||[]); } catch {} }
+
+  // ── Enregistrer un tarif Les Cimes ────────────────────────────
+  async function handleSaveOurRate() {
+    const priceTotal = parseFloat(ourForm.priceTotal)||0;
+    if (!priceTotal) return;
+    setOurSaving(true); setOurSaved(null);
+    const periodStart = selWeek?.period_start || selWeek?.week_start;
+    try {
+      await saveOurRate({
+        period_id:    selWeekId,
+        period_label: selWeek?.label || selWeek?.subtitle || null,
+        period_start: periodStart,
+        period_end:   selWeek?.period_end || (periodStart?addDaysStr(periodStart, _nights):null),
+        season:       selWeek?.season || "ete",
+        stay_nights:  _nights,
+        capacity:     capNum,
+        price_total:  priceTotal,
+        notes:        ourForm.notes || null,
+        source:       "saisie",
+      });
+      await reloadOurRates();
+      setOurSaved("ok"); setOurForm({ priceTotal:"", notes:"" });
+    } catch(e) { setOurSaved("err:"+e.message); }
+    setOurSaving(false);
+    setTimeout(()=>setOurSaved(null),3000);
+  }
+
+  async function handleImportOurCsv() {
+    if(!ourCsvText.trim()) return; setOurCsvLoading(true);
+    try {
+      const r = await importOurRatesCsv(ourCsvText, ALL_PERIODS);
+      setOurCsvResult(r);
+      await reloadOurRates();
+    } catch(e) { setOurCsvResult({ ok:0, updated:0, skipped:0, errors:[e.message] }); }
+    setOurCsvLoading(false);
+  }
 
   // ── Plan de collecte : auto-sélection de la période courante ──
   useEffect(()=>{
@@ -682,10 +850,10 @@ export default function App() {
     const allP = currentP ? [currentP, ...staticP.filter(p=>p.id!==currentP.id)] : staticP;
     const selected = allP.filter(p=>planPeriods.includes(p.id));
     const combos = selected.length * planCaps.length;
-    if(!selected.length||!planCaps.length||!planPlatforms.length||combos>2) return;
+    if(!selected.length||!planCaps.length||!planPlatforms.length||combos>1) return;
     setPlanLoading(true); setPlanError(""); setPlanResults(null); setPlanSaved({});
     try {
-      const res=await fetch("/api/scrape-market-batch",{ method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ season:planSeason, stayNights:planNights, weeks:selected.map(p=>({ id:p.id, label:p.label, week_start:p.period_start||p.week_start })), capacities:planCaps, propertyTypes:planTypes, platforms:planPlatforms, maxListingsPerSearch:6, forceRefresh:planForceRefresh }) });
+      const res=await fetch("/api/scrape-market-batch",{ method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ season:planSeason, stayNights:planNights, weeks:selected.map(p=>({ id:p.id, label:p.label, week_start:p.period_start||p.week_start })), capacities:planCaps, propertyTypes:planTypes, platforms:planPlatforms, maxListingsPerSearch:5, forceRefresh:planForceRefresh }) });
       const data=await res.json();
       if(!res.ok||data.error) throw new Error(data.error||`HTTP ${res.status}`);
       setPlanResults(data.results||[]);
@@ -866,8 +1034,12 @@ export default function App() {
             <div key={ml}><p style={sml}>{ml}</p>
               <div style={cd()}>
                 {periods.map((p,i)=>{
-                  const op = !isHiver ? (OUR_TARIFS[cap]?.[p.season_type]||0) : 0;
-                  const opNight = op ? Math.round(op / (p.stay_nights||7)) : 0;
+                  const pNights = p.stay_nights||7;
+                  const sbRate = ourRates.find(r=>r.period_id===p.id && Number(r.capacity)===capNum && Number(r.stay_nights||7)===pNights && r.is_active!==false);
+                  const fbPrice = !isHiver ? (OUR_TARIFS[cap]?.[p.season_type]||0) : 0;
+                  const op = sbRate?.price_total ? Number(sbRate.price_total) : fbPrice;
+                  const opNight = op ? Math.round(op / pNights) : 0;
+                  const isSb = !!sbRate;
                   const pIs2n = p.stay_nights === 2;
                   return (
                     <div key={p.id} onClick={()=>{ setSWId(p.id); setTab("detail"); setIaText(null); setScreen("week"); }} style={{ ...rw(i===periods.length-1), cursor:"pointer" }}>
@@ -887,9 +1059,9 @@ export default function App() {
                       <div style={{ textAlign:"right", flexShrink:0 }}>
                         {op>0 ? (
                           <>
-                            <p style={{ margin:0, fontSize:12, fontWeight:600, color:C.blue }}>{fmt(opNight)}€/n</p>
-                            <p style={{ margin:0, fontSize:9, color:C.gray }}>{fmt(op)}€/séjour</p>
-                            <p style={{ margin:0, fontSize:8, color:C.gray }}>{p.stay_nights||7} nuits</p>
+                            <p style={{ margin:0, fontSize:12, fontWeight:600, color:C.blue }}>{fmt(op)}€/séjour</p>
+                            <p style={{ margin:0, fontSize:9, color:C.gray }}>{fmt(opNight)}€/nuit</p>
+                            <span style={{ fontSize:8, fontWeight:700, padding:"1px 4px", borderRadius:3, background:isSb?C.greenL:C.grayL, color:isSb?C.green:C.gray }}>{isSb?"saisi":"fallback"}</span>
                           </>
                         ) : (
                           <>
@@ -1024,8 +1196,15 @@ export default function App() {
             </div>
             <div style={cd()}>
               <div style={{ ...rw(false), background:C.bluePale }}>
-                <div><div style={{ display:"flex", alignItems:"center", gap:5 }}><span style={{ fontSize:11, fontWeight:700, color:C.blue }}>Les Cimes (nous)</span><ReliaBadge status="réel"/></div><p style={{ margin:0, fontSize:9, color:C.blueL }}>{OUR_TARIFS_META.source} · {OUR_TARIFS_META.verified_at}</p></div>
-                <div style={{ textAlign:"right" }}><p style={{ margin:0, fontSize:12, fontWeight:700, color:C.blue }}>{fmt(ourNight)}€/n</p><p style={{ margin:0, fontSize:9, color:C.blueL }}>{fmt(ourPrice)}€/sem</p></div>
+                <div><div style={{ display:"flex", alignItems:"center", gap:5 }}><span style={{ fontSize:11, fontWeight:700, color:C.blue }}>Les Cimes (nous)</span><ReliaBadge status="réel"/></div><p style={{ margin:0, fontSize:9, color:C.blueL }}>{currentOurRate?`Tarif saisi · Supabase`:`Grille interne fallback · ${OUR_TARIFS_META.verified_at}`}</p></div>
+                <div style={{ textAlign:"right" }}>
+                  {ourPrice>0?(<>
+                    <p style={{ margin:0, fontSize:12, fontWeight:700, color:C.blue }}>{fmt(ourPrice)}€/séjour</p>
+                    <p style={{ margin:0, fontSize:9, color:C.blueL }}>{fmt(ourNight)}€/nuit · {_nights} nuits</p>
+                  </>):(
+                    <p style={{ margin:0, fontSize:11, color:C.gray, fontStyle:"italic" }}>Tarif à saisir</p>
+                  )}
+                </div>
               </div>
               {rates.map((r,i)=>{ const diff=ourPrice?ourPrice-Number(r.price_week):null; const age=daysSince(r.collected_at);
                 return deleteConfirm===r.id?(
@@ -1092,6 +1271,32 @@ export default function App() {
             </div>
 
             {/* ── SCRAPING SIMPLE : retiré de l'UI, le Plan de collecte est la seule méthode ── */}
+
+            {/* ══ TARIF LES CIMES ═══════════════════════════════════ */}
+            <div style={{ ...cd(11), padding:"11px 13px", background:C.bluePale, marginTop:8 }}>
+              <p style={{ margin:"0 0 6px", fontSize:11, fontWeight:700, color:C.blue }}>💰 Tarif Les Cimes {currentOurRate&&<span style={{ fontSize:8, background:C.greenL, color:C.green, padding:"1px 5px", borderRadius:4, marginLeft:4 }}>existant · maj</span>}</p>
+              <div style={{ display:"flex", gap:6, marginBottom:6, flexWrap:"wrap" }}>
+                <span style={{ fontSize:9, background:C.white, color:C.blueL, padding:"3px 7px", borderRadius:6, fontWeight:600 }}>{selWeek?.label}</span>
+                <span style={{ fontSize:9, background:C.white, color:C.blueL, padding:"3px 7px", borderRadius:6, fontWeight:600 }}>{cap}</span>
+                <span style={{ fontSize:9, background:C.white, color:C.blueL, padding:"3px 7px", borderRadius:6, fontWeight:600 }}>{_nights} nuits</span>
+                <span style={{ fontSize:9, background:C.white, color:C.gray, padding:"3px 7px", borderRadius:6 }}>{ourRateSource}</span>
+              </div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:6 }}>
+                <div>
+                  <p style={{ ...sml, margin:"0 0 4px" }}>Prix total séjour € *</p>
+                  <input type="number" style={inp()} placeholder={currentOurRate?String(currentOurRate.price_total):String(fallbackOurPrice||"")} value={ourForm.priceTotal} onChange={e=>setOurForm({ ...ourForm, priceTotal:e.target.value })}/>
+                </div>
+                <div>
+                  <p style={{ ...sml, margin:"0 0 4px" }}>Prix / nuit (auto)</p>
+                  <input type="text" disabled style={{ ...inp(), background:C.grayL, color:C.gray }} value={ourForm.priceTotal?Math.round((parseFloat(ourForm.priceTotal)||0)/_nights)+"€/nuit":"—"}/>
+                </div>
+              </div>
+              <p style={{ ...sml, margin:"0 0 4px" }}>Notes (optionnel)</p>
+              <input style={{ ...inp(), marginBottom:8 }} placeholder="ex : tarif promo été 2026" value={ourForm.notes} onChange={e=>setOurForm({ ...ourForm, notes:e.target.value })}/>
+              {ourSaved==="ok"&&<div style={{ ...cd(8), padding:"7px 10px", background:C.greenL, marginBottom:6 }}><p style={{ margin:0, fontSize:11, fontWeight:600, color:C.green }}>✓ Tarif Les Cimes enregistré</p></div>}
+              {ourSaved?.startsWith("err")&&<div style={{ ...cd(8), padding:"7px 10px", background:C.redL, marginBottom:6 }}><p style={{ margin:0, fontSize:11, color:C.red }}>✗ {ourSaved.slice(4)}</p></div>}
+              <button style={btn(ourSaving||!ourForm.priceTotal,C.blue)} onClick={handleSaveOurRate} disabled={ourSaving||!ourForm.priceTotal}>{ourSaving?"Enregistrement…":currentOurRate?"Mettre à jour le tarif Les Cimes":"Enregistrer tarif Les Cimes"}</button>
+            </div>
 
             {/* ══ PLAN DE COLLECTE ══════════════════════════════════ */}
             <div style={{ marginTop:6 }}>
@@ -1195,7 +1400,7 @@ export default function App() {
                         {planCombos===0
                           ? "Sélectionner au moins 1 période et 1 capacité"
                           : planTooMany
-                          ? `⚠ Trop large : ${selectedPlanPeriods.length} périodes × ${planCaps.length} capacités = ${planCombos} — max 2. Lance 1×1 ou 2×1.`
+                          ? `⚠ Trop large : ${selectedPlanPeriods.length} période(s) × ${planCaps.length} capacité(s) = ${planCombos} — max 1. Lance 1 période × 1 capacité.`
                           : `✓ ${selectedPlanPeriods.length} période${selectedPlanPeriods.length>1?"s":""} × ${planCaps.length} capacité${planCaps.length>1?"s":""} = ${planCombos} recherche${planCombos>1?"s":""}`}
                       </p>
                       {planCombos>0&&!planTooMany&&<p style={{ margin:"1px 0 0", fontSize:9, color:C.green }}>Durée estimée : ~{planCombos*30}s</p>}
@@ -1492,6 +1697,27 @@ export default function App() {
         </div>
         <button style={btn(csvLoading||!csvText.trim())} onClick={handleImportCsv} disabled={csvLoading||!csvText.trim()}>{csvLoading?"Import en cours…":"Importer →"}</button>
         {imports.length>0&&(<><p style={sml}>Imports précédents</p><div style={cd()}>{imports.slice(0,3).map((im,i)=><div key={im.id||i} style={rw(i===Math.min(imports.length,3)-1)}><div><p style={{ margin:0, fontSize:12, fontWeight:500, color:C.text }}>{im.import_source}</p><p style={{ margin:0, fontSize:10, color:C.gray }}>{im.imported_at?.slice(0,10)} · {im.rows_imported} lignes</p></div><Badge label={im.status?.toUpperCase()||"OK"} color={im.status==="ok"?C.green:C.orange} bg={im.status==="ok"?C.greenL:C.orangeL}/></div>)}</div></>)}
+
+        {/* ══ IMPORT TARIFS LES CIMES (bloc distinct) ════════════ */}
+        <div style={{ height:1, background:C.grayM, margin:"16px 0 4px" }}/>
+        <div style={{ ...cd(11), padding:"10px 13px", background:C.bluePale, marginBottom:8 }}>
+          <p style={{ margin:"0 0 2px", fontSize:11, fontWeight:700, color:C.blue }}>💰 Importer tarifs Les Cimes</p>
+          <p style={{ margin:0, fontSize:9, color:C.blueL, fontFamily:"monospace", lineHeight:1.6 }}>period_id · period_start · period_end · period_label · season · stay_nights · capacity · price_total · notes</p>
+        </div>
+        {ourCsvResult&&(
+          <div style={{ ...cd(10), padding:"10px 12px", background:ourCsvResult.errors.length===0?C.greenL:C.goldL, marginBottom:8 }}>
+            <p style={{ margin:"0 0 3px", fontSize:12, fontWeight:700, color:ourCsvResult.errors.length===0?C.green:C.gold }}>Résultat import tarifs Les Cimes</p>
+            <p style={{ margin:"0 0 1px", fontSize:11, color:C.green }}>✓ Importés : {ourCsvResult.ok}</p>
+            <p style={{ margin:"0 0 1px", fontSize:11, color:C.blue }}>↻ Mis à jour : {ourCsvResult.updated}</p>
+            <p style={{ margin:"0 0 1px", fontSize:11, color:C.gray }}>⊝ Ignorées : {ourCsvResult.skipped}</p>
+            {ourCsvResult.errors.map((e,i)=><p key={i} style={{ margin:0, fontSize:10, color:C.red }}>✗ {e}</p>)}
+          </div>
+        )}
+        <textarea value={ourCsvText} onChange={e=>setOurCsvText(e.target.value)} placeholder={"period_id;period_start;period_end;period_label;season;stay_nights;capacity;price_total;notes\n2026_w2;2026-06-27;2026-07-04;27 juin → 3 juil;ete;7;6;340;Tarif été 2026"} style={{ width:"100%", minHeight:90, padding:"8px", fontSize:10, fontFamily:"monospace", border:`1px solid ${C.grayM}`, borderRadius:9, background:C.grayL, color:C.text, resize:"vertical", boxSizing:"border-box", marginBottom:6 }}/>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:6 }}>
+          <button onClick={()=>{ const tpl=["period_id;period_start;period_end;period_label;season;stay_nights;capacity;price_total;notes","2026_w2;2026-06-27;2026-07-04;27 juin → 3 juil;ete;7;6;340;Tarif été 2026","2026_w3;2026-07-04;2026-07-11;4 juil → 10 juil;ete;7;6;360;Tarif été 2026"].join("\n"); const b=new Blob([tpl],{ type:"text/csv;charset=utf-8" }); const u=URL.createObjectURL(b); const a=document.createElement("a"); a.href=u; a.download="modele_tarifs_les_cimes.csv"; a.click(); }} style={{ ...btn(false,C.grayL,C.blueL), margin:0, border:`1px solid ${C.blueL}` }}>⬇ Modèle CSV tarifs</button>
+          <button style={{ ...btn(ourCsvLoading||!ourCsvText.trim(),C.blue), margin:0 }} onClick={handleImportOurCsv} disabled={ourCsvLoading||!ourCsvText.trim()}>{ourCsvLoading?"Import…":"Importer tarifs →"}</button>
+        </div>
       </div><BNav/>
     </div>
   );
@@ -1528,6 +1754,17 @@ export default function App() {
           </div>
           {lastImport&&(<><p style={sml}>Dernier import</p><div style={{ ...cd(11), padding:"10px 13px" }}><p style={{ margin:"0 0 2px", fontSize:12, fontWeight:500, color:C.text }}>{lastImport.import_source} · {lastImport.imported_at?.slice(0,10)}</p><div style={{ display:"flex", gap:8 }}><Badge label={`✓ ${lastImport.rows_imported}`} color={C.green} bg={C.greenL}/><Badge label={`⊘ ${lastImport.rows_duplicate||0}`} color={C.gold} bg={C.goldL}/></div></div></>)}
           {sbErrors.length>0&&(<><p style={sml}>Erreurs Supabase</p><div style={cd()}>{sbErrors.slice(-3).reverse().map((e,i,arr)=><div key={i} style={rw(i===arr.length-1)}><div><p style={{ margin:0, fontSize:11, color:C.red }}>{e.path}</p><p style={{ margin:0, fontSize:10, color:C.textS }}>{e.ts?.slice(11,19)} — {e.msg?.slice(0,60)}</p></div></div>)}</div></>)}
+          <p style={sml}>Tarifs Les Cimes</p>
+          <div style={cd()}>
+            {[
+              { l:"Tarifs Supabase (total)", v:String(ourRates.length), c:ourRates.length>0?C.green:C.gray },
+              { l:"Tarif courant trouvé", v:currentOurRate?"Oui":"Non", c:currentOurRate?C.green:C.orange },
+              { l:"Source tarif courant", v:ourRateSource, c:currentOurRate?C.green:C.gold },
+              { l:"Dernière maj courante", v:currentOurRate?.updated_at?currentOurRate.updated_at.slice(0,10):"—", c:C.gray },
+            ].map((r,i,arr)=>(
+              <div key={r.l} style={rw(i===arr.length-1)}><span style={{ fontSize:11, color:C.text }}>{r.l}</span><span style={{ fontSize:11, fontWeight:600, color:r.c }}>{r.v}</span></div>
+            ))}
+          </div>
           <p style={sml}>Checklist production</p>
           <div style={cd()}>
             {[{ l:"VITE_SUPABASE_URL configuré", ok:SB_READY },{ l:"Mode Supabase actif", ok:SB_READY },{ l:"Session persistante", ok:!!sessionStorage.getItem("sb_token") },{ l:"Données exemple désactivées", ok:!showExamples },{ l:"≥3 relevés qualifiés", ok:qualified.length>=3 },{ l:"/api/analyse-reco déployée", ok:false, note:"Déployer avec ANTHROPIC_API_KEY." },{ l:"/api/scrape-market déployée", ok:false, note:"Voir api/scrape-market.js" },{ l:"/api/scrape-market-batch déployée", ok:false, note:"Voir api/scrape-market-batch.js" }].map((c,i,arr)=>(
