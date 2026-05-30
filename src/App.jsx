@@ -720,7 +720,7 @@ async function getCompetitorCatalog() {
 async function saveCompetitorCatalogItem(item) {
   if (!item.name) throw new Error("Nom du concurrent requis.");
   if (isOwnProperty(item.name)) throw new Error("Les Cimes ne peut pas être enregistré comme concurrent.");
-  const payload = {
+  const basePayload = {
     name:                String(item.name).trim(),
     property_type:       item.property_type || "résidence",
     platform:            item.platform || "Booking.com",
@@ -730,9 +730,23 @@ async function saveCompetitorCatalogItem(item) {
     notes:               item.notes || null,
     is_active:           item.is_active !== false,
   };
+  const payload = {
+    ...basePayload,
+    direct_url:          item.direct_url || null,
+    preferred_channel:   item.preferred_channel || "booking",
+  };
   if (SB_READY) {
-    if (item.id) return await sb.update("competitor_catalog", `id=eq.${item.id}`, { ...payload, updated_at:new Date().toISOString() });
-    return await sb.insert("competitor_catalog", payload);
+    try {
+      if (item.id) return await sb.update("competitor_catalog", `id=eq.${item.id}`, { ...payload, updated_at:new Date().toISOString() });
+      return await sb.insert("competitor_catalog", payload);
+    } catch (e) {
+      // Si direct_url / preferred_channel manquent encore en base, on enregistre sans.
+      if (isMissingColumnError(e)) {
+        if (item.id) return await sb.update("competitor_catalog", `id=eq.${item.id}`, { ...basePayload, updated_at:new Date().toISOString() });
+        return await sb.insert("competitor_catalog", basePayload);
+      }
+      throw e;
+    }
   }
   const all = ls.get(CATALOG_LS);
   if (item.id) {
@@ -761,8 +775,11 @@ async function importCatalogCsv(csvText) {
     if (!o.name || isOwnProperty(o.name)) { skipped++; continue; }
     try {
       await saveCompetitorCatalogItem({
-        name:o.name, property_type:o.property_type||"résidence", platform:o.platform||"Booking.com",
-        booking_url:o.booking_url||null, search_location:o.search_location||"La Foux d'Allos",
+        name:o.name, property_type:o.property_type||"résidence",
+        preferred_channel:o.preferred_channel||"booking",
+        platform:o.platform||"Booking.com",
+        booking_url:o.booking_url||null, direct_url:o.direct_url||null,
+        search_location:o.search_location||"La Foux d'Allos",
         comparability_score:parseFloat(o.comparability_score)||80, notes:o.notes||null,
       });
       ok++;
@@ -787,6 +804,11 @@ function buildTrackedBookingUrl(competitor, period, capacity) {
     params.set("ss", competitor.search_location || competitor.name || "La Foux d'Allos");
   }
   return baseUrl.includes("?") ? `${baseUrl}&${params.toString()}` : `${baseUrl}?${params.toString()}`;
+}
+
+// Lien site direct : URL telle quelle (on n'injecte pas de dates)
+function buildTrackedDirectUrl(competitor) {
+  return competitor.direct_url || "";
 }
 
 function median(arr) {
@@ -948,6 +970,7 @@ export default function App() {
   const [catCsvText, setCatCsvText]       = useState("");
   const [catCsvResult, setCatCsvResult]   = useState(null);
   const [catVerifyPrice, setCatVerifyPrice] = useState({});
+  const [catChannel, setCatChannel]       = useState({});
   const [catSaved, setCatSaved]           = useState({});
   const [ourForm, setOurForm]             = useState({ priceTotal:"", notes:"" });
   const [ourSaving, setOurSaving]         = useState(false);
@@ -1046,16 +1069,19 @@ export default function App() {
   }
 
   // Enregistre un relevé vérifié pour un concurrent suivi (validé immédiatement)
-  async function saveTrackedRate(competitor, period, capacity, verifiedPrice, key) {
+  async function saveTrackedRate(competitor, period, capacity, verifiedPrice, key, channel="booking") {
     const price = Number(verifiedPrice)||0;
     if (!price || isOwnProperty(competitor.name)) return;
     const nights = period.stay_nights || 7;
     const checkin = period.period_start || period.week_start;
     const checkout = period.period_end || addDaysStr(checkin, nights);
+    const isDirect = channel === "direct";
+    const sourceLabel = isDirect ? "Site direct" : "Booking.com";
+    const sourceUrl = isDirect ? buildTrackedDirectUrl(competitor) : buildTrackedBookingUrl(competitor, period, capacity);
     try {
       await saveCompetitorRate({
         week_id:            period.id,
-        source:             "Booking.com",
+        source:             sourceLabel,
         property_name:      competitor.name,
         competitor:         competitor.name,
         property_type:      competitor.property_type || "résidence",
@@ -1071,13 +1097,13 @@ export default function App() {
         period_start:       checkin,
         period_end:         checkout,
         season:             period.season || "ete",
-        source_url:         buildTrackedBookingUrl(competitor, period, capacity),
-        source_search_url:  buildTrackedBookingUrl(competitor, period, capacity),
+        source_url:         sourceUrl,
+        source_search_url:  sourceUrl,
         collected_at:       new Date().toISOString().slice(0,10),
-        collection_type:    "relevé manuel Booking",
+        collection_type:    isDirect ? "relevé manuel direct" : "relevé manuel Booking",
         reliability_status: "validé",
         validated_at:       new Date().toISOString(),
-        validation_notes:   "Prix vérifié manuellement sur Booking",
+        validation_notes:   isDirect ? "Prix vérifié manuellement sur le site direct" : "Prix vérifié manuellement sur Booking",
         is_example:         false,
       }, competitors);
       setCatSaved(p=>({ ...p, [key]:"ok" }));
@@ -1625,7 +1651,8 @@ export default function App() {
                 </div>
                 <div style={{ display:"flex", gap:5, marginTop:1, alignItems:"center", flexWrap:"wrap" }}>
                   <span style={{ fontSize:9, color:C.gray }}>score {c.comparability_score||"?"}/100 · {c.platform}</span>
-                  {c.booking_url&&<span style={{ fontSize:8, color:C.green }}>URL Booking ✓</span>}
+                  {c.booking_url&&<Badge label="Booking" color={C.blue} bg={C.bluePale} size={8}/>}
+                  {c.direct_url&&<Badge label="Direct" color={C.green} bg={C.greenL} size={8}/>}
                 </div>
                 {c.notes&&<p style={{ margin:"1px 0 0", fontSize:9, color:C.gray, fontStyle:"italic" }}>{c.notes}</p>}
               </div>
@@ -1650,11 +1677,21 @@ export default function App() {
               </div>
               <div>
                 <p style={{ ...sml, margin:"0 0 4px" }}>Plateforme</p>
-                <select value={catForm.platform||"Booking.com"} onChange={e=>setCatForm(f=>({ ...f, platform:e.target.value }))} style={inp()}>{["Booking.com","Airbnb","Abritel"].map(t=><option key={t} value={t}>{t}</option>)}</select>
+                <select value={catForm.preferred_channel||"booking"} onChange={e=>{ const ch=e.target.value; setCatForm(f=>({ ...f, preferred_channel:ch, platform:ch==="direct"?"Site direct":ch==="both"?"Booking + Direct":"Booking.com" })); }} style={inp()}>
+                  <option value="booking">Booking.com</option>
+                  <option value="direct">Site direct</option>
+                  <option value="both">Booking + site direct</option>
+                </select>
               </div>
             </div>
-            <p style={{ ...sml, margin:"0 0 4px" }}>URL Booking</p>
-            <input style={{ ...inp(), marginBottom:6 }} placeholder="https://www.booking.com/hotel/..." value={catForm.booking_url||""} onChange={e=>setCatForm(f=>({ ...f, booking_url:e.target.value }))}/>
+            {(catForm.preferred_channel==="booking"||catForm.preferred_channel==="both"||!catForm.preferred_channel)&&(<>
+              <p style={{ ...sml, margin:"0 0 4px" }}>URL Booking</p>
+              <input style={{ ...inp(), marginBottom:6 }} placeholder="https://www.booking.com/hotel/..." value={catForm.booking_url||""} onChange={e=>setCatForm(f=>({ ...f, booking_url:e.target.value }))}/>
+            </>)}
+            {(catForm.preferred_channel==="direct"||catForm.preferred_channel==="both")&&(<>
+              <p style={{ ...sml, margin:"0 0 4px" }}>URL site direct</p>
+              <input style={{ ...inp(), marginBottom:6 }} placeholder="https://www.site-du-concurrent.com" value={catForm.direct_url||""} onChange={e=>setCatForm(f=>({ ...f, direct_url:e.target.value }))}/>
+            </>)}
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:6 }}>
               <div>
                 <p style={{ ...sml, margin:"0 0 4px" }}>Score comparabilité</p>
@@ -1674,13 +1711,13 @@ export default function App() {
             </div>
           </div>
         ) : (
-          <button onClick={()=>setCatForm({ name:"", property_type:"résidence", platform:"Booking.com", booking_url:"", search_location:"La Foux d'Allos", comparability_score:80, notes:"" })} style={{ ...btn(false,C.blue), marginBottom:8 }}>+ Ajouter concurrent</button>
+          <button onClick={()=>setCatForm({ name:"", property_type:"résidence", preferred_channel:"booking", platform:"Booking.com", booking_url:"", direct_url:"", search_location:"La Foux d'Allos", comparability_score:80, notes:"" })} style={{ ...btn(false,C.blue), marginBottom:8 }}>+ Ajouter concurrent</button>
         )}
 
         {/* Import CSV concurrents suivis */}
         <div style={{ ...cd(11), padding:"11px 13px" }}>
           <p style={{ margin:"0 0 4px", fontSize:11, fontWeight:700, color:C.blue }}>Importer concurrents suivis (CSV)</p>
-          <p style={{ margin:"0 0 6px", fontSize:9, color:C.gray, fontFamily:"monospace", lineHeight:1.5 }}>name;property_type;platform;booking_url;search_location;comparability_score;notes</p>
+          <p style={{ margin:"0 0 6px", fontSize:9, color:C.gray, fontFamily:"monospace", lineHeight:1.5 }}>name;property_type;preferred_channel;platform;booking_url;direct_url;search_location;comparability_score;notes</p>
           {catCsvResult&&(
             <div style={{ ...cd(8), padding:"8px 10px", background:catCsvResult.errors.length===0?C.greenL:C.goldL, marginBottom:6 }}>
               <p style={{ margin:"0 0 1px", fontSize:11, color:C.green }}>✓ Importés : {catCsvResult.ok}</p>
@@ -1690,7 +1727,7 @@ export default function App() {
           )}
           <textarea value={catCsvText} onChange={e=>setCatCsvText(e.target.value)} placeholder={"Résidence Les Chalets du Verdon;résidence;Booking.com;https://www.booking.com/...;La Foux d'Allos;88;Concurrent direct"} style={{ width:"100%", minHeight:70, padding:"8px", fontSize:10, fontFamily:"monospace", border:`1px solid ${C.grayM}`, borderRadius:9, background:C.grayL, color:C.text, resize:"vertical", boxSizing:"border-box", marginBottom:6 }}/>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
-            <button onClick={()=>{ const tpl=["name;property_type;platform;booking_url;search_location;comparability_score;notes","Résidence Les Chalets du Verdon;résidence;Booking.com;https://www.booking.com/...;La Foux d'Allos;88;Concurrent direct","Central Park;résidence;Booking.com;https://www.booking.com/...;La Foux d'Allos;82;Concurrent direct"].join("\n"); const b=new Blob([tpl],{ type:"text/csv;charset=utf-8" }); const u=URL.createObjectURL(b); const a=document.createElement("a"); a.href=u; a.download="modele_concurrents_suivis.csv"; a.click(); }} style={{ ...btn(false,C.grayL,C.blueL), margin:0, border:`1px solid ${C.blueL}` }}>⬇ Modèle CSV</button>
+            <button onClick={()=>{ const tpl=["name;property_type;preferred_channel;platform;booking_url;direct_url;search_location;comparability_score;notes","Résidence Les Chalets du Verdon;résidence;both;Booking + Direct;https://www.booking.com/...;https://www.chaletsduverdon.com;La Foux d'Allos;88;Concurrent direct","Central Park;résidence;direct;Site direct;;https://www.centralpark-allos.com;La Foux d'Allos;82;Site direct utile","Goélia La Foux;résidence;booking;Booking.com;https://www.booking.com/...;;La Foux d'Allos;85;Concurrent direct"].join("\n"); const b=new Blob([tpl],{ type:"text/csv;charset=utf-8" }); const u=URL.createObjectURL(b); const a=document.createElement("a"); a.href=u; a.download="modele_concurrents_suivis.csv"; a.click(); }} style={{ ...btn(false,C.grayL,C.blueL), margin:0, border:`1px solid ${C.blueL}` }}>⬇ Modèle CSV</button>
             <button onClick={handleImportCatalogCsv} disabled={!catCsvText.trim()} style={{ ...btn(!catCsvText.trim(),C.blue), margin:0 }}>Importer concurrents suivis</button>
           </div>
         </div>
@@ -1712,19 +1749,35 @@ export default function App() {
                   const key=`${period?.id}_${capNum}_${c.id}`;
                   const st=catSaved[key];
                   const vp=catVerifyPrice[key]??"";
-                  const url=buildTrackedBookingUrl(c, period||{}, capNum);
+                  const bookingUrl=buildTrackedBookingUrl(c, period||{}, capNum);
+                  const directUrl=buildTrackedDirectUrl(c);
+                  const defaultCh=c.preferred_channel==="direct"?"direct":"booking";
+                  const ch=catChannel[key]??defaultCh;
                   return (
                     <div key={c.id} style={{ padding:"8px 12px", borderBottom:i<catalog.length-1?`0.5px solid ${C.grayL}`:"none" }}>
                       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
                         <span style={{ fontSize:11, fontWeight:500, color:C.text, flex:1, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{c.name}</span>
-                        <a href={url} target="_blank" rel="noreferrer" style={{ fontSize:9, fontWeight:600, color:C.blue, background:C.white, padding:"4px 8px", borderRadius:6, textDecoration:"none", border:`1px solid ${C.grayM}`, flexShrink:0 }}>↗ Ouvrir Booking</a>
+                        <div style={{ display:"flex", gap:4, flexShrink:0, flexWrap:"wrap", justifyContent:"flex-end" }}>
+                          {c.booking_url&&<a href={bookingUrl} target="_blank" rel="noreferrer" style={{ fontSize:9, fontWeight:600, color:C.blue, background:C.white, padding:"4px 8px", borderRadius:6, textDecoration:"none", border:`1px solid ${C.grayM}` }}>↗ Booking</a>}
+                          {directUrl&&<a href={directUrl} target="_blank" rel="noreferrer" style={{ fontSize:9, fontWeight:600, color:C.green, background:C.white, padding:"4px 8px", borderRadius:6, textDecoration:"none", border:`1px solid ${C.grayM}` }}>↗ Site direct</a>}
+                        </div>
                       </div>
                       {st==="ok" ? (
                         <p style={{ margin:"5px 0 0", fontSize:9, color:C.green, fontWeight:600 }}>✓ Prix validé enregistré</p>
                       ) : (
-                        <div style={{ display:"flex", gap:6, marginTop:5, alignItems:"center" }}>
-                          <input type="number" placeholder="Prix vérifié" value={vp} onChange={e=>setCatVerifyPrice(p=>({ ...p, [key]:e.target.value }))} style={{ flex:1, padding:"5px 8px", fontSize:10, border:`1px solid ${C.grayM}`, borderRadius:6, boxSizing:"border-box" }}/>
-                          <button onClick={()=>saveTrackedRate(c, period, capNum, vp, key)} disabled={!vp} style={{ padding:"5px 8px", fontSize:9, fontWeight:700, background:vp?C.green:C.grayL, color:vp?C.white:C.gray, border:"none", borderRadius:6, cursor:vp?"pointer":"default", whiteSpace:"nowrap" }}>Enregistrer prix vérifié</button>
+                        <div style={{ marginTop:5 }}>
+                          {(c.booking_url&&directUrl)&&(
+                            <div style={{ display:"flex", gap:4, marginBottom:5 }}>
+                              <span style={{ fontSize:9, color:C.gray, alignSelf:"center" }}>Source :</span>
+                              {[["booking","Booking.com"],["direct","Site direct"]].map(([v,l])=>(
+                                <button key={v} onClick={()=>setCatChannel(p=>({ ...p, [key]:v }))} style={{ padding:"3px 8px", fontSize:9, fontWeight:ch===v?700:400, background:ch===v?(v==="direct"?C.green:C.blue):C.white, color:ch===v?C.white:C.text, border:`1px solid ${ch===v?(v==="direct"?C.green:C.blue):C.grayM}`, borderRadius:12, cursor:"pointer" }}>{l}</button>
+                              ))}
+                            </div>
+                          )}
+                          <div style={{ display:"flex", gap:6, alignItems:"center" }}>
+                            <input type="number" placeholder="Prix vérifié" value={vp} onChange={e=>setCatVerifyPrice(p=>({ ...p, [key]:e.target.value }))} style={{ flex:1, padding:"5px 8px", fontSize:10, border:`1px solid ${C.grayM}`, borderRadius:6, boxSizing:"border-box" }}/>
+                            <button onClick={()=>saveTrackedRate(c, period, capNum, vp, key, (c.booking_url&&directUrl)?ch:(directUrl&&!c.booking_url?"direct":"booking"))} disabled={!vp} style={{ padding:"5px 8px", fontSize:9, fontWeight:700, background:vp?C.green:C.grayL, color:vp?C.white:C.gray, border:"none", borderRadius:6, cursor:vp?"pointer":"default", whiteSpace:"nowrap" }}>Enregistrer prix vérifié</button>
+                          </div>
                         </div>
                       )}
                       {st==="dup"&&<p style={{ margin:"4px 0 0", fontSize:9, color:C.gold }}>= Relevé déjà existant</p>}
