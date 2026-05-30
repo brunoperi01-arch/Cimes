@@ -2186,7 +2186,6 @@ export default function App() {
       {user && screen === "import" && ImportScreen()}
       {user && screen === "diag" && Diagnostic()}
     </div>
-  </div>
-);
+ </div>
 );
 }
