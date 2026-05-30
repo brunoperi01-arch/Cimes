@@ -1079,25 +1079,28 @@ export default function App() {
   }
 
   // Enregistre un relevé vérifié pour un concurrent suivi (validé immédiatement)
-  async function saveTrackedRate(competitor, period, capacity, verifiedPrice, key, channel="booking") {
-    const price = Number(verifiedPrice)||0;
-    if (!price || isOwnProperty(competitor.name)) return;
+  // Enregistre un prix vérifié pour un concurrent suivi (validé immédiatement)
+  async function saveTrackedCompetitorRate(competitor, channel, priceTotal) {
+    const price = Number(priceTotal)||0;
+    const period = selWeek;
+    const key = `${selWeekId}_${capNum}_${competitor.id}_${channel}`;
+    if (!price || !period || isOwnProperty(competitor.name)) return;
     const nights = period.stay_nights || 7;
     const checkin = period.period_start || period.week_start;
     const checkout = period.period_end || addDaysStr(checkin, nights);
     const isDirect = channel === "direct";
     const sourceLabel = isDirect ? "Site direct" : "Booking.com";
-    const sourceUrl = isDirect ? buildTrackedDirectUrl(competitor) : buildTrackedBookingUrl(competitor, period, capacity);
+    const sourceUrl = isDirect ? buildTrackedDirectUrl(competitor) : buildTrackedBookingUrl(competitor, period, capNum);
     try {
       await saveCompetitorRate({
-        week_id:            period.id,
+        week_id:            selWeekId,
         source:             sourceLabel,
         property_name:      competitor.name,
         competitor:         competitor.name,
         property_type:      competitor.property_type || "résidence",
         competitor_id:      null,
         comparability_score:competitor.comparability_score || 80,
-        capacity:           Number(capacity),
+        capacity:           capNum,
         price:              price,
         price_week:         price,
         price_total:        price,
@@ -1113,15 +1116,23 @@ export default function App() {
         collection_type:    isDirect ? "relevé manuel direct" : "relevé manuel Booking",
         reliability_status: "validé",
         validated_at:       new Date().toISOString(),
-        validation_notes:   isDirect ? "Prix vérifié manuellement sur le site direct" : "Prix vérifié manuellement sur Booking",
+        validation_notes:   "Prix vérifié manuellement depuis concurrent suivi",
         is_example:         false,
       }, competitors);
       setCatSaved(p=>({ ...p, [key]:"ok" }));
       setCatVerifyPrice(p=>({ ...p, [key]:"" }));
-      if (period.id===selWeekId && Number(capacity)===capNum) loadRates();
+      loadRates();
     } catch(e) {
       setCatSaved(p=>({ ...p, [key]:e.message?.includes("DUPLICATE")?"dup":"err" }));
     }
+  }
+
+  // Ouvre jusqu'à 5 liens dans de nouveaux onglets
+  function openAllLinks(urls) {
+    const list = urls.filter(Boolean);
+    if (list.length === 0) return;
+    if (list.length > 5) { setPlanError("Trop de liens : seuls les 5 premiers seront ouverts (limite navigateur)."); }
+    list.slice(0,5).forEach(u => window.open(u, "_blank", "noopener,noreferrer"));
   }
 
   // ── Enregistrer un tarif Les Cimes ────────────────────────────
@@ -1786,59 +1797,91 @@ export default function App() {
         {catalog.length>0&&(()=>{
           const period = selWeek;
           const checkin = period?.period_start || period?.week_start;
-          const checkout = period?.period_end || (checkin?addDaysStr(checkin, period?.stay_nights||7):"");
+          const nights = period?.stay_nights || 7;
+          const checkout = period?.period_end || (checkin?addDaysStr(checkin, nights):"");
+          // Dernier prix enregistré par concurrent + source (depuis rates chargés)
+          const lastRateFor = (name, sourceLabel) => {
+            const matches = (rates||[]).filter(r=>!r.is_example && (r.competitor===name||r.property_name===name||r.competitor_name===name) && r.source===sourceLabel);
+            if (!matches.length) return null;
+            return matches.slice().sort((a,b)=>String(b.collected_at).localeCompare(String(a.collected_at)))[0];
+          };
+          const allBookingUrls = catalog.filter(c=>c.booking_url).map(c=>buildTrackedBookingUrl(c, period||{}, capNum));
+          const allDirectUrls = catalog.filter(c=>buildTrackedDirectUrl(c)).map(c=>buildTrackedDirectUrl(c));
           return (
             <>
-              <p style={sml}>Relevé rapide concurrents suivis</p>
-              <div style={{ ...cd(11,4), padding:"8px 12px", background:C.bluePale }}>
-                <p style={{ margin:0, fontSize:10, color:C.blueL, fontWeight:600 }}>{period?.label} · {cap}</p>
-                <p style={{ margin:"1px 0 0", fontSize:9, color:C.blueL }}>Booking : arrivée {fmtDateShort(checkin)} · départ {fmtDateShort(checkout)}</p>
+              <p style={sml}>🔍 Relevé concurrents suivis</p>
+              <div style={{ ...cd(11,4), padding:"9px 12px", background:C.bluePale }}>
+                <p style={{ margin:0, fontSize:11, color:C.blue, fontWeight:700 }}>Période : {period?.label} · {cap}</p>
+                <p style={{ margin:"1px 0 0", fontSize:9, color:C.blueL }}>Booking : arrivée {checkin} · départ {checkout}</p>
+                <p style={{ margin:"1px 0 0", fontSize:9, color:C.blueL }}>Capacité : {capNum}P · {nights} nuits</p>
+                <p style={{ margin:"4px 0 0", fontSize:9, color:C.gray, fontStyle:"italic" }}>Les prix saisis ici sont considérés comme vérifiés manuellement.</p>
+                <div style={{ display:"flex", gap:5, marginTop:7, flexWrap:"wrap" }}>
+                  {allBookingUrls.length>0&&<button onClick={()=>openAllLinks(allBookingUrls)} style={{ fontSize:9, fontWeight:600, color:C.white, background:C.blue, padding:"5px 9px", borderRadius:6, border:"none", cursor:"pointer" }}>↗ Ouvrir tous les Booking ({allBookingUrls.length})</button>}
+                  {allDirectUrls.length>0&&<button onClick={()=>openAllLinks(allDirectUrls)} style={{ fontSize:9, fontWeight:600, color:C.white, background:C.green, padding:"5px 9px", borderRadius:6, border:"none", cursor:"pointer" }}>↗ Ouvrir tous les sites directs ({allDirectUrls.length})</button>}
+                </div>
               </div>
               <div style={cd()}>
                 {catalog.map((c,i)=>{
-                  const key=`${period?.id}_${capNum}_${c.id}`;
-                  const st=catSaved[key];
-                  const vp=catVerifyPrice[key]??"";
                   const bookingUrl=buildTrackedBookingUrl(c, period||{}, capNum);
                   const directUrl=buildTrackedDirectUrl(c);
-                  const defaultCh=c.preferred_channel==="direct"?"direct":"booking";
-                  const ch=catChannel[key]??defaultCh;
+                  const hasBooking=!!c.booking_url;
+                  const hasDirect=!!directUrl;
+                  const kB=`${selWeekId}_${capNum}_${c.id}_booking`;
+                  const kD=`${selWeekId}_${capNum}_${c.id}_direct`;
+                  const stB=catSaved[kB], stD=catSaved[kD];
+                  const vpB=catVerifyPrice[kB]??"", vpD=catVerifyPrice[kD]??"";
+                  const lastB=lastRateFor(c.name,"Booking.com");
+                  const lastD=lastRateFor(c.name,"Site direct");
                   return (
-                    <div key={c.id} style={{ padding:"8px 12px", borderBottom:i<catalog.length-1?`0.5px solid ${C.grayL}`:"none" }}>
+                    <div key={c.id} style={{ padding:"9px 12px", borderBottom:i<catalog.length-1?`0.5px solid ${C.grayL}`:"none" }}>
                       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 }}>
                         <div style={{ flex:1, minWidth:0 }}>
-                          <span style={{ fontSize:11, fontWeight:500, color:C.text }}>{c.name}</span>
+                          <span style={{ fontSize:12, fontWeight:600, color:C.text }}>{c.name}</span>
                           <div style={{ display:"flex", gap:4, marginTop:2, alignItems:"center", flexWrap:"wrap" }}>
                             <span style={{ fontSize:9, color:C.gray }}>{c.property_type} · score {c.comparability_score||"?"}</span>
-                            {c.booking_url&&<Badge label="Booking" color={C.blue} bg={C.bluePale} size={8}/>}
-                            {directUrl&&<Badge label="Direct" color={C.green} bg={C.greenL} size={8}/>}
+                            {hasBooking&&<Badge label="Booking" color={C.blue} bg={C.bluePale} size={8}/>}
+                            {hasDirect&&<Badge label="Direct" color={C.green} bg={C.greenL} size={8}/>}
                           </div>
                         </div>
                         <div style={{ display:"flex", gap:4, flexShrink:0, flexWrap:"wrap", justifyContent:"flex-end" }}>
-                          {c.booking_url&&<a href={bookingUrl} target="_blank" rel="noreferrer" style={{ fontSize:9, fontWeight:600, color:C.blue, background:C.white, padding:"4px 8px", borderRadius:6, textDecoration:"none", border:`1px solid ${C.grayM}` }}>↗ Booking</a>}
-                          {directUrl&&<a href={directUrl} target="_blank" rel="noreferrer" style={{ fontSize:9, fontWeight:600, color:C.green, background:C.white, padding:"4px 8px", borderRadius:6, textDecoration:"none", border:`1px solid ${C.grayM}` }}>↗ Site direct</a>}
+                          {hasBooking&&<a href={bookingUrl} target="_blank" rel="noreferrer" style={{ fontSize:9, fontWeight:600, color:C.blue, background:C.white, padding:"4px 8px", borderRadius:6, textDecoration:"none", border:`1px solid ${C.grayM}` }}>↗ Booking</a>}
+                          {hasDirect&&<a href={directUrl} target="_blank" rel="noreferrer" style={{ fontSize:9, fontWeight:600, color:C.green, background:C.white, padding:"4px 8px", borderRadius:6, textDecoration:"none", border:`1px solid ${C.grayM}` }}>↗ Site direct</a>}
                         </div>
                       </div>
-                      {st==="ok" ? (
-                        <p style={{ margin:"5px 0 0", fontSize:9, color:C.green, fontWeight:600 }}>✓ Prix validé enregistré</p>
-                      ) : (
-                        <div style={{ marginTop:5 }}>
-                          {(c.booking_url&&directUrl)&&(
-                            <div style={{ display:"flex", gap:4, marginBottom:5 }}>
-                              <span style={{ fontSize:9, color:C.gray, alignSelf:"center" }}>Source :</span>
-                              {[["booking","Booking.com"],["direct","Site direct"]].map(([v,l])=>(
-                                <button key={v} onClick={()=>setCatChannel(p=>({ ...p, [key]:v }))} style={{ padding:"3px 8px", fontSize:9, fontWeight:ch===v?700:400, background:ch===v?(v==="direct"?C.green:C.blue):C.white, color:ch===v?C.white:C.text, border:`1px solid ${ch===v?(v==="direct"?C.green:C.blue):C.grayM}`, borderRadius:12, cursor:"pointer" }}>{l}</button>
-                              ))}
+
+                      {/* Champ Booking */}
+                      {hasBooking&&(
+                        <div style={{ marginTop:6 }}>
+                          {lastB&&<p style={{ margin:"0 0 3px", fontSize:8, color:C.gray }}>Dernier Booking : {fmt(Number(lastB.price_total||lastB.price_week))}€ · {lastB.reliability_status} · {lastB.collected_at}</p>}
+                          {stB==="ok" ? (
+                            <p style={{ margin:0, fontSize:9, color:C.green, fontWeight:600 }}>✓ Prix Booking enregistré</p>
+                          ) : (
+                            <div style={{ display:"flex", gap:6, alignItems:"center" }}>
+                              <input type="number" placeholder="Prix Booking vérifié" value={vpB} onChange={e=>setCatVerifyPrice(p=>({ ...p, [kB]:e.target.value }))} style={{ flex:1, padding:"5px 8px", fontSize:10, border:`1px solid ${C.grayM}`, borderRadius:6, boxSizing:"border-box" }}/>
+                              <button onClick={()=>saveTrackedCompetitorRate(c,"booking",vpB)} disabled={!vpB} style={{ padding:"5px 9px", fontSize:9, fontWeight:700, background:vpB?C.blue:C.grayL, color:vpB?C.white:C.gray, border:"none", borderRadius:6, cursor:vpB?"pointer":"default", whiteSpace:"nowrap" }}>Enregistrer Booking</button>
                             </div>
                           )}
-                          <div style={{ display:"flex", gap:6, alignItems:"center" }}>
-                            <input type="number" placeholder="Prix vérifié" value={vp} onChange={e=>setCatVerifyPrice(p=>({ ...p, [key]:e.target.value }))} style={{ flex:1, padding:"5px 8px", fontSize:10, border:`1px solid ${C.grayM}`, borderRadius:6, boxSizing:"border-box" }}/>
-                            <button onClick={()=>saveTrackedRate(c, period, capNum, vp, key, (c.booking_url&&directUrl)?ch:(directUrl&&!c.booking_url?"direct":"booking"))} disabled={!vp} style={{ padding:"5px 8px", fontSize:9, fontWeight:700, background:vp?C.green:C.grayL, color:vp?C.white:C.gray, border:"none", borderRadius:6, cursor:vp?"pointer":"default", whiteSpace:"nowrap" }}>Enregistrer prix vérifié</button>
-                          </div>
+                          {stB==="dup"&&<p style={{ margin:"3px 0 0", fontSize:8, color:C.gold }}>= Relevé Booking déjà existant</p>}
+                          {stB==="err"&&<p style={{ margin:"3px 0 0", fontSize:8, color:C.red }}>✗ Erreur Booking</p>}
                         </div>
                       )}
-                      {st==="dup"&&<p style={{ margin:"4px 0 0", fontSize:9, color:C.gold }}>= Relevé déjà existant</p>}
-                      {st==="err"&&<p style={{ margin:"4px 0 0", fontSize:9, color:C.red }}>✗ Erreur d'enregistrement</p>}
+
+                      {/* Champ Direct */}
+                      {hasDirect&&(
+                        <div style={{ marginTop:6 }}>
+                          {lastD&&<p style={{ margin:"0 0 3px", fontSize:8, color:C.gray }}>Dernier Direct : {fmt(Number(lastD.price_total||lastD.price_week))}€ · {lastD.reliability_status} · {lastD.collected_at}</p>}
+                          {stD==="ok" ? (
+                            <p style={{ margin:0, fontSize:9, color:C.green, fontWeight:600 }}>✓ Prix Direct enregistré</p>
+                          ) : (
+                            <div style={{ display:"flex", gap:6, alignItems:"center" }}>
+                              <input type="number" placeholder="Prix Direct vérifié" value={vpD} onChange={e=>setCatVerifyPrice(p=>({ ...p, [kD]:e.target.value }))} style={{ flex:1, padding:"5px 8px", fontSize:10, border:`1px solid ${C.grayM}`, borderRadius:6, boxSizing:"border-box" }}/>
+                              <button onClick={()=>saveTrackedCompetitorRate(c,"direct",vpD)} disabled={!vpD} style={{ padding:"5px 9px", fontSize:9, fontWeight:700, background:vpD?C.green:C.grayL, color:vpD?C.white:C.gray, border:"none", borderRadius:6, cursor:vpD?"pointer":"default", whiteSpace:"nowrap" }}>Enregistrer Direct</button>
+                            </div>
+                          )}
+                          {stD==="dup"&&<p style={{ margin:"3px 0 0", fontSize:8, color:C.gold }}>= Relevé Direct déjà existant</p>}
+                          {stD==="err"&&<p style={{ margin:"3px 0 0", fontSize:8, color:C.red }}>✗ Erreur Direct</p>}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
