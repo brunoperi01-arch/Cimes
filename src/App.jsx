@@ -724,7 +724,7 @@ async function saveCompetitorCatalogItem(item) {
     name:                String(item.name).trim(),
     property_type:       item.property_type || "résidence",
     platform:            item.platform || "Booking.com",
-    booking_url:         item.booking_url || null,
+    booking_url:         item.booking_url ? normalizeBookingBaseUrl(item.booking_url) : null,
     search_location:     item.search_location || "La Foux d'Allos",
     comparability_score: Number(item.comparability_score || 80),
     notes:               item.notes || null,
@@ -796,22 +796,39 @@ function daysBetween(start, end) {
   return Math.max(0, Math.round((b - a) / 86400000));
 }
 
-function buildTrackedBookingUrl(competitor, context) {
-  const checkin = context.checkin;
-  const checkout = context.checkout;
-  const capacity = context.capacity;
-  const baseUrl = competitor.booking_url || "https://www.booking.com/searchresults.html";
-  const params = new URLSearchParams({
-    checkin,
-    checkout,
-    group_adults: String(capacity),
-    no_rooms: "1",
-    group_children: "0",
-  });
-  if (baseUrl.includes("booking.com/searchresults")) {
-    params.set("ss", competitor.search_location || competitor.name || "La Foux d'Allos");
+// Nettoie une URL Booking : on garde domaine + chemin, jamais les anciens paramètres (dates, etc.)
+function normalizeBookingBaseUrl(rawUrl) {
+  if (!rawUrl) return "https://www.booking.com/searchresults.html";
+  try {
+    const url = new URL(rawUrl);
+    if (!url.hostname.includes("booking.com")) {
+      return rawUrl;
+    }
+    return `${url.origin}${url.pathname}`;
+  } catch {
+    return "https://www.booking.com/searchresults.html";
   }
-  return baseUrl.includes("?") ? `${baseUrl}&${params.toString()}` : `${baseUrl}?${params.toString()}`;
+}
+
+function buildTrackedBookingUrl(competitor, ctx) {
+  const checkin = ctx.checkin;
+  const checkout = ctx.checkout;
+  const capacity = Number(ctx.capacity || 2);
+  const cleanBase = normalizeBookingBaseUrl(competitor.booking_url);
+  const url = new URL(cleanBase);
+  url.searchParams.set("checkin", checkin);
+  url.searchParams.set("checkout", checkout);
+  url.searchParams.set("group_adults", String(capacity));
+  url.searchParams.set("req_adults", String(capacity));
+  url.searchParams.set("group_children", "0");
+  url.searchParams.set("req_children", "0");
+  url.searchParams.set("no_rooms", "1");
+  url.searchParams.set("room1", Array.from({ length: capacity }, () => "A").join(","));
+  url.searchParams.set("sb_price_type", "total");
+  if (url.pathname.includes("searchresults")) {
+    url.searchParams.set("ss", competitor.search_location || competitor.name || "La Foux d'Allos");
+  }
+  return url.toString();
 }
 
 // Lien site direct : URL telle quelle (on n'injecte pas de dates)
@@ -1782,7 +1799,8 @@ export default function App() {
             </div>
             {(catForm.preferred_channel==="booking"||catForm.preferred_channel==="both"||!catForm.preferred_channel)&&(<>
               <p style={{ ...sml, margin:"0 0 4px" }}>URL Booking</p>
-              <input style={{ ...inp(), marginBottom:6 }} placeholder="https://www.booking.com/hotel/..." value={catForm.booking_url||""} onChange={e=>setCatForm(f=>({ ...f, booking_url:e.target.value }))}/>
+              <input style={{ ...inp(), marginBottom:3 }} placeholder="https://www.booking.com/hotel/..." value={catForm.booking_url||""} onChange={e=>setCatForm(f=>({ ...f, booking_url:e.target.value }))}/>
+              <p style={{ margin:"0 0 6px", fontSize:8, color:C.gray, fontStyle:"italic" }}>Collez l'URL Booking, l'application supprimera automatiquement les anciens paramètres de dates.</p>
             </>)}
             {(catForm.preferred_channel==="direct"||catForm.preferred_channel==="both")&&(<>
               <p style={{ ...sml, margin:"0 0 4px" }}>URL site direct</p>
