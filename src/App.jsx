@@ -932,6 +932,16 @@ export default function App() {
   const [iaError, setIaError]   = useState(null);
   const [settings]              = useState({ thresholdLow:15, thresholdHigh:20, obsoleteDays:7, minScore:70 });
 
+  // ── Responsive : desktop prioritaire, mobile secondaire ───────
+  const [isMobile, setIsMobile] = useState(typeof window !== "undefined" ? window.innerWidth < 700 : false);
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 700);
+    onResize();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  const isDesktop = !isMobile;
+
   const [csvText, setCsvText]   = useState("");
   const [csvResult, setCsvResult] = useState(null);
   const [csvLoading, setCsvLoad]  = useState(false);
@@ -1411,9 +1421,23 @@ export default function App() {
   }
 
   // ── Styles ────────────────────────────────────────────────────
-  const ph  ={ width:390, margin:"0 auto", fontFamily:"-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif", background:C.grayL, minHeight:760, borderRadius:44, overflow:"hidden", border:`0.5px solid ${C.grayM}` };
-  const sbar={ height:46, display:"flex", alignItems:"flex-end", justifyContent:"space-between", padding:"0 20px 6px", background:C.grayL };
-  const cnt ={ padding:"0 14px 80px" };
+  // ── Styles responsive ─────────────────────────────────────────
+  const appShell = { minHeight:"100vh", background:C.grayL, fontFamily:"-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif" };
+  const appContainer = { width:"100%", maxWidth:isMobile?440:1200, margin:"0 auto", padding:isMobile?"0":"18px 20px", boxSizing:"border-box" };
+  const mainGrid = { display:"grid", gridTemplateColumns:"230px 1fr", gap:18, alignItems:"start" };
+  // Cadre "téléphone" uniquement en mobile ; en desktop, panneau plein large
+  const ph  = isMobile
+    ? { width:"100%", maxWidth:440, margin:"0 auto", background:C.grayL, minHeight:"100vh", overflow:"hidden" }
+    : { width:"100%", background:C.white, borderRadius:16, overflow:"hidden", border:`0.5px solid ${C.grayM}`, minHeight:600 };
+  const sbar={ height:46, display:"flex", alignItems:"flex-end", justifyContent:"space-between", padding:"0 20px 6px", background:isMobile?C.grayL:C.white };
+  const cnt ={ padding:isMobile?"0 14px 80px":"0 18px 24px" };
+  const responsiveGrid = (cols = 2) => ({
+    display:"grid",
+    gridTemplateColumns: isMobile ? "1fr" : `repeat(${cols}, minmax(0, 1fr))`,
+    gap: isMobile ? 8 : 14,
+    alignItems:"start",
+  });
+  const formGrid = { display:"grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap:8 };
   const cd  =(r=14,mb=8)=>({ background:C.white, borderRadius:r, overflow:"hidden", marginBottom:mb });
   const rw  =last=>({ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 13px", borderBottom:last?"none":`0.5px solid ${C.grayL}` });
   const btn =(dis,bg=C.blue,fg=C.white)=>({ width:"100%", padding:"12px", fontSize:14, fontWeight:600, background:dis?"#C7C7CC":bg, color:fg, border:"none", borderRadius:11, cursor:dis?"not-allowed":"pointer", marginBottom:6 });
@@ -1439,14 +1463,39 @@ export default function App() {
   ):null;
 
   const NAV=[{id:"dashboard",icon:"▣",l:"Dashboard"},{id:"weeks",icon:"📅",l:"Périodes"},{id:"collect",icon:"✏️",l:"Saisie"},{id:"import",icon:"📥",l:"Import"},{id:"diag",icon:"🔬",l:"Diagnostic"}];
-  const BNav=()=>(
+  const goScreen=id=>{ setScreen(id); setCM(null); setIaText(null); setPasteEdit(null); };
+  const BNav=()=>isMobile?(
     <div style={{ position:"sticky", bottom:0, background:C.white, borderTop:`0.5px solid ${C.grayM}`, display:"flex", padding:"6px 0 16px", zIndex:10 }}>
       {NAV.map(n=>(
-        <button key={n.id} onClick={()=>{ setScreen(n.id); setCM(null); setIaText(null); setPasteEdit(null); }} style={{ flex:1, background:"none", border:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:1 }}>
+        <button key={n.id} onClick={()=>goScreen(n.id)} style={{ flex:1, background:"none", border:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:1 }}>
           <span style={{ fontSize:16 }}>{n.icon}</span>
           <span style={{ fontSize:9, fontWeight:screen===n.id?700:400, color:screen===n.id?C.blue:C.gray }}>{n.l}</span>
         </button>
       ))}
+    </div>
+  ):null;
+  const SideNav=()=>(
+    <div style={{ background:C.white, borderRadius:16, border:`0.5px solid ${C.grayM}`, padding:"14px 10px", position:"sticky", top:18 }}>
+      <div style={{ display:"flex", alignItems:"center", gap:8, padding:"0 8px 12px", borderBottom:`0.5px solid ${C.grayL}`, marginBottom:8 }}>
+        <div style={{ width:30, height:30, background:C.blue, borderRadius:9, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}><span style={{ fontSize:16 }}>⛰</span></div>
+        <div style={{ minWidth:0 }}>
+          <p style={{ margin:0, fontSize:12, fontWeight:700, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>Les Cimes</p>
+          <p style={{ margin:0, fontSize:9, color:C.gray }}>Benchmark</p>
+        </div>
+      </div>
+      {NAV.map(n=>(
+        <button key={n.id} onClick={()=>goScreen(n.id)} style={{ width:"100%", display:"flex", alignItems:"center", gap:10, padding:"9px 10px", marginBottom:2, background:screen===n.id?C.bluePale:"transparent", border:"none", borderRadius:9, cursor:"pointer", textAlign:"left" }}>
+          <span style={{ fontSize:15 }}>{n.icon}</span>
+          <span style={{ fontSize:13, fontWeight:screen===n.id?700:500, color:screen===n.id?C.blue:C.text }}>{n.l}</span>
+        </button>
+      ))}
+      <div style={{ borderTop:`0.5px solid ${C.grayL}`, marginTop:8, paddingTop:8, padding:"8px 10px 0" }}>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:6 }}>
+          <Badge label={SB_READY?"SUPABASE":"LOCAL"} color={SB_READY?C.green:C.gold} bg={SB_READY?C.greenL:C.goldL} size={9}/>
+          {user&&<button onClick={handleLogout} style={{ fontSize:10, color:C.gray, background:"none", border:"none", cursor:"pointer" }}>Déco.</button>}
+        </div>
+        {user&&<p style={{ margin:"6px 0 0", fontSize:9, color:C.gray, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{user.email}</p>}
+      </div>
     </div>
   );
 
@@ -1486,24 +1535,25 @@ export default function App() {
             </div>
           </div>
         </div>
-        <div style={{ ...cd(11), padding:"10px 13px", background:SB_READY?C.greenL:C.goldL, marginTop:8 }}>
+        <div style={{ ...responsiveGrid(3), marginTop:8 }}>
+        <div style={{ ...cd(11), padding:"10px 13px", background:SB_READY?C.greenL:C.goldL, marginBottom:0 }}>
           <p style={{ margin:"0 0 1px", fontSize:11, fontWeight:700, color:SB_READY?C.green:C.gold }}>{SB_READY?"✓ Données persistées en Supabase":"⚠ Mode local — données non persistées"}</p>
           <p style={{ margin:0, fontSize:10, color:SB_READY?C.green:C.gold }}>{SB_READY?"Session restaurée au refresh.":"Configurer VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY."}</p>
         </div>
-        <div style={{ ...cd(11), padding:"10px 13px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+        <div style={{ ...cd(11), padding:"10px 13px", marginBottom:0, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
           <div><p style={{ margin:0, fontSize:13, fontWeight:500, color:C.text }}>Données exemple</p><p style={{ margin:0, fontSize:10, color:C.textS }}>Désactiver en production</p></div>
           <button onClick={()=>setSE(p=>!p)} style={{ width:44, height:26, borderRadius:13, background:showExamples?C.blue:C.grayM, border:"none", cursor:"pointer", position:"relative" }}>
             <div style={{ position:"absolute", top:3, left:showExamples?21:3, width:20, height:20, borderRadius:"50%", background:C.white, transition:"left 0.15s" }}/>
           </button>
         </div>
-        <p style={sml}>Accès rapides</p>
-        <div style={cd()}>
+        <div style={cd(11,0)}>
           {[{ icon:"✏️", l:"Saisir un relevé", s:"collect", m:"manuelle" },{ icon:"📋", l:"Copier-coller Booking/Airbnb", s:"collect", m:"copier-coller" },{ icon:"📥", l:"Importer un CSV", s:"import" },{ icon:"🔬", l:"Diagnostic système", s:"diag" }].map((item,i,arr)=>(
             <div key={i} style={{ ...rw(i===arr.length-1), cursor:"pointer" }} onClick={()=>{ setScreen(item.s); if(item.m) setCM(item.m); }}>
               <div style={{ display:"flex", alignItems:"center", gap:10 }}><span style={{ fontSize:16 }}>{item.icon}</span><span style={{ fontSize:13, fontWeight:500, color:C.text }}>{item.l}</span></div>
               <svg width="7" height="12" viewBox="0 0 7 12" fill="none"><path d="M1 1l5 5-5 5" stroke={C.gray} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
             </div>
           ))}
+        </div>
         </div>
 
         {/* ══ GESTION TARIFS LES CIMES ══════════════════════════ */}
@@ -2607,8 +2657,8 @@ export default function App() {
   };
 
  return (
-  <div style={{ padding:"20px 0 40px", display:"flex", justifyContent:"center" }}>
-    <div style={ph}>
+  <div style={appShell}>
+    <div style={appContainer}>
       {!user && (
         <LoginScreen
           loginErr={loginErr}
@@ -2622,13 +2672,31 @@ export default function App() {
         />
       )}
 
-      {user && screen === "dashboard" && Dashboard()}
-      {user && screen === "weeks" && Weeks()}
-      {user && screen === "week" && WeekDetail()}
-      {user && screen === "collect" && Collect()}
-      {user && screen === "import" && ImportScreen()}
-      {user && screen === "diag" && Diagnostic()}
+      {user && isDesktop && (
+        <div style={mainGrid}>
+          <SideNav/>
+          <div style={ph}>
+            {screen === "dashboard" && Dashboard()}
+            {screen === "weeks" && Weeks()}
+            {screen === "week" && WeekDetail()}
+            {screen === "collect" && Collect()}
+            {screen === "import" && ImportScreen()}
+            {screen === "diag" && Diagnostic()}
+          </div>
+        </div>
+      )}
+
+      {user && isMobile && (
+        <div style={ph}>
+          {screen === "dashboard" && Dashboard()}
+          {screen === "weeks" && Weeks()}
+          {screen === "week" && WeekDetail()}
+          {screen === "collect" && Collect()}
+          {screen === "import" && ImportScreen()}
+          {screen === "diag" && Diagnostic()}
+        </div>
+      )}
     </div>
- </div>
+  </div>
 );
 }
