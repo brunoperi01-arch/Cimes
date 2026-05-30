@@ -703,6 +703,92 @@ async function importOurRatesCsv(csvText, allPeriods) {
   return { ok, updated, skipped, errors:errors.slice(0,4) };
 }
 
+// ══ CATALOGUE CONCURRENTS SUIVIS (competitor_catalog) ═══════════
+const CATALOG_LS = "competitor_catalog";
+
+async function getCompetitorCatalog() {
+  let rows = [];
+  if (SB_READY) {
+    try { rows = await sb.select("competitor_catalog", "is_active=eq.true&order=property_type.asc,name.asc&select=*"); }
+    catch { rows = []; }
+  } else {
+    rows = ls.get(CATALOG_LS).filter(r=>r.is_active!==false);
+  }
+  return (rows||[]).filter(r=>!isOwnProperty(r.name));
+}
+
+async function saveCompetitorCatalogItem(item) {
+  if (!item.name) throw new Error("Nom du concurrent requis.");
+  if (isOwnProperty(item.name)) throw new Error("Les Cimes ne peut pas être enregistré comme concurrent.");
+  const payload = {
+    name:                String(item.name).trim(),
+    property_type:       item.property_type || "résidence",
+    platform:            item.platform || "Booking.com",
+    booking_url:         item.booking_url || null,
+    search_location:     item.search_location || "La Foux d'Allos",
+    comparability_score: Number(item.comparability_score || 80),
+    notes:               item.notes || null,
+    is_active:           item.is_active !== false,
+  };
+  if (SB_READY) {
+    if (item.id) return await sb.update("competitor_catalog", `id=eq.${item.id}`, { ...payload, updated_at:new Date().toISOString() });
+    return await sb.insert("competitor_catalog", payload);
+  }
+  const all = ls.get(CATALOG_LS);
+  if (item.id) {
+    const idx = all.findIndex(r=>r.id===item.id);
+    if (idx>=0) { all[idx] = { ...all[idx], ...payload, updated_at:new Date().toISOString() }; ls.set(CATALOG_LS, all); return all[idx]; }
+  }
+  const created = { ...payload, id:"cc_"+Date.now(), created_at:new Date().toISOString(), updated_at:new Date().toISOString() };
+  all.push(created); ls.set(CATALOG_LS, all); return created;
+}
+
+async function deleteCompetitorCatalogItem(id) {
+  if (SB_READY) return sb.delete("competitor_catalog", `id=eq.${id}`);
+  ls.set(CATALOG_LS, ls.get(CATALOG_LS).filter(r=>r.id!==id));
+  return true;
+}
+
+async function importCatalogCsv(csvText) {
+  const lines = csvText.trim().split("\n").filter(l=>l.trim());
+  if (lines.length<2) return { ok:0, skipped:0, errors:["Fichier vide"] };
+  const sep = lines[0].includes(";") ? ";" : ",";
+  const headers = lines[0].split(sep).map(h=>h.trim().toLowerCase().replace(/[^a-z_]/g,""));
+  let ok=0, skipped=0; const errors=[];
+  for (const line of lines.slice(1)) {
+    const vals = line.split(sep).map(v=>v.trim().replace(/^"|"$/g,""));
+    const o={}; headers.forEach((h,i)=>o[h]=vals[i]||"");
+    if (!o.name || isOwnProperty(o.name)) { skipped++; continue; }
+    try {
+      await saveCompetitorCatalogItem({
+        name:o.name, property_type:o.property_type||"résidence", platform:o.platform||"Booking.com",
+        booking_url:o.booking_url||null, search_location:o.search_location||"La Foux d'Allos",
+        comparability_score:parseFloat(o.comparability_score)||80, notes:o.notes||null,
+      });
+      ok++;
+    } catch(e) { errors.push(e.message); }
+  }
+  return { ok, skipped, errors:errors.slice(0,4) };
+}
+
+// Lien Booking fiable pour un concurrent suivi (URL exacte si fournie)
+function buildTrackedBookingUrl(competitor, period, capacity) {
+  const checkin = period.period_start || period.week_start;
+  const checkout = period.period_end || addDaysStr(checkin, period.stay_nights || 7);
+  const baseUrl = competitor.booking_url || "https://www.booking.com/searchresults.html";
+  const params = new URLSearchParams({
+    checkin,
+    checkout,
+    group_adults: String(capacity),
+    no_rooms: "1",
+    group_children: "0",
+  });
+  if (baseUrl.includes("booking.com/searchresults")) {
+    params.set("ss", competitor.search_location || competitor.name || "La Foux d'Allos");
+  }
+  return baseUrl.includes("?") ? `${baseUrl}&${params.toString()}` : `${baseUrl}?${params.toString()}`;
+}
+
 function median(arr) {
   if (!arr.length) return null;
   const sorted=[...arr].sort((a,b)=>a-b); const mid=Math.floor(sorted.length/2);
@@ -855,6 +941,14 @@ export default function App() {
 
   // ── Tarifs Les Cimes (our_rates) ──────────────────────────────
   const [ourRates, setOurRates]           = useState([]);
+  // ── Concurrents suivis (competitor_catalog) ───────────────────
+  const [catalog, setCatalog]             = useState([]);
+  const [catForm, setCatForm]             = useState(null); // null = fermé ; objet = formulaire ouvert
+  const [catSaving, setCatSaving]         = useState(false);
+  const [catCsvText, setCatCsvText]       = useState("");
+  const [catCsvResult, setCatCsvResult]   = useState(null);
+  const [catVerifyPrice, setCatVerifyPrice] = useState({});
+  const [catSaved, setCatSaved]           = useState({});
   const [ourForm, setOurForm]             = useState({ priceTotal:"", notes:"" });
   const [ourSaving, setOurSaving]         = useState(false);
   const [ourSaved, setOurSaved]           = useState(null);
@@ -923,8 +1017,76 @@ export default function App() {
   useEffect(()=>{ if(user) loadRates(); },[loadRates,user]);
   useEffect(()=>{ if(user) getImports().then(setImports).catch(()=>{}); },[user]);
   useEffect(()=>{ if(user) getOurRates().then(setOurRates).catch(()=>{}); },[user]);
+  useEffect(()=>{ if(user) getCompetitorCatalog().then(setCatalog).catch(()=>{}); },[user]);
 
   async function reloadOurRates() { try { const d=await getOurRates(); setOurRates(d||[]); } catch {} }
+
+  // ── Concurrents suivis : chargement + handlers ────────────────
+  async function reloadCatalog() { try { const d=await getCompetitorCatalog(); setCatalog(d||[]); } catch {} }
+
+  async function handleSaveCatalogItem() {
+    if (!catForm?.name?.trim()) return;
+    setCatSaving(true);
+    try {
+      await saveCompetitorCatalogItem(catForm);
+      await reloadCatalog();
+      setCatForm(null);
+    } catch(e) { setCatForm(f=>({ ...f, error:e.message })); }
+    setCatSaving(false);
+  }
+
+  async function handleDeleteCatalogItem(id) {
+    try { await deleteCompetitorCatalogItem(id); await reloadCatalog(); } catch(e) { console.error(e); }
+  }
+
+  async function handleImportCatalogCsv() {
+    if (!catCsvText.trim()) return;
+    try { const r = await importCatalogCsv(catCsvText); setCatCsvResult(r); await reloadCatalog(); }
+    catch(e) { setCatCsvResult({ ok:0, skipped:0, errors:[e.message] }); }
+  }
+
+  // Enregistre un relevé vérifié pour un concurrent suivi (validé immédiatement)
+  async function saveTrackedRate(competitor, period, capacity, verifiedPrice, key) {
+    const price = Number(verifiedPrice)||0;
+    if (!price || isOwnProperty(competitor.name)) return;
+    const nights = period.stay_nights || 7;
+    const checkin = period.period_start || period.week_start;
+    const checkout = period.period_end || addDaysStr(checkin, nights);
+    try {
+      await saveCompetitorRate({
+        week_id:            period.id,
+        source:             "Booking.com",
+        property_name:      competitor.name,
+        competitor:         competitor.name,
+        property_type:      competitor.property_type || "résidence",
+        competitor_id:      null,
+        comparability_score:competitor.comparability_score || 80,
+        capacity:           Number(capacity),
+        price:              price,
+        price_week:         price,
+        price_total:        price,
+        price_night:        Math.round(price / nights),
+        price_week_equiv:   Math.round((price / nights) * 7),
+        stay_nights:        nights,
+        period_start:       checkin,
+        period_end:         checkout,
+        season:             period.season || "ete",
+        source_url:         buildTrackedBookingUrl(competitor, period, capacity),
+        source_search_url:  buildTrackedBookingUrl(competitor, period, capacity),
+        collected_at:       new Date().toISOString().slice(0,10),
+        collection_type:    "relevé manuel Booking",
+        reliability_status: "validé",
+        validated_at:       new Date().toISOString(),
+        validation_notes:   "Prix vérifié manuellement sur Booking",
+        is_example:         false,
+      }, competitors);
+      setCatSaved(p=>({ ...p, [key]:"ok" }));
+      setCatVerifyPrice(p=>({ ...p, [key]:"" }));
+      if (period.id===selWeekId && Number(capacity)===capNum) loadRates();
+    } catch(e) {
+      setCatSaved(p=>({ ...p, [key]:e.message?.includes("DUPLICATE")?"dup":"err" }));
+    }
+  }
 
   // ── Enregistrer un tarif Les Cimes ────────────────────────────
   async function handleSaveOurRate() {
@@ -1443,6 +1605,137 @@ export default function App() {
             </div>
           </div>
         )}
+
+        {/* ══ CONCURRENTS SUIVIS ════════════════════════════════ */}
+        <p style={sml}>🏢 Concurrents suivis</p>
+
+        <div style={{ ...cd(11), padding:"9px 12px", background:C.goldL, marginBottom:8 }}>
+          <p style={{ margin:0, fontSize:9, color:C.orange, fontWeight:600, lineHeight:1.4 }}>Les prix Claude sont indicatifs. Les prix validés manuellement sont prioritaires.</p>
+        </div>
+
+        {/* Liste + ajout */}
+        <div style={cd()}>
+          {catalog.length===0&&<div style={{ padding:"12px 13px" }}><p style={{ margin:0, fontSize:11, color:C.gray, fontStyle:"italic" }}>Aucun concurrent suivi. Ajoutez-en un pour relever ses prix Booking facilement.</p></div>}
+          {catalog.map((c,i)=>(
+            <div key={c.id} style={rw(i===catalog.length-1)}>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:5, flexWrap:"wrap" }}>
+                  <span style={{ fontSize:12, fontWeight:500, color:C.text }}>{c.name}</span>
+                  <Badge label={c.property_type} color={c.property_type==="hôtel"?C.purple:c.property_type==="particulier"?"#FF5A5F":C.blue} bg={c.property_type==="hôtel"?C.purpleL:c.property_type==="particulier"?"#FFE9EA":C.bluePale} size={8}/>
+                </div>
+                <div style={{ display:"flex", gap:5, marginTop:1, alignItems:"center", flexWrap:"wrap" }}>
+                  <span style={{ fontSize:9, color:C.gray }}>score {c.comparability_score||"?"}/100 · {c.platform}</span>
+                  {c.booking_url&&<span style={{ fontSize:8, color:C.green }}>URL Booking ✓</span>}
+                </div>
+                {c.notes&&<p style={{ margin:"1px 0 0", fontSize:9, color:C.gray, fontStyle:"italic" }}>{c.notes}</p>}
+              </div>
+              <div style={{ display:"flex", gap:6, alignItems:"center", flexShrink:0 }}>
+                <button onClick={()=>setCatForm({ ...c })} style={{ background:"none", border:"none", cursor:"pointer", fontSize:13, color:C.blue, padding:2 }}>✎</button>
+                <button onClick={()=>handleDeleteCatalogItem(c.id)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:14, color:C.gray, padding:2 }}>🗑</button>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Formulaire ajout/édition */}
+        {catForm ? (
+          <div style={{ ...cd(11), padding:"11px 13px" }}>
+            <p style={{ margin:"0 0 6px", fontSize:11, fontWeight:700, color:C.blue }}>{catForm.id?"Modifier le concurrent":"Ajouter un concurrent"}</p>
+            <p style={{ ...sml, margin:"0 0 4px" }}>Nom *</p>
+            <input style={{ ...inp(), marginBottom:6 }} placeholder="Résidence Les Chalets du Verdon" value={catForm.name||""} onChange={e=>setCatForm(f=>({ ...f, name:e.target.value }))}/>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:6 }}>
+              <div>
+                <p style={{ ...sml, margin:"0 0 4px" }}>Type</p>
+                <select value={catForm.property_type||"résidence"} onChange={e=>setCatForm(f=>({ ...f, property_type:e.target.value }))} style={inp()}>{["résidence","hôtel","particulier"].map(t=><option key={t} value={t}>{t}</option>)}</select>
+              </div>
+              <div>
+                <p style={{ ...sml, margin:"0 0 4px" }}>Plateforme</p>
+                <select value={catForm.platform||"Booking.com"} onChange={e=>setCatForm(f=>({ ...f, platform:e.target.value }))} style={inp()}>{["Booking.com","Airbnb","Abritel"].map(t=><option key={t} value={t}>{t}</option>)}</select>
+              </div>
+            </div>
+            <p style={{ ...sml, margin:"0 0 4px" }}>URL Booking</p>
+            <input style={{ ...inp(), marginBottom:6 }} placeholder="https://www.booking.com/hotel/..." value={catForm.booking_url||""} onChange={e=>setCatForm(f=>({ ...f, booking_url:e.target.value }))}/>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:6 }}>
+              <div>
+                <p style={{ ...sml, margin:"0 0 4px" }}>Score comparabilité</p>
+                <input type="number" style={inp()} placeholder="88" value={catForm.comparability_score??""} onChange={e=>setCatForm(f=>({ ...f, comparability_score:e.target.value }))}/>
+              </div>
+              <div>
+                <p style={{ ...sml, margin:"0 0 4px" }}>Localisation</p>
+                <input style={inp()} placeholder="La Foux d'Allos" value={catForm.search_location||""} onChange={e=>setCatForm(f=>({ ...f, search_location:e.target.value }))}/>
+              </div>
+            </div>
+            <p style={{ ...sml, margin:"0 0 4px" }}>Notes</p>
+            <input style={{ ...inp(), marginBottom:8 }} placeholder="Concurrent direct" value={catForm.notes||""} onChange={e=>setCatForm(f=>({ ...f, notes:e.target.value }))}/>
+            {catForm.error&&<div style={{ ...cd(8), padding:"7px 10px", background:C.redL, marginBottom:6 }}><p style={{ margin:0, fontSize:11, color:C.red }}>✗ {catForm.error}</p></div>}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
+              <button onClick={()=>setCatForm(null)} style={{ ...btn(false,C.grayL,C.text), margin:0 }}>Annuler</button>
+              <button onClick={handleSaveCatalogItem} disabled={catSaving||!catForm.name?.trim()} style={{ ...btn(catSaving||!catForm.name?.trim(),C.blue), margin:0 }}>{catSaving?"…":"Enregistrer"}</button>
+            </div>
+          </div>
+        ) : (
+          <button onClick={()=>setCatForm({ name:"", property_type:"résidence", platform:"Booking.com", booking_url:"", search_location:"La Foux d'Allos", comparability_score:80, notes:"" })} style={{ ...btn(false,C.blue), marginBottom:8 }}>+ Ajouter concurrent</button>
+        )}
+
+        {/* Import CSV concurrents suivis */}
+        <div style={{ ...cd(11), padding:"11px 13px" }}>
+          <p style={{ margin:"0 0 4px", fontSize:11, fontWeight:700, color:C.blue }}>Importer concurrents suivis (CSV)</p>
+          <p style={{ margin:"0 0 6px", fontSize:9, color:C.gray, fontFamily:"monospace", lineHeight:1.5 }}>name;property_type;platform;booking_url;search_location;comparability_score;notes</p>
+          {catCsvResult&&(
+            <div style={{ ...cd(8), padding:"8px 10px", background:catCsvResult.errors.length===0?C.greenL:C.goldL, marginBottom:6 }}>
+              <p style={{ margin:"0 0 1px", fontSize:11, color:C.green }}>✓ Importés : {catCsvResult.ok}</p>
+              <p style={{ margin:"0 0 1px", fontSize:11, color:C.gray }}>⊝ Ignorés : {catCsvResult.skipped}</p>
+              {catCsvResult.errors.map((e,i)=><p key={i} style={{ margin:0, fontSize:10, color:C.red }}>✗ {e}</p>)}
+            </div>
+          )}
+          <textarea value={catCsvText} onChange={e=>setCatCsvText(e.target.value)} placeholder={"Résidence Les Chalets du Verdon;résidence;Booking.com;https://www.booking.com/...;La Foux d'Allos;88;Concurrent direct"} style={{ width:"100%", minHeight:70, padding:"8px", fontSize:10, fontFamily:"monospace", border:`1px solid ${C.grayM}`, borderRadius:9, background:C.grayL, color:C.text, resize:"vertical", boxSizing:"border-box", marginBottom:6 }}/>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
+            <button onClick={()=>{ const tpl=["name;property_type;platform;booking_url;search_location;comparability_score;notes","Résidence Les Chalets du Verdon;résidence;Booking.com;https://www.booking.com/...;La Foux d'Allos;88;Concurrent direct","Central Park;résidence;Booking.com;https://www.booking.com/...;La Foux d'Allos;82;Concurrent direct"].join("\n"); const b=new Blob([tpl],{ type:"text/csv;charset=utf-8" }); const u=URL.createObjectURL(b); const a=document.createElement("a"); a.href=u; a.download="modele_concurrents_suivis.csv"; a.click(); }} style={{ ...btn(false,C.grayL,C.blueL), margin:0, border:`1px solid ${C.blueL}` }}>⬇ Modèle CSV</button>
+            <button onClick={handleImportCatalogCsv} disabled={!catCsvText.trim()} style={{ ...btn(!catCsvText.trim(),C.blue), margin:0 }}>Importer concurrents suivis</button>
+          </div>
+        </div>
+
+        {/* Relevé rapide concurrents suivis (période + capacité courantes) */}
+        {catalog.length>0&&(()=>{
+          const period = selWeek;
+          const checkin = period?.period_start || period?.week_start;
+          const checkout = period?.period_end || (checkin?addDaysStr(checkin, period?.stay_nights||7):"");
+          return (
+            <>
+              <p style={sml}>Relevé rapide concurrents suivis</p>
+              <div style={{ ...cd(11,4), padding:"8px 12px", background:C.bluePale }}>
+                <p style={{ margin:0, fontSize:10, color:C.blueL, fontWeight:600 }}>{period?.label} · {cap}</p>
+                <p style={{ margin:"1px 0 0", fontSize:9, color:C.blueL }}>Booking : arrivée {fmtDateShort(checkin)} · départ {fmtDateShort(checkout)}</p>
+              </div>
+              <div style={cd()}>
+                {catalog.map((c,i)=>{
+                  const key=`${period?.id}_${capNum}_${c.id}`;
+                  const st=catSaved[key];
+                  const vp=catVerifyPrice[key]??"";
+                  const url=buildTrackedBookingUrl(c, period||{}, capNum);
+                  return (
+                    <div key={c.id} style={{ padding:"8px 12px", borderBottom:i<catalog.length-1?`0.5px solid ${C.grayL}`:"none" }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
+                        <span style={{ fontSize:11, fontWeight:500, color:C.text, flex:1, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{c.name}</span>
+                        <a href={url} target="_blank" rel="noreferrer" style={{ fontSize:9, fontWeight:600, color:C.blue, background:C.white, padding:"4px 8px", borderRadius:6, textDecoration:"none", border:`1px solid ${C.grayM}`, flexShrink:0 }}>↗ Ouvrir Booking</a>
+                      </div>
+                      {st==="ok" ? (
+                        <p style={{ margin:"5px 0 0", fontSize:9, color:C.green, fontWeight:600 }}>✓ Prix validé enregistré</p>
+                      ) : (
+                        <div style={{ display:"flex", gap:6, marginTop:5, alignItems:"center" }}>
+                          <input type="number" placeholder="Prix vérifié" value={vp} onChange={e=>setCatVerifyPrice(p=>({ ...p, [key]:e.target.value }))} style={{ flex:1, padding:"5px 8px", fontSize:10, border:`1px solid ${C.grayM}`, borderRadius:6, boxSizing:"border-box" }}/>
+                          <button onClick={()=>saveTrackedRate(c, period, capNum, vp, key)} disabled={!vp} style={{ padding:"5px 8px", fontSize:9, fontWeight:700, background:vp?C.green:C.grayL, color:vp?C.white:C.gray, border:"none", borderRadius:6, cursor:vp?"pointer":"default", whiteSpace:"nowrap" }}>Enregistrer prix vérifié</button>
+                        </div>
+                      )}
+                      {st==="dup"&&<p style={{ margin:"4px 0 0", fontSize:9, color:C.gold }}>= Relevé déjà existant</p>}
+                      {st==="err"&&<p style={{ margin:"4px 0 0", fontSize:9, color:C.red }}>✗ Erreur d'enregistrement</p>}
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          );
+        })()}
       </div><BNav/>
     </div>
     );
