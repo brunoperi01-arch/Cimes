@@ -1755,8 +1755,15 @@ export default function App() {
                   const ch=catChannel[key]??defaultCh;
                   return (
                     <div key={c.id} style={{ padding:"8px 12px", borderBottom:i<catalog.length-1?`0.5px solid ${C.grayL}`:"none" }}>
-                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
-                        <span style={{ fontSize:11, fontWeight:500, color:C.text, flex:1, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{c.name}</span>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 }}>
+                        <div style={{ flex:1, minWidth:0 }}>
+                          <span style={{ fontSize:11, fontWeight:500, color:C.text }}>{c.name}</span>
+                          <div style={{ display:"flex", gap:4, marginTop:2, alignItems:"center", flexWrap:"wrap" }}>
+                            <span style={{ fontSize:9, color:C.gray }}>{c.property_type} · score {c.comparability_score||"?"}</span>
+                            {c.booking_url&&<Badge label="Booking" color={C.blue} bg={C.bluePale} size={8}/>}
+                            {directUrl&&<Badge label="Direct" color={C.green} bg={C.greenL} size={8}/>}
+                          </div>
+                        </div>
                         <div style={{ display:"flex", gap:4, flexShrink:0, flexWrap:"wrap", justifyContent:"flex-end" }}>
                           {c.booking_url&&<a href={bookingUrl} target="_blank" rel="noreferrer" style={{ fontSize:9, fontWeight:600, color:C.blue, background:C.white, padding:"4px 8px", borderRadius:6, textDecoration:"none", border:`1px solid ${C.grayM}` }}>↗ Booking</a>}
                           {directUrl&&<a href={directUrl} target="_blank" rel="noreferrer" style={{ fontSize:9, fontWeight:600, color:C.green, background:C.white, padding:"4px 8px", borderRadius:6, textDecoration:"none", border:`1px solid ${C.grayM}` }}>↗ Site direct</a>}
