@@ -256,6 +256,14 @@ const DEFAULT_COMPETITORS = [
   { id:"pap_lf",   name:"PAP Vacances",              property_type:"particulier",source:"PAP",             comparability_score:48, has_pool:false, has_ski_access:false },
 ];
 
+// Dates métier : ne JAMAIS utiliser toISOString() (décalage de fuseau possible)
+function dateISO(y, m, d) {
+  return `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+function dateObjToISO(date) {
+  return dateISO(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
 const STATIC_WEEKS = (() => {
   const mns=["jan","fév","mar","avr","mai","juin","juil","août","sept"];
   const evts={"2026-07-11":"Vac. zone A","2026-07-14":"Fête Nat.","2026-07-18":"Vac. B/C","2026-08-15":"Assomption","2026-09-05":"Rentrée","2027-07-10":"Vac. zone A","2027-07-14":"Fête Nat.","2027-07-17":"Vac. B/C","2027-08-15":"Assomption","2027-09-04":"Rentrée"};
@@ -270,7 +278,7 @@ const STATIC_WEEKS = (() => {
       const key=`${year}-${String(m+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
       let cat="basse";
       if(m===7) cat="haute"; else if(m===6&&d.getDate()>=11) cat="haute"; else if(m===6) cat="moyenne"; else if(m===5&&d.getDate()>=27) cat="moyenne";
-      rows.push({ id:`${year}_w${wn}`, year, week_start:d.toISOString().slice(0,10), label:`${fmt(d)} → ${fmt(e)}`, month_label:["Juin","Juil.","Août","Sept."][m-5]||"", season_type:cat, event_label:evts[key]||null });
+      rows.push({ id:`${year}_w${wn}`, year, week_start:dateObjToISO(d), label:`${fmt(d)} → ${fmt(e)}`, month_label:["Juin","Juil.","Août","Sept."][m-5]||"", season_type:cat, event_label:evts[key]||null });
       d=new Date(d.getTime()+7*864e5); wn++;
     }
   });
@@ -356,6 +364,40 @@ function fmtDateShort(dateStr) {
   const mns = ["jan","fév","mar","avr","mai","juin","juil","août","sept","oct","nov","déc"];
   const d = new Date(dateStr + "T12:00:00Z");
   return `${d.getUTCDate()} ${mns[d.getUTCMonth()]}`;
+}
+
+// Lien Booking par localisation + dates corrigées (résidences/appart = property_type 204)
+function bookingSearchUrl({ location, periodStart, periodEnd, capacity, propertyTypeCode = "204" }) {
+  const ss = encodeURIComponent(location || "La Foux d'Allos");
+  return `https://www.booking.com/searchresults.html?ss=${ss}&checkin=${periodStart}&checkout=${periodEnd}&group_adults=${capacity}&nflt=property_type%3D${propertyTypeCode}`;
+}
+
+// Lien Booking ciblé sur le nom d'un logement précis
+function bookingItemUrl(item, result) {
+  const query = encodeURIComponent(`${item.name} La Foux d'Allos`);
+  const checkin = result.period_start;
+  const checkout = result.period_end;
+  const adults = result.capacity || 2;
+  return `https://www.booking.com/searchresults.fr.html?ss=${query}&checkin=${checkin}&checkout=${checkout}&group_adults=${adults}&no_rooms=1&group_children=0`;
+}
+
+// URL sûre : garde l'URL source si elle paraît valide, sinon recherche Booking/Google
+function safeListingUrl(item, result) {
+  const raw = item.url || "";
+  if (raw && raw.startsWith("https://") && !raw.includes("...")) return raw;
+  if ((item.platform || "").toLowerCase().includes("booking")) return bookingItemUrl(item, result);
+  return `https://www.google.com/search?q=${encodeURIComponent(item.name + " La Foux d'Allos")}`;
+}
+
+// Détecte notre propre établissement pour l'exclure des concurrents
+function isOwnProperty(name) {
+  const n = String(name || "").toLowerCase();
+  return (
+    n.includes("les cimes du val d'allos") ||
+    n.includes("les cimes val d'allos") ||
+    n.includes("résidence les cimes") ||
+    n.includes("residence les cimes")
+  );
 }
 
 function isDuplicate(existing, rate) {
@@ -486,6 +528,9 @@ async function saveCompetitorRate(rate, allCompetitors) {
       ...(clean.period_start && { period_start: clean.period_start }),
       ...(clean.period_end && { period_end: clean.period_end }),
       ...(clean.season && { season: clean.season }),
+      ...(clean.source_search_url && { source_search_url: clean.source_search_url }),
+      ...(clean.validation_notes && { validation_notes: clean.validation_notes }),
+      ...(clean.validated_at && { validated_at: clean.validated_at }),
     };
 
     try {
@@ -801,6 +846,7 @@ export default function App() {
   const [planLoading, setPlanLoading]     = useState(false);
   const [planResults, setPlanResults]     = useState(null);
   const [planSaved, setPlanSaved]         = useState({});
+  const [planVerifyPrice, setPlanVerifyPrice] = useState({});
   const [planError, setPlanError]         = useState("");
   const [showPlan, setShowPlan]           = useState(false);
 
@@ -1123,9 +1169,11 @@ export default function App() {
     setPlanLoading(false);
   }
 
-  async function savePlanRate(item, result, key) {
-    const priceTotal = Number(item.price_total??item.price_week??0);
-    const priceNight = Number(item.price_night??(priceTotal?Math.round(priceTotal/(result.stay_nights||7)):0));
+  async function savePlanRate(item, result, key, override) {
+    if (isOwnProperty(item.name)) { setPlanSaved(p=>({ ...p, [key]:"own" })); return; }
+    const verifiedPrice = override?.verifiedPrice ? Number(override.verifiedPrice) : 0;
+    const priceTotal = verifiedPrice || Number(item.price_total??item.price_week??0);
+    const priceNight = Number(item.price_night && !verifiedPrice ? item.price_night : (priceTotal?Math.round(priceTotal/(result.stay_nights||7)):0));
     const priceWeekEquiv = priceNight?Math.round(priceNight*7):null;
     try {
       await saveCompetitorRate({
@@ -1147,13 +1195,15 @@ export default function App() {
         season:             result.season,
         source_url:         item.url||"",
         url:                item.url||"",
+        source_search_url:  safeListingUrl(item, result),
         booking_rating:     item.rating||null,
         collected_at:       new Date().toISOString().slice(0,10),
         collection_type:    "scraping-batch",
-        reliability_status: "à vérifier",
+        reliability_status: verifiedPrice ? "validé" : "à vérifier",
+        ...(verifiedPrice && { validated_at:new Date().toISOString(), validation_notes:"Prix vérifié manuellement sur Booking" }),
         is_example:         false,
       },competitors);
-      setPlanSaved(p=>({ ...p, [key]:"ok" }));
+      setPlanSaved(p=>({ ...p, [key]:verifiedPrice?"valid":"ok" }));
       if(result.week_id===selWeekId&&result.capacity===capNum) loadRates();
     } catch(e) {
       const status = e.message?.includes("DUPLICATE") ? "dup" : "err";
@@ -1166,8 +1216,9 @@ export default function App() {
 
   async function savePlanGroup(result) {
     for(let i=0;i<result.listings.length;i++){
+      if (isOwnProperty(result.listings[i].name)) continue;
       const key=`${result.week_id}_${result.capacity}_${i}`;
-      if(planSaved[key] !== "ok" && planSaved[key] !== "dup") await savePlanRate(result.listings[i],result,key);
+      if(planSaved[key] !== "ok" && planSaved[key] !== "dup" && planSaved[key] !== "valid") await savePlanRate(result.listings[i],result,key);
     }
   }
 
@@ -1683,13 +1734,18 @@ export default function App() {
             {/* ══ PLAN DE COLLECTE ══════════════════════════════════ */}
             <div style={{ marginTop:6 }}>
               <button onClick={()=>{ setShowPlan(p=>!p); if(showPlan){ setPlanResults(null); setPlanError(""); } }} style={{ width:"100%", display:"flex", justifyContent:"space-between", alignItems:"center", padding:"9px 13px", background:showPlan?C.bluePale:C.white, border:`1px solid ${showPlan?C.blueL:C.grayM}`, borderRadius:10, cursor:"pointer" }}>
-                <span style={{ fontSize:12, fontWeight:600, color:showPlan?C.blue:C.text }}>📋 Plan de collecte</span>
+                <span style={{ fontSize:12, fontWeight:600, color:showPlan?C.blue:C.text }}>🔎 Pré-recherche marché</span>
                 <span style={{ fontSize:10, color:C.gray }}>{showPlan?"▲ Fermer":"▼ Ouvrir"}</span>
               </button>
 
               {showPlan&&(()=>{
                 return (
                   <div style={{ background:C.white, border:`1px solid ${C.grayM}`, borderTop:"none", borderRadius:"0 0 10px 10px", padding:"10px 13px", marginBottom:8 }}>
+
+                    {/* Avertissement usage Claude */}
+                    <div style={{ background:C.goldL, borderRadius:8, padding:"7px 10px", marginBottom:10 }}>
+                      <p style={{ margin:0, fontSize:9, color:C.orange, fontWeight:600, lineHeight:1.4 }}>Claude sert à repérer des annonces, pas à garantir les prix. Vérifiez chaque tarif sur Booking avant de valider.</p>
+                    </div>
 
                     {/* Mode */}
                     <p style={{ ...sml, margin:"0 0 6px" }}>Mode</p>
@@ -1789,8 +1845,15 @@ export default function App() {
                     </div>
 
                     <button onClick={launchPlan} disabled={!planCanLaunch} style={{ ...btn(!planCanLaunch,C.blue), margin:0 }}>
-                      {planLoading?`⏳ Recherche en cours…`:"🚀 Lancer le plan de collecte"}
+                      {planLoading?`⏳ Recherche en cours…`:"🔎 Lancer la pré-recherche"}
                     </button>
+                    {selectedPlanPeriods.length>0&&(()=>{
+                      const sp=selectedPlanPeriods[0];
+                      const start=sp.period_start||sp.week_start;
+                      const nights=sp.stay_nights||planNights||7;
+                      const checkout=sp.period_end||addDaysStr(start,nights);
+                      return <p style={{ margin:"5px 0 0", fontSize:9, color:C.gray, textAlign:"center" }}>Booking : arrivée {fmtDateShort(start)} · départ {fmtDateShort(checkout)} · {nights} nuits</p>;
+                    })()}
 
                     {planError&&<div style={{ ...cd(9), padding:"8px 12px", background:C.redL, marginTop:6, marginBottom:0 }}><p style={{ margin:0, fontSize:11, color:C.red }}>{planError}</p></div>}
 
@@ -1800,23 +1863,29 @@ export default function App() {
                         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
                           <p style={{ ...sml, margin:0 }}>Résultats ({planResults.reduce((s,r)=>s+r.listings.length,0)} logements)</p>
                         </div>
-                        {planResults.map((result,ri)=>{
+                        {planResults.map((rawResult,ri)=>{
+                          const ownCount=(rawResult.listings||[]).filter(l=>isOwnProperty(l.name)).length;
+                          const result={ ...rawResult, listings:(rawResult.listings||[]).filter(l=>!isOwnProperty(l.name)) };
                           const allGroupSaved=result.listings.map((_,i)=>planSaved[`${result.week_id}_${result.capacity}_${i}`]);
-                          const allDone=allGroupSaved.length>0&&allGroupSaved.every(s=>s==="ok"||s==="dup");
+                          const allDone=allGroupSaved.length>0&&allGroupSaved.every(s=>s==="ok"||s==="dup"||s==="valid");
+                          const bkCheckin=result.period_start;
+                          const bkCheckout=result.period_end||addDaysStr(result.period_start,result.stay_nights||7);
                           return (
                             <div key={`${result.week_id}_${result.capacity}`} style={{ ...cd(10,6) }}>
                               <div style={{ padding:"7px 12px", background:result.from_cache?C.greenL:C.bluePale, display:"flex", justifyContent:"space-between", alignItems:"center", borderBottom:`0.5px solid ${C.grayM}` }}>
                                 <div>
                                   <div style={{ display:"flex", alignItems:"center", gap:6 }}>
                                     <p style={{ margin:0, fontSize:11, fontWeight:700, color:result.from_cache?C.green:C.blue }}>{result.week_label}</p>
-                                    <span style={{ fontSize:9, fontWeight:700, padding:"1px 5px", borderRadius:4, background:result.from_cache?"#D1FAE5":"#DBEAFE", color:result.from_cache?C.green:C.blueL }}>{result.from_cache?"Cache":"Claude"}</span>
+                                    <span style={{ fontSize:9, fontWeight:700, padding:"1px 5px", borderRadius:4, background:result.from_cache?"#D1FAE5":"#DBEAFE", color:result.from_cache?C.green:C.blueL }}>{result.from_cache?"Cache":"Pré-recherche"}</span>
                                   </div>
                                   <p style={{ margin:0, fontSize:9, color:result.from_cache?C.green:C.blueL }}>
-                                    {fmtDateShort(result.period_start)} → {fmtDateShort(result.period_end)} · {result.stay_nights}n · {result.capacity}P · {result.listings.length} logements
+                                    {fmtDateShort(result.period_start)} → {fmtDateShort(addDaysStr(result.period_start,(result.stay_nights||7)-1))} · {result.stay_nights}n · {result.capacity}P · {result.listings.length} logements
                                   </p>
+                                  <p style={{ margin:"1px 0 0", fontSize:8, color:C.gray }}>Booking : arrivée {fmtDateShort(bkCheckin)} · départ {fmtDateShort(bkCheckout)}</p>
                                   {result.platforms&&result.platforms.length>0&&(
                                     <p style={{ margin:"1px 0 0", fontSize:8, color:C.gray }}>📍 {result.platforms.join(" · ")}</p>
                                   )}
+                                  {ownCount>0&&<p style={{ margin:"1px 0 0", fontSize:8, color:C.orange }}>{ownCount} résultat{ownCount>1?"s":""} ignoré{ownCount>1?"s":""} : Les Cimes</p>}
                                 </div>
                                 {!result.error&&result.listings.length>0&&(
                                   <div style={{ display:"flex", flexDirection:"column", gap:4, alignItems:"flex-end" }}>
@@ -1828,6 +1897,14 @@ export default function App() {
                                     </button>)}
                                   </div>
                                 )}
+                              </div>
+                              {/* Avertissement fiabilité + liens Booking corrigés */}
+                              <div style={{ padding:"7px 12px", background:C.goldL, borderBottom:`0.5px solid ${C.grayM}` }}>
+                                <p style={{ margin:"0 0 5px", fontSize:9, color:C.orange, fontWeight:600 }}>⚠ Prix issus de Claude Web Search : à vérifier sur Booking avant validation.</p>
+                                <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
+                                  <a href={bookingSearchUrl({ location:"La Foux d'Allos", periodStart:bkCheckin, periodEnd:bkCheckout, capacity:result.capacity })} target="_blank" rel="noreferrer" style={{ fontSize:9, fontWeight:600, color:C.blue, background:C.white, padding:"3px 8px", borderRadius:6, textDecoration:"none", border:`1px solid ${C.grayM}` }}>↗ Ouvrir Booking La Foux</a>
+                                  <a href={bookingSearchUrl({ location:"Val d'Allos", periodStart:bkCheckin, periodEnd:bkCheckout, capacity:result.capacity })} target="_blank" rel="noreferrer" style={{ fontSize:9, fontWeight:600, color:C.blue, background:C.white, padding:"3px 8px", borderRadius:6, textDecoration:"none", border:`1px solid ${C.grayM}` }}>↗ Ouvrir Booking Val d'Allos</a>
+                                </div>
                               </div>
                               {result.error&&<div style={{ padding:"8px 12px" }}><p style={{ margin:0, fontSize:11, color:C.red }}>✗ {result.error}</p></div>}
                               {result.warning&&!result.error&&<div style={{ padding:"8px 12px" }}><p style={{ margin:0, fontSize:11, color:C.gold }}>⚠ {result.warning}</p></div>}
@@ -1844,22 +1921,35 @@ export default function App() {
                                     const pn=item.price_night??(pt?Math.round(pt/(result.stay_nights||7)):0);
                                     const equiv=item.price_week_equiv??(pn?Math.round(pn*7):null);
                                     const is2n=result.stay_nights===2;
+                                    const locked=state==="ok"||state==="dup"||state==="valid";
+                                    const vp=planVerifyPrice[key]??"";
+                                    const vpNight=vp?Math.round((parseFloat(vp)||0)/(result.stay_nights||7)):0;
                                     return (
-                                      <div key={i} style={{ display:"flex", alignItems:"center", gap:8, padding:"7px 12px", borderBottom:i<items.length-1?`0.5px solid ${C.grayL}`:"none" }}>
-                                        <div style={{ flex:1, minWidth:0 }}>
-                                          <p style={{ margin:0, fontSize:11, fontWeight:500, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                                            {item.url?<a href={item.url} target="_blank" rel="noreferrer" style={{ color:C.text, textDecoration:"none" }}>{item.name}</a>:item.name}
-                                          </p>
-                                          <p style={{ margin:0, fontSize:9, color:C.gray }}>{item.platform}{item.rating?` · ${item.rating}★`:""}</p>
-                                          {is2n&&equiv&&<p style={{ margin:0, fontSize:8, color:C.purple, fontStyle:"italic" }}>≈{fmt(equiv)}€/sem indicatif</p>}
+                                      <div key={i} style={{ padding:"7px 12px", borderBottom:i<items.length-1?`0.5px solid ${C.grayL}`:"none" }}>
+                                        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                                          <div style={{ flex:1, minWidth:0 }}>
+                                            <p style={{ margin:0, fontSize:11, fontWeight:500, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                                              <a href={safeListingUrl(item, result)} target="_blank" rel="noreferrer" style={{ color:C.text, textDecoration:"none" }}>{item.name}</a>
+                                            </p>
+                                            <p style={{ margin:0, fontSize:9, color:C.gray }}>{item.platform}{item.rating?` · ${item.rating}★`:""} · <span style={{ color:C.blueL }}>{(item.url&&item.url.startsWith("https://")&&!item.url.includes("..."))?"Lien source ↗":"Recherche Booking ↗"}</span></p>
+                                            {is2n&&equiv&&<p style={{ margin:0, fontSize:8, color:C.purple, fontStyle:"italic" }}>≈{fmt(equiv)}€/sem indicatif</p>}
+                                          </div>
+                                          <div style={{ textAlign:"right", flexShrink:0 }}>
+                                            <p style={{ margin:0, fontSize:12, fontWeight:700, color:C.text }}>{fmt(pt)}€<span style={{ fontSize:9, fontWeight:400, color:C.gray }}>/{is2n?"2n":"sem"}</span></p>
+                                            <p style={{ margin:0, fontSize:8, color:C.orange }}>proposé Claude</p>
+                                          </div>
+                                          <button onClick={()=>savePlanRate(item,result,key)} disabled={locked} style={{ width:26, height:26, borderRadius:7, border:"none", flexShrink:0, background:state==="dup"?C.goldL:(state==="ok"||state==="valid")?C.greenL:state==="err"?C.redL:C.bluePale, color:state==="dup"?C.gold:(state==="ok"||state==="valid")?C.green:state==="err"?C.red:C.blue, fontWeight:700, fontSize:14, cursor:locked?"default":"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>
+                                            {state==="dup"?"=":state==="valid"?"✓✓":state==="ok"?"✓":state==="err"?"!":"+"}
+                                          </button>
                                         </div>
-                                        <div style={{ textAlign:"right", flexShrink:0 }}>
-                                          <p style={{ margin:0, fontSize:12, fontWeight:700, color:C.text }}>{fmt(pt)}€<span style={{ fontSize:9, fontWeight:400, color:C.gray }}>/{is2n?"2n":"sem"}</span></p>
-                                          {pn>0&&<p style={{ margin:0, fontSize:9, color:C.gray }}>{fmt(pn)}€/n</p>}
-                                        </div>
-                                        <button onClick={()=>savePlanRate(item,result,key)} disabled={state==="ok"||state==="dup"} style={{ width:26, height:26, borderRadius:7, border:"none", flexShrink:0, background:state==="dup"?C.goldL:state==="ok"?C.greenL:state==="err"?C.redL:C.bluePale, color:state==="dup"?C.gold:state==="ok"?C.green:state==="err"?C.red:C.blue, fontWeight:700, fontSize:14, cursor:(state==="ok"||state==="dup")?"default":"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>
-                                          {state==="dup"?"=":state==="ok"?"✓":state==="err"?"!":"+"}
-                                        </button>
+                                        {!locked&&(
+                                          <div style={{ display:"flex", alignItems:"center", gap:6, marginTop:5 }}>
+                                            <input type="number" placeholder="Prix vérifié Booking" value={vp} onChange={e=>setPlanVerifyPrice(p=>({ ...p, [key]:e.target.value }))} style={{ flex:1, padding:"5px 8px", fontSize:10, border:`1px solid ${C.grayM}`, borderRadius:6, boxSizing:"border-box" }}/>
+                                            {vp&&<span style={{ fontSize:9, color:C.gray, whiteSpace:"nowrap" }}>{vpNight}€/n</span>}
+                                            <button onClick={()=>savePlanRate(item,result,key,{ verifiedPrice:vp })} disabled={!vp} style={{ padding:"5px 8px", fontSize:9, fontWeight:700, background:vp?C.green:C.grayL, color:vp?C.white:C.gray, border:"none", borderRadius:6, cursor:vp?"pointer":"default", whiteSpace:"nowrap" }}>✓ Valider avec ce prix</button>
+                                          </div>
+                                        )}
+                                        {state==="valid"&&<p style={{ margin:"4px 0 0", fontSize:8, color:C.green }}>✓ Validé — prix vérifié manuellement</p>}
                                       </div>
                                     );
                                   })}
