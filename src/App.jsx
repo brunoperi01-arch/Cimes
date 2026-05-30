@@ -2163,7 +2163,7 @@ export default function App() {
     );
   };
 
-  return (
+ return (
   <div style={{ padding:"20px 0 40px", display:"flex", justifyContent:"center" }}>
     <div style={ph}>
       {!user && (
@@ -2187,5 +2187,6 @@ export default function App() {
       {user && screen === "diag" && Diagnostic()}
     </div>
   </div>
+);
 );
 }
