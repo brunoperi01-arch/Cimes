@@ -118,7 +118,9 @@ const sb = {
 
   return d;
 },
-  signOut() { _token=null; try { sessionStorage.removeItem("sb_token"); sessionStorage.removeItem("sb_user"); } catch {} },
+  signOut() {
+  clearStoredSession();
+},
   restoreSession() { try { const t=sessionStorage.getItem("sb_token"); const u=sessionStorage.getItem("sb_user"); if (t&&u) { _token=t; return JSON.parse(u); } } catch {} return null; },
 };
 
