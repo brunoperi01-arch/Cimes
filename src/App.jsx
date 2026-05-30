@@ -121,7 +121,27 @@ const sb = {
   signOut() {
   clearStoredSession();
 },
-  restoreSession() { try { const t=sessionStorage.getItem("sb_token"); const u=sessionStorage.getItem("sb_user"); if (t&&u) { _token=t; return JSON.parse(u); } } catch {} return null; },
+restoreSession() {
+  try {
+    const t = sessionStorage.getItem("sb_token");
+    const r = sessionStorage.getItem("sb_refresh");
+    const e = sessionStorage.getItem("sb_expires_at");
+    const u = sessionStorage.getItem("sb_user");
+
+    if (t && r && u) {
+      _token = t;
+      _refreshToken = r;
+      _expiresAt = Number(e || 0);
+      return JSON.parse(u);
+    }
+
+    clearStoredSession();
+  } catch {
+    clearStoredSession();
+  }
+
+  return null;
+},  
 };
 
 // ══ DONNÉES STATIQUES ═══════════════════════════════════════════
