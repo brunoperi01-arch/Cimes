@@ -994,6 +994,7 @@ export default function App() {
   const [trackedCheckin, setTrackedCheckin] = useState("");
   const [trackedCheckout, setTrackedCheckout] = useState("");
   const [trackedCapacity, setTrackedCapacity] = useState(6);
+  const [trackedLinksVisible, setTrackedLinksVisible] = useState(false);
   const [catSaved, setCatSaved]           = useState({});
   const [ourForm, setOurForm]             = useState({ priceTotal:"", notes:"" });
   const [ourSaving, setOurSaving]         = useState(false);
@@ -1054,7 +1055,7 @@ export default function App() {
     const nights = trackedMode === "custom" ? daysBetween(trackedCheckin, trackedCheckout) : (selWeek?.stay_nights || 7);
     const checkout = trackedMode === "custom" ? trackedCheckout : (selWeek?.period_end || addDaysStr(checkin, nights));
     const capacity = Number(trackedCapacity || capNum);
-    const periodId = trackedMode === "custom" ? `custom_${checkin}_${checkout}` : selWeekId;
+    const periodId = trackedMode === "custom" ? `custom_${checkin}_${checkout}_${capacity}p` : selWeekId;
     const label = trackedMode === "custom" ? `${checkin} → ${checkout}` : (selWeek?.label || selWeek?.subtitle || "");
     return { periodId, label, checkin, checkout, capacity, stayNights: nights, season: selWeek?.season || "ete" };
   }
@@ -1830,7 +1831,8 @@ export default function App() {
         {/* Relevé rapide concurrents suivis (période + capacité courantes) */}
         {catalog.length>0&&(()=>{
           const ctx = getTrackedPeriodContext();
-          const ctxValid = isTrackedCtxValid(ctx);
+          const datesInvalid = !ctx.checkin || !ctx.checkout || !ctx.stayNights || ctx.stayNights <= 0;
+          const ctxValid = !datesInvalid;
           // Dernier prix enregistré par concurrent + source (depuis rates chargés)
           const lastRateFor = (name, sourceLabel) => {
             const matches = (rates||[]).filter(r=>!r.is_example && (r.competitor===name||r.property_name===name||r.competitor_name===name) && r.source===sourceLabel);
@@ -1878,9 +1880,32 @@ export default function App() {
                 )}
                 <p style={{ margin:"4px 0 0", fontSize:9, color:C.gray, fontStyle:"italic" }}>Les prix saisis ici sont considérés comme vérifiés manuellement.</p>
                 <div style={{ display:"flex", gap:5, marginTop:7, flexWrap:"wrap" }}>
-                  {allBookingUrls.length>0&&<button onClick={()=>{ if(!ctxValid){ setPlanError("Dates invalides : vérifiez arrivée et départ."); return; } openAllLinks(allBookingUrls); }} style={{ fontSize:9, fontWeight:600, color:C.white, background:ctxValid?C.blue:C.gray, padding:"5px 9px", borderRadius:6, border:"none", cursor:"pointer" }}>↗ Ouvrir tous les Booking ({allBookingUrls.length})</button>}
-                  {allDirectUrls.length>0&&<button onClick={()=>openAllLinks(allDirectUrls)} style={{ fontSize:9, fontWeight:600, color:C.white, background:C.green, padding:"5px 9px", borderRadius:6, border:"none", cursor:"pointer" }}>↗ Ouvrir tous les sites directs ({allDirectUrls.length})</button>}
+                  {(allBookingUrls.length>0||allDirectUrls.length>0)&&<button onClick={()=>setTrackedLinksVisible(v=>!v)} disabled={datesInvalid} style={{ fontSize:9, fontWeight:600, color:datesInvalid?C.gray:C.white, background:datesInvalid?C.grayL:C.blue, padding:"5px 9px", borderRadius:6, border:"none", cursor:datesInvalid?"default":"pointer" }}>{trackedLinksVisible?"▲ Masquer les liens":`↗ Ouvrir tous les Booking (${allBookingUrls.length})`}</button>}
+                  {allBookingUrls.length>1&&!datesInvalid&&<button onClick={()=>openAllLinks(allBookingUrls)} style={{ fontSize:9, fontWeight:600, color:C.blue, background:C.white, padding:"5px 9px", borderRadius:6, border:`1px solid ${C.blueL}`, cursor:"pointer" }}>Ouvrir les {Math.min(allBookingUrls.length,5)} premiers</button>}
                 </div>
+                {/* Liste de liens cliquables (évite le blocage multi-onglets) */}
+                {trackedLinksVisible&&!datesInvalid&&(
+                  <div style={{ marginTop:8, borderTop:`0.5px solid ${C.grayM}`, paddingTop:8 }}>
+                    {allBookingUrls.length>0&&(<>
+                      <p style={{ margin:"0 0 4px", fontSize:9, fontWeight:700, color:C.blue, textTransform:"uppercase" }}>Liens Booking à ouvrir</p>
+                      {catalog.filter(c=>c.booking_url).map((c,idx)=>(
+                        <div key={c.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, padding:"4px 0" }}>
+                          <span style={{ fontSize:10, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{idx+1}. {c.name}</span>
+                          <a href={buildTrackedBookingUrl(c, ctx)} target="_blank" rel="noreferrer" style={{ fontSize:9, fontWeight:600, color:C.blue, background:C.bluePale, padding:"3px 9px", borderRadius:6, textDecoration:"none", flexShrink:0 }}>Ouvrir ↗</a>
+                        </div>
+                      ))}
+                    </>)}
+                    {allDirectUrls.length>0&&(<>
+                      <p style={{ margin:"8px 0 4px", fontSize:9, fontWeight:700, color:C.green, textTransform:"uppercase" }}>Liens site direct à ouvrir</p>
+                      {catalog.filter(c=>buildTrackedDirectUrl(c)).map((c,idx)=>(
+                        <div key={c.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, padding:"4px 0" }}>
+                          <span style={{ fontSize:10, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{idx+1}. {c.name}</span>
+                          <a href={buildTrackedDirectUrl(c)} target="_blank" rel="noreferrer" style={{ fontSize:9, fontWeight:600, color:C.green, background:C.greenL, padding:"3px 9px", borderRadius:6, textDecoration:"none", flexShrink:0 }}>Ouvrir ↗</a>
+                        </div>
+                      ))}
+                    </>)}
+                  </div>
+                )}
               </div>
               <div style={cd()}>
                 {catalog.map((c,i)=>{
@@ -1906,7 +1931,9 @@ export default function App() {
                           </div>
                         </div>
                         <div style={{ display:"flex", gap:4, flexShrink:0, flexWrap:"wrap", justifyContent:"flex-end" }}>
-                          {hasBooking&&<a href={bookingUrl} target="_blank" rel="noreferrer" style={{ fontSize:9, fontWeight:600, color:C.blue, background:C.white, padding:"4px 8px", borderRadius:6, textDecoration:"none", border:`1px solid ${C.grayM}` }}>↗ Booking</a>}
+                          {hasBooking&&(datesInvalid
+                            ? <span style={{ fontSize:9, fontWeight:600, color:C.gray, background:C.grayL, padding:"4px 8px", borderRadius:6, border:`1px solid ${C.grayM}` }}>↗ Booking</span>
+                            : <a href={bookingUrl} target="_blank" rel="noreferrer" style={{ fontSize:9, fontWeight:600, color:C.blue, background:C.white, padding:"4px 8px", borderRadius:6, textDecoration:"none", border:`1px solid ${C.grayM}` }}>↗ Booking</a>)}
                           {hasDirect&&<a href={directUrl} target="_blank" rel="noreferrer" style={{ fontSize:9, fontWeight:600, color:C.green, background:C.white, padding:"4px 8px", borderRadius:6, textDecoration:"none", border:`1px solid ${C.grayM}` }}>↗ Site direct</a>}
                         </div>
                       </div>
@@ -1920,7 +1947,7 @@ export default function App() {
                           ) : (
                             <div style={{ display:"flex", gap:6, alignItems:"center" }}>
                               <input type="number" placeholder="Prix Booking vérifié" value={vpB} onChange={e=>setCatVerifyPrice(p=>({ ...p, [kB]:e.target.value }))} style={{ flex:1, padding:"5px 8px", fontSize:10, border:`1px solid ${C.grayM}`, borderRadius:6, boxSizing:"border-box" }}/>
-                              <button onClick={()=>saveTrackedCompetitorRate(c,"booking",vpB)} disabled={!vpB} style={{ padding:"5px 9px", fontSize:9, fontWeight:700, background:vpB?C.blue:C.grayL, color:vpB?C.white:C.gray, border:"none", borderRadius:6, cursor:vpB?"pointer":"default", whiteSpace:"nowrap" }}>Enregistrer Booking</button>
+                              <button onClick={()=>saveTrackedCompetitorRate(c,"booking",vpB)} disabled={!vpB||datesInvalid} style={{ padding:"5px 9px", fontSize:9, fontWeight:700, background:(vpB&&!datesInvalid)?C.blue:C.grayL, color:(vpB&&!datesInvalid)?C.white:C.gray, border:"none", borderRadius:6, cursor:(vpB&&!datesInvalid)?"pointer":"default", whiteSpace:"nowrap" }}>Enregistrer Booking</button>
                             </div>
                           )}
                           {stB==="dup"&&<p style={{ margin:"3px 0 0", fontSize:8, color:C.gold }}>= Relevé Booking déjà existant</p>}
@@ -1937,7 +1964,7 @@ export default function App() {
                           ) : (
                             <div style={{ display:"flex", gap:6, alignItems:"center" }}>
                               <input type="number" placeholder="Prix Direct vérifié" value={vpD} onChange={e=>setCatVerifyPrice(p=>({ ...p, [kD]:e.target.value }))} style={{ flex:1, padding:"5px 8px", fontSize:10, border:`1px solid ${C.grayM}`, borderRadius:6, boxSizing:"border-box" }}/>
-                              <button onClick={()=>saveTrackedCompetitorRate(c,"direct",vpD)} disabled={!vpD} style={{ padding:"5px 9px", fontSize:9, fontWeight:700, background:vpD?C.green:C.grayL, color:vpD?C.white:C.gray, border:"none", borderRadius:6, cursor:vpD?"pointer":"default", whiteSpace:"nowrap" }}>Enregistrer Direct</button>
+                              <button onClick={()=>saveTrackedCompetitorRate(c,"direct",vpD)} disabled={!vpD||datesInvalid} style={{ padding:"5px 9px", fontSize:9, fontWeight:700, background:(vpD&&!datesInvalid)?C.green:C.grayL, color:(vpD&&!datesInvalid)?C.white:C.gray, border:"none", borderRadius:6, cursor:(vpD&&!datesInvalid)?"pointer":"default", whiteSpace:"nowrap" }}>Enregistrer Direct</button>
                             </div>
                           )}
                           {stD==="dup"&&<p style={{ margin:"3px 0 0", fontSize:8, color:C.gold }}>= Relevé Direct déjà existant</p>}
