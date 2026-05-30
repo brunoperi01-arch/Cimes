@@ -789,9 +789,17 @@ async function importCatalogCsv(csvText) {
 }
 
 // Lien Booking fiable pour un concurrent suivi (URL exacte si fournie)
-function buildTrackedBookingUrl(competitor, period, capacity) {
-  const checkin = period.period_start || period.week_start;
-  const checkout = period.period_end || addDaysStr(checkin, period.stay_nights || 7);
+function daysBetween(start, end) {
+  if (!start || !end) return 0;
+  const a = new Date(start + "T12:00:00");
+  const b = new Date(end + "T12:00:00");
+  return Math.max(0, Math.round((b - a) / 86400000));
+}
+
+function buildTrackedBookingUrl(competitor, context) {
+  const checkin = context.checkin;
+  const checkout = context.checkout;
+  const capacity = context.capacity;
   const baseUrl = competitor.booking_url || "https://www.booking.com/searchresults.html";
   const params = new URLSearchParams({
     checkin,
@@ -981,6 +989,11 @@ export default function App() {
   const [catCsvResult, setCatCsvResult]   = useState(null);
   const [catVerifyPrice, setCatVerifyPrice] = useState({});
   const [catChannel, setCatChannel]       = useState({});
+  // ── Relevé concurrents suivis : dates personnalisables ────────
+  const [trackedMode, setTrackedMode]       = useState("period"); // period | custom
+  const [trackedCheckin, setTrackedCheckin] = useState("");
+  const [trackedCheckout, setTrackedCheckout] = useState("");
+  const [trackedCapacity, setTrackedCapacity] = useState(6);
   const [catSaved, setCatSaved]           = useState({});
   const [ourForm, setOurForm]             = useState({ priceTotal:"", notes:"" });
   const [ourSaving, setOurSaving]         = useState(false);
@@ -1024,6 +1037,30 @@ export default function App() {
   const ourNight = ourPrice ? Math.round(ourPrice / _nights) : 0;
   const ourRateSource = currentOurRate ? "Supabase" : "Grille interne fallback";
   const reco     = calcReco(ourPrice,rates,settings);
+
+  // ── Relevé concurrents suivis : synchro dates avec la période ──
+  useEffect(() => {
+    const start = selWeek?.period_start || selWeek?.week_start || "";
+    const nights = selWeek?.stay_nights || 7;
+    const end = selWeek?.period_end || (start ? addDaysStr(start, nights) : "");
+    setTrackedCheckin(start);
+    setTrackedCheckout(end);
+    setTrackedCapacity(capNum);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selWeekId, capNum]);
+
+  function getTrackedPeriodContext() {
+    const checkin = trackedMode === "custom" ? trackedCheckin : (selWeek?.period_start || selWeek?.week_start);
+    const nights = trackedMode === "custom" ? daysBetween(trackedCheckin, trackedCheckout) : (selWeek?.stay_nights || 7);
+    const checkout = trackedMode === "custom" ? trackedCheckout : (selWeek?.period_end || addDaysStr(checkin, nights));
+    const capacity = Number(trackedCapacity || capNum);
+    const periodId = trackedMode === "custom" ? `custom_${checkin}_${checkout}` : selWeekId;
+    const label = trackedMode === "custom" ? `${checkin} → ${checkout}` : (selWeek?.label || selWeek?.subtitle || "");
+    return { periodId, label, checkin, checkout, capacity, stayNights: nights, season: selWeek?.season || "ete" };
+  }
+  function isTrackedCtxValid(ctx) {
+    return !!(ctx.checkin && ctx.checkout && ctx.checkout > ctx.checkin && ctx.capacity);
+  }
 
   // ── Auth ──────────────────────────────────────────────────────
   useEffect(()=>{ const restored=sb.restoreSession(); if(restored){ setUser(restored); setScreen("dashboard"); } },[]);
@@ -1078,38 +1115,35 @@ export default function App() {
     catch(e) { setCatCsvResult({ ok:0, skipped:0, errors:[e.message] }); }
   }
 
-  // Enregistre un relevé vérifié pour un concurrent suivi (validé immédiatement)
   // Enregistre un prix vérifié pour un concurrent suivi (validé immédiatement)
   async function saveTrackedCompetitorRate(competitor, channel, priceTotal) {
     const price = Number(priceTotal)||0;
-    const period = selWeek;
-    const key = `${selWeekId}_${capNum}_${competitor.id}_${channel}`;
-    if (!price || !period || isOwnProperty(competitor.name)) return;
-    const nights = period.stay_nights || 7;
-    const checkin = period.period_start || period.week_start;
-    const checkout = period.period_end || addDaysStr(checkin, nights);
+    const ctx = getTrackedPeriodContext();
+    const key = `${competitor.id}_${channel}`;
+    if (!price || isOwnProperty(competitor.name)) return;
+    if (!isTrackedCtxValid(ctx)) { setPlanError("Dates invalides : vérifiez arrivée et départ."); return; }
     const isDirect = channel === "direct";
     const sourceLabel = isDirect ? "Site direct" : "Booking.com";
-    const sourceUrl = isDirect ? buildTrackedDirectUrl(competitor) : buildTrackedBookingUrl(competitor, period, capNum);
+    const sourceUrl = isDirect ? buildTrackedDirectUrl(competitor) : buildTrackedBookingUrl(competitor, ctx);
     try {
       await saveCompetitorRate({
-        week_id:            selWeekId,
+        week_id:            ctx.periodId,
         source:             sourceLabel,
         property_name:      competitor.name,
         competitor:         competitor.name,
         property_type:      competitor.property_type || "résidence",
         competitor_id:      null,
         comparability_score:competitor.comparability_score || 80,
-        capacity:           capNum,
+        capacity:           ctx.capacity,
         price:              price,
         price_week:         price,
         price_total:        price,
-        price_night:        Math.round(price / nights),
-        price_week_equiv:   Math.round((price / nights) * 7),
-        stay_nights:        nights,
-        period_start:       checkin,
-        period_end:         checkout,
-        season:             period.season || "ete",
+        price_night:        Math.round(price / ctx.stayNights),
+        price_week_equiv:   Math.round((price / ctx.stayNights) * 7),
+        stay_nights:        ctx.stayNights,
+        period_start:       ctx.checkin,
+        period_end:         ctx.checkout,
+        season:             ctx.season,
         source_url:         sourceUrl,
         source_search_url:  sourceUrl,
         collected_at:       new Date().toISOString().slice(0,10),
@@ -1795,39 +1829,67 @@ export default function App() {
 
         {/* Relevé rapide concurrents suivis (période + capacité courantes) */}
         {catalog.length>0&&(()=>{
-          const period = selWeek;
-          const checkin = period?.period_start || period?.week_start;
-          const nights = period?.stay_nights || 7;
-          const checkout = period?.period_end || (checkin?addDaysStr(checkin, nights):"");
+          const ctx = getTrackedPeriodContext();
+          const ctxValid = isTrackedCtxValid(ctx);
           // Dernier prix enregistré par concurrent + source (depuis rates chargés)
           const lastRateFor = (name, sourceLabel) => {
             const matches = (rates||[]).filter(r=>!r.is_example && (r.competitor===name||r.property_name===name||r.competitor_name===name) && r.source===sourceLabel);
             if (!matches.length) return null;
             return matches.slice().sort((a,b)=>String(b.collected_at).localeCompare(String(a.collected_at)))[0];
           };
-          const allBookingUrls = catalog.filter(c=>c.booking_url).map(c=>buildTrackedBookingUrl(c, period||{}, capNum));
+          const allBookingUrls = catalog.filter(c=>c.booking_url).map(c=>buildTrackedBookingUrl(c, ctx));
           const allDirectUrls = catalog.filter(c=>buildTrackedDirectUrl(c)).map(c=>buildTrackedDirectUrl(c));
           return (
             <>
               <p style={sml}>🔍 Relevé concurrents suivis</p>
-              <div style={{ ...cd(11,4), padding:"9px 12px", background:C.bluePale }}>
-                <p style={{ margin:0, fontSize:11, color:C.blue, fontWeight:700 }}>Période : {period?.label} · {cap}</p>
-                <p style={{ margin:"1px 0 0", fontSize:9, color:C.blueL }}>Booking : arrivée {checkin} · départ {checkout}</p>
-                <p style={{ margin:"1px 0 0", fontSize:9, color:C.blueL }}>Capacité : {capNum}P · {nights} nuits</p>
+
+              {/* Sélection des dates du relevé */}
+              <div style={{ ...cd(11,4), padding:"10px 12px" }}>
+                <p style={{ margin:"0 0 6px", fontSize:11, fontWeight:700, color:C.blue }}>Dates du relevé</p>
+                <div style={{ display:"flex", gap:4, marginBottom:8 }}>
+                  {[["period","Période sélectionnée"],["custom","Dates personnalisées"]].map(([v,l])=>(
+                    <button key={v} onClick={()=>setTrackedMode(v)} style={{ flex:1, padding:"6px 4px", fontSize:10, fontWeight:trackedMode===v?700:400, background:trackedMode===v?C.blue:C.white, color:trackedMode===v?C.white:C.text, border:`1px solid ${trackedMode===v?C.blue:C.grayM}`, borderRadius:8, cursor:"pointer" }}>{l}</button>
+                  ))}
+                </div>
+                <div style={formGrid}>
+                  <div>
+                    <p style={{ ...sml, margin:"0 0 4px" }}>Date d'arrivée</p>
+                    <input type="date" value={trackedCheckin} onChange={e=>setTrackedCheckin(e.target.value)} disabled={trackedMode==="period"} style={{ ...inp(), ...(trackedMode==="period"?{ background:C.grayL, color:C.gray }:{}) }}/>
+                  </div>
+                  <div>
+                    <p style={{ ...sml, margin:"0 0 4px" }}>Date de départ</p>
+                    <input type="date" value={trackedCheckout} onChange={e=>setTrackedCheckout(e.target.value)} disabled={trackedMode==="period"} style={{ ...inp(), ...(trackedMode==="period"?{ background:C.grayL, color:C.gray }:{}) }}/>
+                  </div>
+                </div>
+                <p style={{ ...sml, margin:"8px 0 4px" }}>Capacité</p>
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:4 }}>
+                  {[2,4,6,8].map(n=><button key={n} onClick={()=>setTrackedCapacity(n)} style={{ padding:"6px 0", background:Number(trackedCapacity)===n?C.blue:C.grayL, border:"none", borderRadius:8, cursor:"pointer", fontSize:11, fontWeight:Number(trackedCapacity)===n?700:400, color:Number(trackedCapacity)===n?C.white:C.text }}>{n}P</button>)}
+                </div>
+              </div>
+
+              {/* Récapitulatif contexte */}
+              <div style={{ ...cd(11,4), padding:"9px 12px", background:ctxValid?C.bluePale:C.redL }}>
+                {ctxValid ? (<>
+                  <p style={{ margin:0, fontSize:11, color:C.blue, fontWeight:700 }}>{trackedMode==="custom"?"Dates personnalisées":`Période sélectionnée : ${ctx.label}`}</p>
+                  <p style={{ margin:"1px 0 0", fontSize:9, color:C.blueL }}>Booking : arrivée {ctx.checkin} · départ {ctx.checkout}</p>
+                  <p style={{ margin:"1px 0 0", fontSize:9, color:C.blueL }}>Capacité : {ctx.capacity}P · {ctx.stayNights} nuits</p>
+                </>) : (
+                  <p style={{ margin:0, fontSize:11, color:C.red, fontWeight:600 }}>Dates invalides : vérifiez arrivée et départ.</p>
+                )}
                 <p style={{ margin:"4px 0 0", fontSize:9, color:C.gray, fontStyle:"italic" }}>Les prix saisis ici sont considérés comme vérifiés manuellement.</p>
                 <div style={{ display:"flex", gap:5, marginTop:7, flexWrap:"wrap" }}>
-                  {allBookingUrls.length>0&&<button onClick={()=>openAllLinks(allBookingUrls)} style={{ fontSize:9, fontWeight:600, color:C.white, background:C.blue, padding:"5px 9px", borderRadius:6, border:"none", cursor:"pointer" }}>↗ Ouvrir tous les Booking ({allBookingUrls.length})</button>}
+                  {allBookingUrls.length>0&&<button onClick={()=>{ if(!ctxValid){ setPlanError("Dates invalides : vérifiez arrivée et départ."); return; } openAllLinks(allBookingUrls); }} style={{ fontSize:9, fontWeight:600, color:C.white, background:ctxValid?C.blue:C.gray, padding:"5px 9px", borderRadius:6, border:"none", cursor:"pointer" }}>↗ Ouvrir tous les Booking ({allBookingUrls.length})</button>}
                   {allDirectUrls.length>0&&<button onClick={()=>openAllLinks(allDirectUrls)} style={{ fontSize:9, fontWeight:600, color:C.white, background:C.green, padding:"5px 9px", borderRadius:6, border:"none", cursor:"pointer" }}>↗ Ouvrir tous les sites directs ({allDirectUrls.length})</button>}
                 </div>
               </div>
               <div style={cd()}>
                 {catalog.map((c,i)=>{
-                  const bookingUrl=buildTrackedBookingUrl(c, period||{}, capNum);
+                  const bookingUrl=buildTrackedBookingUrl(c, ctx);
                   const directUrl=buildTrackedDirectUrl(c);
                   const hasBooking=!!c.booking_url;
                   const hasDirect=!!directUrl;
-                  const kB=`${selWeekId}_${capNum}_${c.id}_booking`;
-                  const kD=`${selWeekId}_${capNum}_${c.id}_direct`;
+                  const kB=`${c.id}_booking`;
+                  const kD=`${c.id}_direct`;
                   const stB=catSaved[kB], stD=catSaved[kD];
                   const vpB=catVerifyPrice[kB]??"", vpD=catVerifyPrice[kD]??"";
                   const lastB=lastRateFor(c.name,"Booking.com");
