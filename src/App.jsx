@@ -433,6 +433,42 @@ function periodOptionLabel(p) {
   return `${fmtDateShort(start)} → ${fmtDateShort(end)} · ${nights} nuits`;
 }
 
+// Contexte de travail partagé (relevé / promotions / benchmark)
+function getWorkContext({ mode, selectedPeriodId, customCheckin, customCheckout, stayNights, capacity, accommodationType, season }) {
+  const n = Number(stayNights || 7);
+  const cap = Number(capacity || 0);
+  if (mode === "period" || (mode == null && selectedPeriodId)) {
+    const p = ALL_PERIODS.find(x => x.id === selectedPeriodId);
+    if (p) {
+      const start = p.period_start || p.week_start;
+      const end = p.period_end || addDaysStr(start, Number(p.stay_nights || n));
+      return {
+        periodId: p.id,
+        label: periodOptionLabel(p),
+        checkin: start,
+        checkout: end,
+        stayNights: Number(p.stay_nights || n),
+        capacity: cap,
+        accommodationType: accommodationType || null,
+        season: season || p.season || "ete",
+      };
+    }
+  }
+  // Mode dates personnalisées
+  const checkin = customCheckin || "";
+  const checkout = customCheckout || (checkin ? addDaysStr(checkin, n) : "");
+  return {
+    periodId: checkin && checkout ? `custom_${checkin}_${checkout}_${cap}p` : "",
+    label: checkin && checkout ? `${fmtDateShort(checkin)} → ${fmtDateShort(checkout)} · ${n} nuits` : "Dates à définir",
+    checkin,
+    checkout,
+    stayNights: n,
+    capacity: cap,
+    accommodationType: accommodationType || null,
+    season: season || "ete",
+  };
+}
+
 // Lien Booking par localisation + dates corrigées (résidences/appart = property_type 204)
 function bookingSearchUrl({ location, periodStart, periodEnd, capacity, propertyTypeCode = "204" }) {
   const ss = encodeURIComponent(location || "La Foux d'Allos");
@@ -1532,6 +1568,7 @@ export default function App() {
   const [promoSeason, setPromoSeason]     = useState("ete");
   const [promoMsg, setPromoMsg]           = useState(null);
   const [promoMsgPreview, setPromoMsgPreview] = useState(null);
+  const [promoSourceFilter, setPromoSourceFilter] = useState({ booking:true, direct:true, tour_operator:true, marketplace:false, other:false });
   const [catSaved, setCatSaved]           = useState({});
   const [ourForm, setOurForm]             = useState({ priceTotal:"", notes:"" });
   const [ourSaving, setOurSaving]         = useState(false);
@@ -1588,6 +1625,10 @@ export default function App() {
     (trackedSeason === "all" || p.season === trackedSeason) &&
     Number(p.stay_nights || 7) === Number(trackedStayNights)
   );
+  // 3/4 nuits (ou toute durée sans période prédéfinie) → forcer les dates personnalisées
+  useEffect(() => {
+    if (trackedAvailablePeriods.length === 0 && trackedMode === "period") setTrackedMode("custom");
+  }, [trackedStayNights, trackedSeason]);
 
   // Initialise la période et la capacité depuis la période ouverte ailleurs
   useEffect(() => {
@@ -2814,13 +2855,15 @@ export default function App() {
                       <select value={trackedStayNights} onChange={e=>setTrackedStayNights(Number(e.target.value))} style={inp()}>
                         <option value={7}>7 nuits</option>
                         <option value={2}>2 nuits</option>
+                        <option value={3}>3 nuits</option>
+                        <option value={4}>4 nuits</option>
                       </select>
                     </div>
                   </div>
                   <p style={{ ...sml, margin:"8px 0 4px" }}>Période</p>
                   <select value={trackedPeriodId} onChange={e=>setTrackedPeriodId(e.target.value)} style={inp()}>
                     {trackedAvailablePeriods.length===0&&<option value="">Aucune période</option>}
-                    {trackedAvailablePeriods.map(p=><option key={p.id} value={p.id}>{periodOptionLabel(p)}{p.label?` — ${p.label}`:""}</option>)}
+                    {trackedAvailablePeriods.map(p=><option key={p.id} value={p.id}>{periodOptionLabel(p)}</option>)}
                   </select>
                 </>) : (
                   <div style={formGrid}>
@@ -3941,7 +3984,7 @@ export default function App() {
               <p style={{ ...sml, margin:"8px 0 4px" }}>Période</p>
               <select value={trackedPeriodId} onChange={e=>setTrackedPeriodId(e.target.value)} style={inp()}>
                 {trackedAvailablePeriods.length===0&&<option value="">Aucune période</option>}
-                {trackedAvailablePeriods.map(p=><option key={p.id} value={p.id}>{periodOptionLabel(p)}{p.label?` — ${p.label}`:""}</option>)}
+                {trackedAvailablePeriods.map(p=><option key={p.id} value={p.id}>{periodOptionLabel(p)}</option>)}
               </select>
             </>) : (
               <div style={formGrid}>
@@ -4132,14 +4175,23 @@ export default function App() {
     }
     const datesInvalid = !checkin || !checkout || daysBetween(checkin,checkout)<=0;
     const stayNights = n;
-    const daysToArrival = checkin ? daysBetween(new Date().toISOString().slice(0,10), checkin) : null;
-    // Marché validé pour ce contexte
+    const todayStr = dateObjToISO(new Date());
+    const daysToArrival = checkin ? daysBetween(todayStr, checkin) : null;
+    const famOf = ch => {
+      if (ch==="booking"||ch==="direct"||ch==="tour_operator"||ch==="marketplace") return ch;
+      if (ch==="maeva") return "tour_operator";
+      if (ch==="airbnb"||ch==="abritel"||ch==="expedia") return "marketplace";
+      return "other";
+    };
+    // Marché validé : correspondance par DATES (cohérent avec le relevé), durée, capacité, sources
     const verified = (histAll||[]).filter(r=>
       !r.is_example &&
       TRUSTED_STATUSES.includes(r.reliability_status||"à vérifier") &&
-      Number(r.capacity)===capacity &&
+      String(r.period_start||"")===String(checkin||"") &&
+      String(r.period_end||"")===String(checkout||"") &&
       Number(r.stay_nights||7)===stayNights &&
-      (periodId ? r.week_id===periodId : true)
+      Number(r.capacity)===capacity &&
+      (!r.source_channel || promoSourceFilter[famOf(r.source_channel)] !== false)
     );
     // Tarif Les Cimes
     const ourRate = getOurRateForContext(ourRates, { periodId, checkin, checkout, stayNights, capacity }, promoAccType);
@@ -4195,7 +4247,7 @@ export default function App() {
             {n===7 ? (<>
               <p style={{ ...sml, margin:"8px 0 4px" }}>Période (samedi → samedi)</p>
               <select value={trackedPeriodId} onChange={e=>setTrackedPeriodId(e.target.value)} style={inp()}>
-                {ALL_PERIODS.filter(p=>p.season===promoSeason && Number(p.stay_nights||7)===7).map(p=><option key={p.id} value={p.id}>{periodOptionLabel(p)}{p.label?` — ${p.label}`:""}</option>)}
+                {ALL_PERIODS.filter(p=>p.season===promoSeason && Number(p.stay_nights||7)===7).map(p=><option key={p.id} value={p.id}>{periodOptionLabel(p)}</option>)}
               </select>
             </>) : (
               <div style={{ ...formGrid, marginTop:8 }}>
@@ -4207,11 +4259,21 @@ export default function App() {
             {distinctSources.length>0&&<p style={{ margin:"4px 0 0", fontSize:8, color:C.gray }}>Sources marché suivies : {distinctSources.slice(0,8).join(", ")}</p>}
           </div>
 
+          {/* Filtre sources incluses */}
+          <div style={{ ...cd(11), padding:"9px 12px" }}>
+            <p style={{ ...sml, margin:"0 0 5px" }}>Sources incluses</p>
+            <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
+              {[["booking","Booking"],["direct","Direct"],["tour_operator","Tour opérateurs"],["marketplace","Marketplaces"],["other","Autres"]].map(([k,l])=>(
+                <button key={k} onClick={()=>setPromoSourceFilter(f=>({ ...f, [k]:!f[k] }))} style={{ fontSize:10, fontWeight:promoSourceFilter[k]?700:400, color:promoSourceFilter[k]?C.white:C.gray, background:promoSourceFilter[k]?C.purple:C.grayL, border:"none", borderRadius:14, padding:"5px 11px", cursor:"pointer" }}>{promoSourceFilter[k]?"✓ ":""}{l}</button>
+              ))}
+            </div>
+          </div>
+
           {/* Proposition */}
           {opp.needData ? (
             <div style={{ ...cd(11), padding:"12px", textAlign:"center", border:`2px dashed ${C.grayM}` }}>
-              <p style={{ margin:"0 0 8px", fontSize:11, color:C.gray }}>Pas assez de relevés marché validés ({opp.validatedCount}/3) pour cette durée et capacité.</p>
-              <button onClick={()=>setScreen("track")} style={{ ...btn(false,C.blue), width:"auto", padding:"7px 14px", margin:0 }}>Faire un relevé marché →</button>
+              <p style={{ margin:"0 0 8px", fontSize:11, color:C.gray }}>Relevés insuffisants pour cette durée ({opp.validatedCount}/3). Lancez un relevé concurrents suivis.</p>
+              <button onClick={()=>{ if(!datesInvalid){ setTrackedMode("custom"); setTrackedStayNights(stayNights); setTrackedCheckin(checkin); setTrackedCheckout(checkout); setTrackedCapacity(capacity); setTrackedSeason(promoSeason); } setScreen("dashboard"); }} disabled={datesInvalid} style={{ ...btn(datesInvalid,C.blue), width:"auto", padding:"7px 14px", margin:0 }}>Faire un relevé sur ces dates</button>
             </div>
           ) : (
             <div style={{ ...cd(11), padding:"12px 13px", borderLeft:`3px solid ${promoColor(opp.promoType)}` }}>
