@@ -295,6 +295,65 @@ const OUR_TARIFS = {
 // Métadonnées de notre grille interne
 const OUR_TARIFS_META = { source:"Tarif interne validé", verified_at:"avril 2026", status:"réel" };
 
+// ══ TYPOLOGIES COMMERCIALES LES CIMES ═══════════════════════════
+const ACCOMMODATION_TYPES = {
+  "2P6":     { label:"2 pièces 6 pers.",            capacity:6, surfaceMin:34, surfaceMax:45, targetMin:2, targetMax:4, comfort:"budget_famille",        segment:"6p_budget"  },
+  "2P6_SUP": { label:"2 pièces 6 pers. supérieur",  capacity:6, surfaceMin:42, surfaceMax:45, targetMin:4, targetMax:6, comfort:"confort_intermediaire", segment:"6p_confort" },
+  "3P6":     { label:"3 pièces 6 pers.",            capacity:6, surfaceMin:42, surfaceMax:45, targetMin:4, targetMax:6, comfort:"confort",              segment:"6p_confort" },
+  "3P8":     { label:"3 pièces 8 pers.",            capacity:8, surfaceMin:57, surfaceMax:57, targetMin:6, targetMax:8, comfort:"famille_premium",      segment:"8p_famille" },
+};
+
+// Prix par personne et par nuit selon l'occupation cible
+function pricePerPersonNight(priceTotal, stayNights, occupancy) {
+  if (!priceTotal || !stayNights || !occupancy) return null;
+  return Math.round(priceTotal / stayNights / occupancy);
+}
+
+// Score de comparabilité ajusté d'un relevé concurrent selon notre typologie
+function scoreRateForAccommodation(rate, accommodationType) {
+  const meta = ACCOMMODATION_TYPES[accommodationType];
+  if (!meta) return { score: rate?.comparability_score || 50, segment: "Secondaire" };
+  const ptype = String(rate?.property_type || "").toLowerCase();
+  const isHotel = ptype.includes("hôtel") || ptype.includes("hotel");
+  const cap = Number(rate?.detected_capacity || rate?.capacity || 0);
+  const rooms = String(rate?.detected_rooms || "").toLowerCase();
+  let score = 50, segment = "Secondaire";
+  if (isHotel) return { score: 25, segment: "Secondaire" };
+
+  if (accommodationType === "2P6") {
+    if (cap===6 || cap===4 || rooms.includes("2")) { score=90; segment="Comparable"; }
+    else if (rooms.includes("3")) { score=60; segment="Plus grand"; }
+    else if (cap>=8) { score=35; segment="Plus grand"; }
+    else { score=50; segment="Budget"; }
+  } else if (accommodationType === "2P6_SUP" || accommodationType === "3P6") {
+    if ((cap===6 && rooms.includes("3")) || (cap===6 && !rooms)) { score=90; segment="Comparable"; }
+    else if (rooms.includes("2") || ptype.includes("studio")) { score=60; segment="Plus petit"; }
+    else if (cap>=8) { score=45; segment="Plus grand"; }
+    else if (cap<=4) { score=40; segment="Plus petit"; }
+    else { score=55; segment="Confort"; }
+  } else if (accommodationType === "3P8") {
+    if (cap>=8) { score=90; segment="Comparable"; }
+    else if (cap===6) { score=60; segment="Plus petit"; }
+    else if (cap<=4) { score=30; segment="Plus petit"; }
+    else { score=45; segment="Secondaire"; }
+  }
+  // Bonus confort/premium léger
+  if (meta.comfort==="famille_premium" && cap>=8) segment = "Premium";
+  if (meta.comfort==="budget_famille" && score>=80) segment = "Budget";
+  return { score, segment };
+}
+
+// Phrase commerciale de positionnement selon la typologie
+function accommodationAdvice(accommodationType) {
+  switch (accommodationType) {
+    case "2P6": return "Le 2P6 doit être positionné comme offre famille budget. Il peut être attractif pour 4 à 6 personnes, mais ne doit pas être comparé directement à un vrai 3P6 premium.";
+    case "2P6_SUP": return "Le 2P6 supérieur se situe entre le budget et le confort. Comparez-le aux 2 pièces récents et bien équipés plutôt qu'aux studios.";
+    case "3P6": return "Le 3P6 est un produit confort. Comparez-le aux vrais 3 pièces 6 personnes et aux résidences de bon standing.";
+    case "3P8": return "Le 3P8 est un produit familial plus rare. La comparaison doit privilégier les grands appartements 8P et les résidences premium.";
+    default: return "";
+  }
+}
+
 // Statuts considérés comme fiables pour les calculs / recommandations / IA
 const TRUSTED_STATUSES = ["réel", "validé", "saisi manuellement", "importé CSV"];
 
@@ -654,7 +713,7 @@ async function saveOurRate(rate) {
   if (!priceTotal) throw new Error("Prix total manquant.");
   if (!rate.period_id || !rate.capacity) throw new Error("Période et capacité requises.");
   const priceNight = rate.price_night ? Number(rate.price_night) : Math.round(priceTotal / stayNights);
-  const payload = {
+  const basePayload = {
     period_id:    rate.period_id,
     period_label: rate.period_label || null,
     period_start: rate.period_start || null,
@@ -668,6 +727,20 @@ async function saveOurRate(rate) {
     notes:        rate.notes || null,
     is_active:    true,
   };
+  // Champs typologie (optionnels, dérivés de accommodation_type si fourni)
+  const meta = rate.accommodation_type ? ACCOMMODATION_TYPES[rate.accommodation_type] : null;
+  const payload = {
+    ...basePayload,
+    ...(rate.accommodation_type && {
+      accommodation_type:    rate.accommodation_type,
+      accommodation_label:   rate.accommodation_label || meta?.label || rate.accommodation_type,
+      surface_min:           rate.surface_min ?? meta?.surfaceMin ?? null,
+      surface_max:           rate.surface_max ?? meta?.surfaceMax ?? null,
+      target_occupancy_min:  rate.target_occupancy_min ?? meta?.targetMin ?? null,
+      target_occupancy_max:  rate.target_occupancy_max ?? meta?.targetMax ?? null,
+      comfort_level:         rate.comfort_level || meta?.comfort || "standard",
+    }),
+  };
 
   if (SB_READY) {
     const filter = [
@@ -676,11 +749,19 @@ async function saveOurRate(rate) {
       `stay_nights=eq.${encodeURIComponent(payload.stay_nights)}`,
       `select=id`,
     ].join("&");
-    const existing = await sb.select("our_rates", filter);
-    if (existing?.length) {
-      return await sb.update("our_rates", `id=eq.${existing[0].id}`, payload);
+    try {
+      const existing = await sb.select("our_rates", filter);
+      if (existing?.length) return await sb.update("our_rates", `id=eq.${existing[0].id}`, payload);
+      return await sb.insert("our_rates", payload);
+    } catch (e) {
+      // Si les colonnes typologie manquent encore en base, on enregistre sans
+      if (isMissingColumnError(e)) {
+        const existing = await sb.select("our_rates", filter);
+        if (existing?.length) return await sb.update("our_rates", `id=eq.${existing[0].id}`, basePayload);
+        return await sb.insert("our_rates", basePayload);
+      }
+      throw e;
     }
-    return await sb.insert("our_rates", payload);
   }
 
   // localStorage : upsert par period_id + capacity + stay_nights
@@ -729,6 +810,7 @@ async function importOurRatesCsv(csvText, allPeriods) {
         season:       o.season || period?.season || "ete",
         stay_nights:  stayNights,
         capacity,
+        accommodation_type: (o.accommodation_type||o.accommodationtype) ? String(o.accommodation_type||o.accommodationtype).toUpperCase().replace(/\s/g,"") : null,
         price_total:  priceTotal,
         notes:        o.notes || null,
         source:       "import CSV",
@@ -1335,6 +1417,8 @@ export default function App() {
   const [decSaving, setDecSaving]         = useState(false);
   const [decMsg, setDecMsg]               = useState(null);
   const [benchSourceFilter, setBenchSourceFilter] = useState({ booking:true, direct:true, tour_operator:true, marketplace:false, other:false });
+  const [benchAccType, setBenchAccType]   = useState("2P6");
+  const [benchOccupancy, setBenchOccupancy] = useState(6);
   const [catSaved, setCatSaved]           = useState({});
   const [ourForm, setOurForm]             = useState({ priceTotal:"", notes:"" });
   const [ourSaving, setOurSaving]         = useState(false);
@@ -2312,7 +2396,7 @@ export default function App() {
         {dashTarifTab==="import"&&(
           <div style={{ ...cd(11), padding:"11px 13px" }}>
             <p style={{ margin:"0 0 4px", fontSize:11, fontWeight:700, color:C.blue }}>Importer grille tarifaire Les Cimes</p>
-            <p style={{ margin:"0 0 6px", fontSize:9, color:C.gray, fontFamily:"monospace", lineHeight:1.5 }}>period_id;period_start;period_end;period_label;season;stay_nights;capacity;price_total;notes</p>
+            <p style={{ margin:"0 0 6px", fontSize:9, color:C.gray, fontFamily:"monospace", lineHeight:1.5 }}>period_id;period_start;period_end;period_label;season;stay_nights;capacity;accommodation_type;price_total;notes</p>
             {ourCsvResult&&(
               <div style={{ ...cd(8), padding:"8px 10px", background:ourCsvResult.errors.length===0?C.greenL:C.goldL, marginBottom:6 }}>
                 <p style={{ margin:"0 0 1px", fontSize:11, color:C.green }}>✓ Importés : {ourCsvResult.ok}</p>
@@ -2321,9 +2405,9 @@ export default function App() {
                 {ourCsvResult.errors.map((e,i)=><p key={i} style={{ margin:0, fontSize:10, color:C.red }}>✗ {e}</p>)}
               </div>
             )}
-            <textarea value={ourCsvText} onChange={e=>setOurCsvText(e.target.value)} placeholder={"2026_w2;2026-06-27;2026-07-04;27 juin → 3 juil;ete;7;6;340;Tarif été 2026"} style={{ width:"100%", minHeight:80, padding:"8px", fontSize:10, fontFamily:"monospace", border:`1px solid ${C.grayM}`, borderRadius:9, background:C.grayL, color:C.text, resize:"vertical", boxSizing:"border-box", marginBottom:6 }}/>
+            <textarea value={ourCsvText} onChange={e=>setOurCsvText(e.target.value)} placeholder={"2026_w2;2026-06-27;2026-07-04;27 juin → 3 juil;ete;7;6;2P6;340;Tarif été 2026"} style={{ width:"100%", minHeight:80, padding:"8px", fontSize:10, fontFamily:"monospace", border:`1px solid ${C.grayM}`, borderRadius:9, background:C.grayL, color:C.text, resize:"vertical", boxSizing:"border-box", marginBottom:6 }}/>
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
-              <button onClick={()=>{ const tpl=["period_id;period_start;period_end;period_label;season;stay_nights;capacity;price_total;notes","2026_w2;2026-06-27;2026-07-04;27 juin → 3 juil;ete;7;6;340;Tarif été 2026","2026_w3;2026-07-04;2026-07-11;4 juil → 10 juil;ete;7;6;360;Tarif été 2026"].join("\n"); const b=new Blob([tpl],{ type:"text/csv;charset=utf-8" }); const u=URL.createObjectURL(b); const a=document.createElement("a"); a.href=u; a.download="modele_tarifs_les_cimes.csv"; a.click(); }} style={{ ...btn(false,C.grayL,C.blueL), margin:0, border:`1px solid ${C.blueL}` }}>⬇ Modèle CSV</button>
+              <button onClick={()=>{ const tpl=["period_id;period_start;period_end;period_label;season;stay_nights;capacity;accommodation_type;price_total;notes","2026_w2;2026-06-27;2026-07-04;27 juin → 3 juil;ete;7;6;2P6;340;Tarif été 2026","2026_w3;2026-07-04;2026-07-11;4 juil → 10 juil;ete;7;8;3P8;460;Tarif été 2026"].join("\n"); const b=new Blob([tpl],{ type:"text/csv;charset=utf-8" }); const u=URL.createObjectURL(b); const a=document.createElement("a"); a.href=u; a.download="modele_tarifs_les_cimes.csv"; a.click(); }} style={{ ...btn(false,C.grayL,C.blueL), margin:0, border:`1px solid ${C.blueL}` }}>⬇ Modèle CSV</button>
               <button style={{ ...btn(ourCsvLoading||!ourCsvText.trim(),C.blue), margin:0 }} onClick={handleImportOurCsv} disabled={ourCsvLoading||!ourCsvText.trim()}>{ourCsvLoading?"Import…":"Importer tarifs"}</button>
             </div>
           </div>
@@ -3490,9 +3574,9 @@ export default function App() {
             {ourCsvResult.errors.map((e,i)=><p key={i} style={{ margin:0, fontSize:10, color:C.red }}>✗ {e}</p>)}
           </div>
         )}
-        <textarea value={ourCsvText} onChange={e=>setOurCsvText(e.target.value)} placeholder={"period_id;period_start;period_end;period_label;season;stay_nights;capacity;price_total;notes\n2026_w2;2026-06-27;2026-07-04;27 juin → 3 juil;ete;7;6;340;Tarif été 2026"} style={{ width:"100%", minHeight:90, padding:"8px", fontSize:10, fontFamily:"monospace", border:`1px solid ${C.grayM}`, borderRadius:9, background:C.grayL, color:C.text, resize:"vertical", boxSizing:"border-box", marginBottom:6 }}/>
+        <textarea value={ourCsvText} onChange={e=>setOurCsvText(e.target.value)} placeholder={"period_id;period_start;period_end;period_label;season;stay_nights;capacity;accommodation_type;price_total;notes\n2026_w2;2026-06-27;2026-07-04;27 juin → 3 juil;ete;7;6;2P6;340;Tarif été 2026"} style={{ width:"100%", minHeight:90, padding:"8px", fontSize:10, fontFamily:"monospace", border:`1px solid ${C.grayM}`, borderRadius:9, background:C.grayL, color:C.text, resize:"vertical", boxSizing:"border-box", marginBottom:6 }}/>
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:6 }}>
-          <button onClick={()=>{ const tpl=["period_id;period_start;period_end;period_label;season;stay_nights;capacity;price_total;notes","2026_w2;2026-06-27;2026-07-04;27 juin → 3 juil;ete;7;6;340;Tarif été 2026","2026_w3;2026-07-04;2026-07-11;4 juil → 10 juil;ete;7;6;360;Tarif été 2026"].join("\n"); const b=new Blob([tpl],{ type:"text/csv;charset=utf-8" }); const u=URL.createObjectURL(b); const a=document.createElement("a"); a.href=u; a.download="modele_tarifs_les_cimes.csv"; a.click(); }} style={{ ...btn(false,C.grayL,C.blueL), margin:0, border:`1px solid ${C.blueL}` }}>⬇ Modèle CSV tarifs</button>
+          <button onClick={()=>{ const tpl=["period_id;period_start;period_end;period_label;season;stay_nights;capacity;accommodation_type;price_total;notes","2026_w2;2026-06-27;2026-07-04;27 juin → 3 juil;ete;7;6;2P6;340;Tarif été 2026","2026_w3;2026-07-04;2026-07-11;4 juil → 10 juil;ete;7;8;3P8;460;Tarif été 2026"].join("\n"); const b=new Blob([tpl],{ type:"text/csv;charset=utf-8" }); const u=URL.createObjectURL(b); const a=document.createElement("a"); a.href=u; a.download="modele_tarifs_les_cimes.csv"; a.click(); }} style={{ ...btn(false,C.grayL,C.blueL), margin:0, border:`1px solid ${C.blueL}` }}>⬇ Modèle CSV tarifs</button>
           <button style={{ ...btn(ourCsvLoading||!ourCsvText.trim(),C.blue), margin:0 }} onClick={handleImportOurCsv} disabled={ourCsvLoading||!ourCsvText.trim()}>{ourCsvLoading?"Import…":"Importer tarifs →"}</button>
         </div>
       </div><BNav/>
@@ -3737,6 +3821,25 @@ export default function App() {
             </div>
           </div>
 
+          {/* Typologie Les Cimes + occupation cible */}
+          <div style={{ ...cd(11), padding:"9px 12px" }}>
+            <div style={formGrid}>
+              <div>
+                <p style={{ ...sml, margin:"0 0 4px" }}>Typologie Les Cimes</p>
+                <select value={benchAccType} onChange={e=>setBenchAccType(e.target.value)} style={inp()}>
+                  {Object.entries(ACCOMMODATION_TYPES).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <p style={{ ...sml, margin:"0 0 4px" }}>Occupation cible</p>
+                <select value={benchOccupancy} onChange={e=>setBenchOccupancy(Number(e.target.value))} style={inp()}>
+                  {[2,4,6,8].map(n=><option key={n} value={n}>{n} personnes</option>)}
+                </select>
+              </div>
+            </div>
+            <p style={{ margin:"6px 0 0", fontSize:8, color:C.gray }}>{ACCOMMODATION_TYPES[benchAccType]?.surfaceMin}–{ACCOMMODATION_TYPES[benchAccType]?.surfaceMax} m² · cible {ACCOMMODATION_TYPES[benchAccType]?.targetMin}–{ACCOMMODATION_TYPES[benchAccType]?.targetMax} pers. · segment {ACCOMMODATION_TYPES[benchAccType]?.segment}</p>
+          </div>
+
           {/* B + C : cartes */}
           <div style={responsiveGrid(2)}>
             <div style={{ ...cd(11,0), padding:"10px 12px", background:C.bluePale }}>
@@ -3744,6 +3847,7 @@ export default function App() {
               {ourPrice>0?(<>
                 <p style={{ margin:0, fontSize:18, fontWeight:700, color:C.blue }}>{fmt(ourPrice)}€<span style={{ fontSize:10 }}>/séjour</span></p>
                 <p style={{ margin:0, fontSize:10, color:C.blueL }}>{fmt(ourNight)}€/nuit · {ourRateSource}</p>
+                {(()=>{ const ppn=pricePerPersonNight(ourPrice, ctx.stayNights, benchOccupancy); return ppn?<p style={{ margin:"1px 0 0", fontSize:10, color:C.blueL, fontWeight:600 }}>{fmt(ppn)}€/pers/nuit ({benchOccupancy}P)</p>:null; })()}
               </>):(<p style={{ margin:0, fontSize:13, color:C.gray, fontStyle:"italic" }}>Tarif à définir</p>)}
               <button onClick={()=>{ setScreen("dashboard"); setDashTarifTab("saisie"); setDashOurPeriodId(selWeekId); setDashOurCap(capNum); }} style={{ ...btn(false,C.white,C.blue), margin:"7px 0 0", border:`1px solid ${C.blueL}`, padding:"6px" }}>Modifier tarif</button>
             </div>
@@ -3766,21 +3870,26 @@ export default function App() {
             </div>
           ):(
             <div style={cd()}>
-              {verified.map((r,i)=>{
+              {verified.map(r=>({ r, sc:scoreRateForAccommodation(r, benchAccType) }))
+                .sort((a,b)=>b.sc.score-a.sc.score)
+                .map(({r,sc},i,arr)=>{
                 const pt=priceOf(r); const gap=ourPrice?ourPrice-pt:null;
+                const segColor = sc.segment==="Comparable"?C.green:sc.segment==="Premium"?C.purple:sc.segment==="Secondaire"?C.gray:C.orange;
+                const segBg = sc.segment==="Comparable"?C.greenL:sc.segment==="Premium"?C.purpleL:sc.segment==="Secondaire"?C.grayL:C.orangeL;
+                const ppn = pricePerPersonNight(pt, r.stay_nights||7, benchOccupancy);
                 return (
-                  <div key={r.id||i} style={rw(i===verified.length-1)}>
+                  <div key={r.id||i} style={rw(i===arr.length-1)}>
                     <div style={{ flex:1, minWidth:0 }}>
                       <span style={{ fontSize:11, fontWeight:600, color:C.text }}>{r.competitor||r.property_name}</span>
                       <div style={{ display:"flex", gap:4, marginTop:1, alignItems:"center", flexWrap:"wrap" }}>
                         <Badge label={r.source||"?"} color={C.blue} bg={C.bluePale} size={8}/>
-                        <span style={{ fontSize:8, color:C.gray }}>{r.property_type} · {r.collected_at}</span>
-                        <ReliaBadge status={r.reliability_status||"validé"}/>
+                        <Badge label={sc.segment} color={segColor} bg={segBg} size={8}/>
+                        <span style={{ fontSize:8, color:C.gray }}>{r.property_type} · score {sc.score}</span>
                       </div>
                     </div>
                     <div style={{ textAlign:"right", flexShrink:0 }}>
                       <p style={{ margin:0, fontSize:12, fontWeight:700, color:C.text }}>{fmt(pt)}€</p>
-                      <p style={{ margin:0, fontSize:8, color:C.gray }}>{fmt(Math.round(pt/(r.stay_nights||7)))}€/n</p>
+                      <p style={{ margin:0, fontSize:8, color:C.gray }}>{fmt(Math.round(pt/(r.stay_nights||7)))}€/n{ppn?` · ${fmt(ppn)}€/p/n`:""}</p>
                       {gap!==null&&<p style={{ margin:0, fontSize:9, fontWeight:700, color:gap>0?C.green:C.red }}>{gap>0?"+":""}{fmt(gap)}€</p>}
                     </div>
                   </div>
@@ -3801,6 +3910,7 @@ export default function App() {
               <p style={{ margin:0, fontSize:11, color:C.text }}>Prix public conseillé : <strong>{fmt(dec.recommendedPrice)}€</strong> · Prix direct : <strong>{fmt(dec.directPrice)}€</strong></p>
               {dec.gapPct!==null&&<p style={{ margin:"2px 0 0", fontSize:9, color:C.gray }}>Écart actuel vs médiane : {dec.gapPct>0?"+":""}{dec.gapPct}%{dec.potentialGain?` · gain potentiel ${dec.potentialGain>0?"+":""}${fmt(dec.potentialGain)}€`:""}</p>}
             </>)}
+            {accommodationAdvice(benchAccType)&&<p style={{ margin:"6px 0 0", paddingTop:6, borderTop:`0.5px solid ${C.grayM}`, fontSize:9, color:C.text, fontStyle:"italic" }}>💡 {accommodationAdvice(benchAccType)}</p>}
           </div>
 
           {/* F. Enregistrer décision */}
