@@ -912,6 +912,63 @@ async function getAllCompetitorRatesHistory() {
   return all.sort((a,b)=>String(b.collected_at).localeCompare(String(a.collected_at))).slice(0,1000);
 }
 
+// ══ DÉCISIONS COMMERCIALES (commercial_decisions) ═══════════════
+const DECISIONS_LS = "commercial_decisions";
+
+async function getCommercialDecisions() {
+  if (SB_READY) {
+    try { return await sb.select("commercial_decisions", "order=created_at.desc&limit=300&select=*"); }
+    catch { return []; }
+  }
+  return ls.get(DECISIONS_LS).slice().sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at))).slice(0,300);
+}
+
+async function saveCommercialDecision(decision) {
+  const payload = { ...decision };
+  delete payload.id;
+  if (SB_READY) return await sb.insert("commercial_decisions", payload);
+  const all = ls.get(DECISIONS_LS);
+  const created = { ...payload, id:"cd_"+Date.now(), created_at:new Date().toISOString(), updated_at:new Date().toISOString() };
+  all.push(created); ls.set(DECISIONS_LS, all); return created;
+}
+
+async function updateCommercialDecision(id, patch) {
+  if (SB_READY) return await sb.update("commercial_decisions", `id=eq.${id}`, { ...patch, updated_at:new Date().toISOString() });
+  const all = ls.get(DECISIONS_LS);
+  const idx = all.findIndex(r=>r.id===id);
+  if (idx>=0) { all[idx] = { ...all[idx], ...patch, updated_at:new Date().toISOString() }; ls.set(DECISIONS_LS, all); return all[idx]; }
+  return null;
+}
+
+async function deleteCommercialDecision(id) {
+  if (SB_READY) return sb.delete("commercial_decisions", `id=eq.${id}`);
+  ls.set(DECISIONS_LS, ls.get(DECISIONS_LS).filter(r=>r.id!==id));
+  return true;
+}
+
+// Calcul local de la décision commerciale (relevés validés uniquement)
+function calcBenchmarkDecision({ ourPrice, marketRates, stayNights }) {
+  const priceOf = r => Number(r.price_total || r.price_week || r.price || 0);
+  const all = (marketRates||[]).map(priceOf).filter(Boolean);
+  const res = (marketRates||[]).filter(r=>r.property_type==="résidence").map(priceOf).filter(Boolean);
+  const marketMedian = median(res.length ? res : all);
+  const marketMin = all.length ? Math.min(...all) : null;
+  const marketMax = all.length ? Math.max(...all) : null;
+  const validatedCount = all.length;
+
+  if (validatedCount < 3 || !marketMedian) {
+    return { marketMedian, marketMin, marketMax, validatedCount, actionType:"need_data", actionLabel:"Relevés insuffisants", priority:"high", recommendedPrice:ourPrice||null, directPrice:ourPrice?Math.round(ourPrice*0.95):null, gapPct:null, potentialGain:null };
+  }
+  const gapPct = ourPrice ? Math.round(((ourPrice - marketMedian) / marketMedian) * 100) : null;
+  let actionType="maintain", actionLabel="Maintenir", priority="normal", recommendedPrice=marketMedian;
+  if (ourPrice && gapPct < -15) { actionType="increase"; actionLabel="Augmenter"; priority="high"; recommendedPrice=Math.round(marketMedian*0.98); }
+  else if (ourPrice && gapPct > 20) { actionType="promo"; actionLabel="Baisser / promo"; priority="medium"; recommendedPrice=Math.round(marketMedian*1.02); }
+  else { actionType="maintain"; actionLabel="Maintenir"; priority="normal"; recommendedPrice=ourPrice||marketMedian; }
+  const directPrice = recommendedPrice ? Math.round(recommendedPrice * 0.95) : null;
+  const potentialGain = (ourPrice && recommendedPrice) ? recommendedPrice - ourPrice : null;
+  return { marketMedian, marketMin, marketMax, validatedCount, actionType, actionLabel, priority, recommendedPrice, directPrice, gapPct, potentialGain };
+}
+
 function median(arr) {
   if (!arr.length) return null;
   const sorted=[...arr].sort((a,b)=>a-b); const mid=Math.floor(sorted.length/2);
@@ -1102,6 +1159,11 @@ export default function App() {
   const [histAll, setHistAll]             = useState([]);
   const [histLoading, setHistLoading]     = useState(false);
   const [histFilters, setHistFilters]     = useState({ competitor:"", source:"", capacity:0, status:"" });
+  // ── Décisions commerciales ────────────────────────────────────
+  const [decisions, setDecisions]         = useState([]);
+  const [decForm, setDecForm]             = useState({ action_type:"maintain", our_price_after:"", direct_price:"", decision_status:"à faire", notes:"" });
+  const [decSaving, setDecSaving]         = useState(false);
+  const [decMsg, setDecMsg]               = useState(null);
   const [catSaved, setCatSaved]           = useState({});
   const [ourForm, setOurForm]             = useState({ priceTotal:"", notes:"" });
   const [ourSaving, setOurSaving]         = useState(false);
@@ -1429,7 +1491,9 @@ export default function App() {
     catch { setHistAll([]); }
     setHistLoading(false);
   }
-  useEffect(()=>{ if(user && screen==="track") loadHistAll(); /* eslint-disable-next-line */ },[user,screen]);
+  useEffect(()=>{ if(user && (screen==="track"||screen==="benchmark")) loadHistAll(); /* eslint-disable-next-line */ },[user,screen]);
+  useEffect(()=>{ if(user) getCommercialDecisions().then(setDecisions).catch(()=>{}); },[user]);
+  async function reloadDecisions() { try { const d=await getCommercialDecisions(); setDecisions(d||[]); } catch {} }
 
   function exportHistoryCsv(rows) {
     const cols = ["collected_at","week_id","period_start","period_end","competitor","source","source_channel","capacity","stay_nights","price_total","price_night","reliability_status"];
@@ -1779,7 +1843,7 @@ export default function App() {
     </div>
   ):null;
 
-  const NAV=[{id:"dashboard",icon:"▣",l:"Dashboard"},{id:"weeks",icon:"📅",l:"Périodes"},{id:"track",icon:"📊",l:"Suivi prix"},{id:"import",icon:"📥",l:"Import"},{id:"diag",icon:"🔬",l:"Diagnostic"}];
+  const NAV=[{id:"dashboard",icon:"▣",l:"Dashboard"},{id:"benchmark",icon:"📊",l:"Benchmark"},{id:"track",icon:"💶",l:"Suivi prix"},{id:"weeks",icon:"📡",l:"Radar marché"},{id:"diag",icon:"🔬",l:"Diagnostic"}];
   const goScreen=id=>{ setScreen(id); setCM(null); setIaText(null); setPasteEdit(null); };
   const BNav=()=>isMobile?(
     <div style={{ position:"sticky", bottom:0, background:C.white, borderTop:`0.5px solid ${C.grayM}`, display:"flex", padding:"6px 0 16px", zIndex:10 }}>
@@ -1852,6 +1916,17 @@ export default function App() {
             </div>
           </div>
         </div>
+        {/* Résumé décisions commerciales */}
+        <div style={{ ...cd(11), padding:"10px 13px", background:C.bluePale, marginTop:8 }}>
+          <p style={{ margin:"0 0 3px", fontSize:11, fontWeight:700, color:C.blue }}>Décisions commerciales</p>
+          <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+            <span style={{ fontSize:10, color:C.orange, fontWeight:600 }}>{decisions.filter(d=>d.decision_status==="à faire").length} à faire</span>
+            <span style={{ fontSize:10, color:C.green, fontWeight:600 }}>{decisions.filter(d=>d.decision_status==="appliqué").length} appliquées</span>
+          </div>
+          {decisions[0]&&<p style={{ margin:"2px 0 0", fontSize:9, color:C.blueL }}>Dernière : {decisions[0].action_label||decisions[0].action_type} · {decisions[0].period_label||decisions[0].period_id} ({(decisions[0].created_at||"").slice(0,10)})</p>}
+          <button onClick={()=>setScreen("benchmark")} style={{ ...btn(false,C.blue), marginTop:8, marginBottom:0 }}>Ouvrir Benchmark &amp; décisions</button>
+        </div>
+
         <div style={{ ...responsiveGrid(3), marginTop:8 }}>
         <div style={{ ...cd(11), padding:"10px 13px", background:SB_READY?C.greenL:C.goldL, marginBottom:0 }}>
           <p style={{ margin:"0 0 1px", fontSize:11, fontWeight:700, color:SB_READY?C.green:C.gold }}>{SB_READY?"✓ Données persistées en Supabase":"⚠ Mode local — données non persistées"}</p>
@@ -2339,10 +2414,14 @@ export default function App() {
     displayPeriods.forEach(p => { if(!grouped[p.month_label]) grouped[p.month_label]=[]; grouped[p.month_label].push(p); });
     const is2n = periodMode === "hiver_2";
     const isHiver = periodMode !== "ete_7";
-    const barTitle = periodMode === "ete_7" ? `Périodes Été ${yr}` : periodMode === "hiver_7" ? "Périodes Hiver 7n" : "Périodes Hiver 2n";
+    const barTitle = "Radar marché";
     return (
       <div><SBar title={barTitle}/>
         <div style={{ padding:"6px 14px 4px" }}>
+          <div style={{ ...cd(10), padding:"8px 11px", background:C.goldL, marginBottom:8 }}>
+            <p style={{ margin:"0 0 1px", fontSize:11, fontWeight:700, color:C.orange }}>📡 Radar marché — découverte de concurrents</p>
+            <p style={{ margin:0, fontSize:9, color:C.orange }}>Les résultats Radar sont indicatifs. Ajoutez les concurrents utiles dans le catalogue avant de les suivre.</p>
+          </div>
           {/* Sélecteur de mode */}
           <div style={{ display:"flex", gap:4, marginBottom:8 }}>
             {[["ete_7","Été 7 nuits"],["hiver_7","Hiver 7n"],["hiver_2","Hiver 2n"]].map(([id,lbl])=>(
@@ -3211,6 +3290,192 @@ export default function App() {
     );
   };
 
+  const BenchmarkDecision=()=>{
+    const ctx = getTrackedPeriodContext();
+    const datesInvalid = !ctx.checkin || !ctx.checkout || !ctx.stayNights || ctx.stayNights<=0;
+    // Relevés validés correspondant au contexte (période/dates + capacité + durée)
+    const verified = (histAll||[]).filter(r=>
+      !r.is_example &&
+      TRUSTED_STATUSES.includes(r.reliability_status || "à vérifier") &&
+      r.week_id===ctx.periodId &&
+      Number(r.capacity)===Number(ctx.capacity) &&
+      Number(r.stay_nights||7)===Number(ctx.stayNights)
+    );
+    const dec = calcBenchmarkDecision({ ourPrice, marketRates:verified, stayNights:ctx.stayNights });
+    const priceOf = r => Number(r.price_total||r.price_week||r.price||0);
+    const usedSources = Array.from(new Set(verified.map(r=>r.source).filter(Boolean)));
+    const actChoices = [["increase","Augmenter"],["promo","Baisser / promo"],["maintain","Maintenir"],["surveiller","Surveiller"],["need_data","Relevés insuffisants"]];
+    const prioColor = p => p==="high"?C.red:p==="medium"?C.orange:C.green;
+
+    async function submitDecision() {
+      setDecSaving(true); setDecMsg(null);
+      try {
+        await saveCommercialDecision({
+          period_id: ctx.periodId, period_label: ctx.label, period_start: ctx.checkin, period_end: ctx.checkout,
+          stay_nights: ctx.stayNights, capacity: ctx.capacity,
+          our_price_before: ourPrice||null,
+          our_price_after: parseFloat(decForm.our_price_after)||null,
+          direct_price: parseFloat(decForm.direct_price)||null,
+          market_median: dec.marketMedian||null, market_min: dec.marketMin||null, market_max: dec.marketMax||null,
+          validated_rates_count: dec.validatedCount||0,
+          action_type: decForm.action_type, action_label: (actChoices.find(a=>a[0]===decForm.action_type)||[])[1]||decForm.action_type,
+          priority: dec.priority||"normal",
+          decision_status: decForm.decision_status||"à faire",
+          notes: decForm.notes||null,
+        });
+        await reloadDecisions();
+        setDecMsg("ok");
+        setDecForm({ action_type:"maintain", our_price_after:"", direct_price:"", decision_status:"à faire", notes:"" });
+      } catch(e) { setDecMsg("err:"+e.message); }
+      setDecSaving(false);
+      setTimeout(()=>setDecMsg(null),3000);
+    }
+
+    return (
+      <div><SBar title="Benchmark & décisions"/>
+        <div style={cnt}>
+          {/* A. Sélecteur de travail (réutilise le contexte du relevé) */}
+          <div style={{ ...cd(11), padding:"10px 12px", marginTop:8 }}>
+            <p style={{ margin:"0 0 6px", fontSize:11, fontWeight:700, color:C.blue }}>Période de travail</p>
+            <div style={{ display:"flex", gap:4, marginBottom:8 }}>
+              {[["period","Période sélectionnée"],["custom","Dates personnalisées"]].map(([v,l])=>(
+                <button key={v} onClick={()=>setTrackedMode(v)} style={{ flex:1, padding:"6px 4px", fontSize:10, fontWeight:trackedMode===v?700:400, background:trackedMode===v?C.blue:C.white, color:trackedMode===v?C.white:C.text, border:`1px solid ${trackedMode===v?C.blue:C.grayM}`, borderRadius:8, cursor:"pointer" }}>{l}</button>
+              ))}
+            </div>
+            <div style={formGrid}>
+              <div><p style={{ ...sml, margin:"0 0 4px" }}>Arrivée</p><input type="date" value={trackedCheckin} onChange={e=>setTrackedCheckin(e.target.value)} disabled={trackedMode==="period"} style={{ ...inp(), ...(trackedMode==="period"?{ background:C.grayL, color:C.gray }:{}) }}/></div>
+              <div><p style={{ ...sml, margin:"0 0 4px" }}>Départ</p><input type="date" value={trackedCheckout} onChange={e=>setTrackedCheckout(e.target.value)} disabled={trackedMode==="period"} style={{ ...inp(), ...(trackedMode==="period"?{ background:C.grayL, color:C.gray }:{}) }}/></div>
+            </div>
+            <p style={{ ...sml, margin:"8px 0 4px" }}>Capacité</p>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:4 }}>
+              {[2,4,6,8].map(n=><button key={n} onClick={()=>setTrackedCapacity(n)} style={{ padding:"6px 0", background:Number(trackedCapacity)===n?C.blue:C.grayL, border:"none", borderRadius:8, cursor:"pointer", fontSize:11, fontWeight:Number(trackedCapacity)===n?700:400, color:Number(trackedCapacity)===n?C.white:C.text }}>{n}P</button>)}
+            </div>
+            <p style={{ margin:"6px 0 0", fontSize:9, color:datesInvalid?C.red:C.gray }}>{datesInvalid?"Dates invalides : vérifiez arrivée et départ.":`${trackedMode==="custom"?"Dates personnalisées":ctx.label} · ${ctx.capacity}P · ${ctx.stayNights} nuits`}</p>
+          </div>
+
+          {/* B + C : cartes */}
+          <div style={responsiveGrid(2)}>
+            <div style={{ ...cd(11,0), padding:"10px 12px", background:C.bluePale }}>
+              <p style={{ margin:"0 0 1px", fontSize:8, color:C.blueL, fontWeight:700, textTransform:"uppercase" }}>Nos tarifs Les Cimes</p>
+              {ourPrice>0?(<>
+                <p style={{ margin:0, fontSize:18, fontWeight:700, color:C.blue }}>{fmt(ourPrice)}€<span style={{ fontSize:10 }}>/séjour</span></p>
+                <p style={{ margin:0, fontSize:10, color:C.blueL }}>{fmt(ourNight)}€/nuit · {ourRateSource}</p>
+              </>):(<p style={{ margin:0, fontSize:13, color:C.gray, fontStyle:"italic" }}>Tarif à définir</p>)}
+              <button onClick={()=>{ setScreen("dashboard"); setDashTarifTab("saisie"); setDashOurPeriodId(selWeekId); setDashOurCap(capNum); }} style={{ ...btn(false,C.white,C.blue), margin:"7px 0 0", border:`1px solid ${C.blueL}`, padding:"6px" }}>Modifier tarif</button>
+            </div>
+            <div style={{ ...cd(11,0), padding:"10px 12px", background:dec.validatedCount>=3?C.greenL:C.goldL }}>
+              <p style={{ margin:"0 0 1px", fontSize:8, color:dec.validatedCount>=3?C.green:C.gold, fontWeight:700, textTransform:"uppercase" }}>Marché vérifié ({dec.validatedCount})</p>
+              {dec.marketMedian?(<>
+                <p style={{ margin:0, fontSize:18, fontWeight:700, color:C.text }}>{fmt(dec.marketMedian)}€<span style={{ fontSize:10 }}>médiane</span></p>
+                <p style={{ margin:0, fontSize:10, color:C.gray }}>min {fmt(dec.marketMin)}€ · max {fmt(dec.marketMax)}€</p>
+                {usedSources.length>0&&<p style={{ margin:"2px 0 0", fontSize:8, color:C.gray }}>Sources : {usedSources.join(", ")}</p>}
+              </>):(<p style={{ margin:0, fontSize:11, color:C.gold }}>Pas assez de relevés validés.</p>)}
+            </div>
+          </div>
+
+          {/* D. Tableau benchmark */}
+          <p style={sml}>Concurrents validés</p>
+          {verified.length===0?(
+            <div style={{ ...cd(11), padding:"12px", textAlign:"center", border:`2px dashed ${C.grayM}` }}>
+              <p style={{ margin:"0 0 8px", fontSize:11, color:C.gray }}>Aucun relevé validé pour ce contexte.</p>
+              <button onClick={()=>setScreen("track")} style={{ ...btn(false,C.blue), width:"auto", padding:"7px 14px", margin:0 }}>Faire un relevé prix →</button>
+            </div>
+          ):(
+            <div style={cd()}>
+              {verified.map((r,i)=>{
+                const pt=priceOf(r); const gap=ourPrice?ourPrice-pt:null;
+                return (
+                  <div key={r.id||i} style={rw(i===verified.length-1)}>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <span style={{ fontSize:11, fontWeight:600, color:C.text }}>{r.competitor||r.property_name}</span>
+                      <div style={{ display:"flex", gap:4, marginTop:1, alignItems:"center", flexWrap:"wrap" }}>
+                        <Badge label={r.source||"?"} color={C.blue} bg={C.bluePale} size={8}/>
+                        <span style={{ fontSize:8, color:C.gray }}>{r.property_type} · {r.collected_at}</span>
+                        <ReliaBadge status={r.reliability_status||"validé"}/>
+                      </div>
+                    </div>
+                    <div style={{ textAlign:"right", flexShrink:0 }}>
+                      <p style={{ margin:0, fontSize:12, fontWeight:700, color:C.text }}>{fmt(pt)}€</p>
+                      <p style={{ margin:0, fontSize:8, color:C.gray }}>{fmt(Math.round(pt/(r.stay_nights||7)))}€/n</p>
+                      {gap!==null&&<p style={{ margin:0, fontSize:9, fontWeight:700, color:gap>0?C.green:C.red }}>{gap>0?"+":""}{fmt(gap)}€</p>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* E. Décision recommandée */}
+          <div style={{ ...cd(11), padding:"11px 13px", background:dec.actionType==="need_data"?C.goldL:dec.actionType==="increase"?C.greenL:dec.actionType==="promo"?C.orangeL:C.bluePale, marginTop:8 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
+              <p style={{ margin:0, fontSize:12, fontWeight:700, color:C.text }}>{dec.actionLabel}</p>
+              <Badge label={dec.priority} color={prioColor(dec.priority)} bg={C.white} size={9}/>
+            </div>
+            {dec.actionType==="need_data"?(
+              <p style={{ margin:0, fontSize:10, color:C.gold }}>Validez au moins 3 relevés pour une recommandation fiable.</p>
+            ):(<>
+              <p style={{ margin:0, fontSize:11, color:C.text }}>Prix public conseillé : <strong>{fmt(dec.recommendedPrice)}€</strong> · Prix direct : <strong>{fmt(dec.directPrice)}€</strong></p>
+              {dec.gapPct!==null&&<p style={{ margin:"2px 0 0", fontSize:9, color:C.gray }}>Écart actuel vs médiane : {dec.gapPct>0?"+":""}{dec.gapPct}%{dec.potentialGain?` · gain potentiel ${dec.potentialGain>0?"+":""}${fmt(dec.potentialGain)}€`:""}</p>}
+            </>)}
+          </div>
+
+          {/* F. Enregistrer décision */}
+          <p style={sml}>Enregistrer une décision commerciale</p>
+          <div style={{ ...cd(11), padding:"11px 13px" }}>
+            <div style={formGrid}>
+              <div>
+                <p style={{ ...sml, margin:"0 0 4px" }}>Action</p>
+                <select value={decForm.action_type} onChange={e=>setDecForm(f=>({ ...f, action_type:e.target.value }))} style={inp()}>{actChoices.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select>
+              </div>
+              <div>
+                <p style={{ ...sml, margin:"0 0 4px" }}>Statut</p>
+                <select value={decForm.decision_status} onChange={e=>setDecForm(f=>({ ...f, decision_status:e.target.value }))} style={inp()}>{["à faire","appliqué","annulé"].map(s=><option key={s} value={s}>{s}</option>)}</select>
+              </div>
+              <div>
+                <p style={{ ...sml, margin:"0 0 4px" }}>Nouveau prix public</p>
+                <input type="number" style={inp()} placeholder={dec.recommendedPrice?String(dec.recommendedPrice):"735"} value={decForm.our_price_after} onChange={e=>setDecForm(f=>({ ...f, our_price_after:e.target.value }))}/>
+              </div>
+              <div>
+                <p style={{ ...sml, margin:"0 0 4px" }}>Prix direct conseillé</p>
+                <input type="number" style={inp()} placeholder={dec.directPrice?String(dec.directPrice):"705"} value={decForm.direct_price} onChange={e=>setDecForm(f=>({ ...f, direct_price:e.target.value }))}/>
+              </div>
+            </div>
+            <p style={{ ...sml, margin:"8px 0 4px" }}>Note</p>
+            <input style={{ ...inp(), marginBottom:8 }} placeholder="ex : aligner sur Labellemontagne" value={decForm.notes} onChange={e=>setDecForm(f=>({ ...f, notes:e.target.value }))}/>
+            {decMsg==="ok"&&<div style={{ ...cd(8), padding:"7px 10px", background:C.greenL, marginBottom:6 }}><p style={{ margin:0, fontSize:11, fontWeight:600, color:C.green }}>✓ Décision enregistrée</p></div>}
+            {decMsg?.startsWith("err")&&<div style={{ ...cd(8), padding:"7px 10px", background:C.redL, marginBottom:6 }}><p style={{ margin:0, fontSize:11, color:C.red }}>✗ {decMsg.slice(4)}</p></div>}
+            <button onClick={submitDecision} disabled={decSaving} style={btn(decSaving,C.blue)}>{decSaving?"Enregistrement…":"Enregistrer la décision"}</button>
+          </div>
+
+          {/* Historique des décisions */}
+          <p style={sml}>Historique des décisions</p>
+          {decisions.length===0&&<p style={{ fontSize:11, color:C.gray, textAlign:"center", padding:"12px 0", fontStyle:"italic" }}>Aucune décision enregistrée.</p>}
+          <div style={cd()}>
+            {decisions.slice(0,50).map((d,i,arr)=>(
+              <div key={d.id||i} style={{ padding:"9px 12px", borderBottom:i===Math.min(arr.length,50)-1?"none":`0.5px solid ${C.grayL}` }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 }}>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <span style={{ fontSize:11, fontWeight:600, color:C.text }}>{d.action_label||d.action_type}</span>
+                    <div style={{ display:"flex", gap:4, marginTop:1, alignItems:"center", flexWrap:"wrap" }}>
+                      <span style={{ fontSize:8, color:C.gray }}>{(d.created_at||"").slice(0,10)} · {d.period_label||d.period_id} · {d.capacity}P</span>
+                      <Badge label={d.decision_status} color={d.decision_status==="appliqué"?C.green:d.decision_status==="annulé"?C.red:C.orange} bg={d.decision_status==="appliqué"?C.greenL:d.decision_status==="annulé"?C.redL:C.goldL} size={8}/>
+                    </div>
+                    <p style={{ margin:"2px 0 0", fontSize:9, color:C.gray }}>{d.our_price_before?`${fmt(Number(d.our_price_before))}€`:"—"} → {d.our_price_after?`${fmt(Number(d.our_price_after))}€`:"—"}{d.direct_price?` · direct ${fmt(Number(d.direct_price))}€`:""}</p>
+                    {d.notes&&<p style={{ margin:"1px 0 0", fontSize:8, color:C.gray, fontStyle:"italic" }}>{d.notes}</p>}
+                  </div>
+                  <div style={{ display:"flex", flexDirection:"column", gap:3, flexShrink:0 }}>
+                    {d.decision_status!=="appliqué"&&<button onClick={async()=>{ await updateCommercialDecision(d.id,{ decision_status:"appliqué", applied_at:new Date().toISOString() }); reloadDecisions(); }} style={{ fontSize:8, fontWeight:700, color:C.green, background:C.greenL, border:"none", borderRadius:5, padding:"3px 6px", cursor:"pointer" }}>✓ Appliqué</button>}
+                    <button onClick={async()=>{ await deleteCommercialDecision(d.id); reloadDecisions(); }} style={{ fontSize:8, color:C.gray, background:C.grayL, border:"none", borderRadius:5, padding:"3px 6px", cursor:"pointer" }}>🗑</button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div><BNav/>
+      </div>
+    );
+  };
+
  return (
   <div style={appShell}>
     <div style={appContainer}>
@@ -3235,6 +3500,7 @@ export default function App() {
             {screen === "weeks" && Weeks()}
             {screen === "week" && WeekDetail()}
             {screen === "collect" && Collect()}
+            {screen === "benchmark" && BenchmarkDecision()}
             {screen === "track" && TrackPrices()}
             {screen === "import" && ImportScreen()}
             {screen === "diag" && Diagnostic()}
@@ -3248,6 +3514,7 @@ export default function App() {
           {screen === "weeks" && Weeks()}
           {screen === "week" && WeekDetail()}
           {screen === "collect" && Collect()}
+            {screen === "benchmark" && BenchmarkDecision()}
             {screen === "track" && TrackPrices()}
           {screen === "import" && ImportScreen()}
           {screen === "diag" && Diagnostic()}
