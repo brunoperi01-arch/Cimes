@@ -926,22 +926,46 @@ async function deleteCompetitorSource(id) {
   return true;
 }
 
+// Normalise une URL saisie : www.→https://www., ww.→https://www., sans http→https://
+function normalizeSourceUrl(raw) {
+  let u = String(raw || "").trim();
+  if (!u) return "";
+  if (/^https?:\/\//i.test(u)) return u;
+  if (/^www\./i.test(u)) return "https://" + u;
+  if (/^ww\./i.test(u)) return "https://www." + u.replace(/^ww\./i, "");
+  return "https://" + u;
+}
+
 // Import CSV : competitor_name;source_type;source_name;source_url;notes
 async function importSourcesCsv(csvText, catalog) {
   const lines = String(csvText||"").trim().split(/\r?\n/).filter(Boolean);
   if (!lines.length) return { added:0, skipped:0, errors:["CSV vide"] };
   const start = /competitor_name/i.test(lines[0]) ? 1 : 0;
   let added=0, skipped=0; const errors=[];
+  const findComp = (name) => {
+    const n = String(name||"").trim();
+    if (!n) return null;
+    // 1. nom exact
+    let c = (catalog||[]).find(x=>String(x.name).trim()===n);
+    if (c) return c;
+    // 2. insensible à la casse
+    c = (catalog||[]).find(x=>String(x.name).trim().toLowerCase()===n.toLowerCase());
+    if (c) return c;
+    // 3. partiel (includes)
+    c = (catalog||[]).find(x=>String(x.name).toLowerCase().includes(n.toLowerCase()) || n.toLowerCase().includes(String(x.name).toLowerCase()));
+    return c || null;
+  };
   for (let i=start; i<lines.length; i++) {
     const cols = lines[i].split(";").map(s=>s.trim());
     const [cname, stype, sname, surl, notes] = cols;
-    if (!cname || !surl) { skipped++; continue; }
-    const comp = (catalog||[]).find(c=>String(c.name).toLowerCase()===String(cname).toLowerCase());
+    if (!cname) { errors.push(`Ligne ${i+1} : nom de concurrent manquant`); skipped++; continue; }
+    if (!surl)  { errors.push(`Ligne ${i+1} (${cname}) : URL manquante`); skipped++; continue; }
+    const comp = findComp(cname);
     if (!comp) { errors.push(`Concurrent introuvable : ${cname}`); skipped++; continue; }
     try {
-      await saveCompetitorSource({ competitor_id:comp.id, source_type:stype||"other", source_name:sname||stype||"Autre", source_url:surl, notes:notes||null, is_active:true });
+      await saveCompetitorSource({ competitor_id:comp.id, source_type:stype||"other", source_name:sname||stype||"Autre", source_url:normalizeSourceUrl(surl), notes:notes||null, is_active:true });
       added++;
-    } catch(e) { errors.push(`${cname}/${sname} : ${e.message}`); skipped++; }
+    } catch(e) { errors.push(`${cname}/${sname||stype} : ${e.message}`); skipped++; }
   }
   return { added, skipped, errors };
 }
@@ -1524,7 +1548,7 @@ export default function App() {
   async function handleSaveSource() {
     if (!sourceForm?.source_url?.trim()) { setSourceForm(f=>({ ...f, error:"URL requise." })); return; }
     if (!sourceForm.source_name?.trim()) { setSourceForm(f=>({ ...f, error:"Nom de la source requis." })); return; }
-    try { await saveCompetitorSource({ competitor_id:sourceForm.competitor_id, source_type:sourceForm.source_type, source_name:sourceForm.source_name.trim(), source_url:sourceForm.source_url, notes:sourceForm.notes, is_active:true }); await reloadSources(); setSourceForm(null); }
+    try { await saveCompetitorSource({ competitor_id:sourceForm.competitor_id, source_type:sourceForm.source_type, source_name:sourceForm.source_name.trim(), source_url:normalizeSourceUrl(sourceForm.source_url), notes:sourceForm.notes, is_active:true }); await reloadSources(); setSourceForm(null); }
     catch(e) { setSourceForm(f=>({ ...f, error:e.message })); }
   }
   async function handleDeleteSource(id) {
