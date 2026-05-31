@@ -1584,12 +1584,23 @@ export default function App() {
       });
       const data = await res.json();
       if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
-      setTrackedScrapeResults(data.results || []);
-      // pré-remplir les prix éditables avec les prix détectés
-      const edits = {};
-      (data.results||[]).forEach((r,i)=>{ if(r.price_total) edits[i]=String(r.price_total); });
-      setTrackedScrapeEditedPrices(edits);
-      if ((data.results||[]).length===0) setTrackedScrapeError("Aucun résultat. Ouvrez les liens manuellement.");
+      const results = data.results || [];
+      setTrackedScrapeResults(results);
+      // Préremplir le champ "Prix vérifié" de chaque source correspondante (sans valider)
+      const prefill = {};
+      (catalog||[]).forEach(c=>{
+        sourcesForCompetitor(c).forEach(s=>{
+          const match = results.find(r => {
+            const sameComp = String(r.competitor_name||"").toLowerCase()===String(c.name||"").toLowerCase();
+            const sn=String(s.source_name||"").toLowerCase(), rs=String(r.source||"").toLowerCase();
+            const sameSrc = rs===sn || String(r.channel||"").toLowerCase()===String(s.source_type||"").toLowerCase() || (sn&&rs&&(rs.includes(sn)||sn.includes(rs)));
+            return sameComp && sameSrc && r.price_total;
+          });
+          if (match) prefill[`${c.id}_${s.id}`] = String(match.price_total);
+        });
+      });
+      if (Object.keys(prefill).length) setTrackPrices(p=>({ ...p, ...prefill }));
+      if (results.length===0) setTrackedScrapeError("Aucun résultat. Ouvrez les liens manuellement.");
     } catch(e) {
       setTrackedScrapeError("Erreur scraping : "+e.message+" — vérifiez les liens manuellement.");
     }
@@ -1664,6 +1675,17 @@ export default function App() {
     if (c.booking_url) legacy.push({ id:`legacy_b_${c.id}`, competitor_id:c.id, source_type:"booking", source_name:"Booking.com", source_url:c.booking_url });
     if (c.direct_url) legacy.push({ id:`legacy_d_${c.id}`, competitor_id:c.id, source_type:"direct", source_name:"Site direct", source_url:c.direct_url });
     return legacy;
+  }
+
+  // Retrouve un résultat de scraping correspondant à une source d'un concurrent
+  function findScrapeResultForSource(competitor, source) {
+    return (trackedScrapeResults||[]).find(r => {
+      const sameCompetitor = String(r.competitor_name||"").toLowerCase() === String(competitor.name||"").toLowerCase();
+      const sn = String(source.source_name||"").toLowerCase();
+      const rs = String(r.source||"").toLowerCase();
+      const sameSource = rs===sn || String(r.channel||"").toLowerCase()===String(source.source_type||"").toLowerCase() || (sn&&rs&&(rs.includes(sn)||sn.includes(rs)));
+      return sameCompetitor && sameSource;
+    });
   }
 
   // Enregistre un prix relevé pour une source précise (validé)
@@ -2598,56 +2620,11 @@ export default function App() {
                 )}
               </div>
 
-              {/* Scraping ciblé automatique (prévalidation) */}
+              {/* Scraping ciblé automatique (préremplit les lignes ci-dessous) */}
               <button onClick={scrapeTrackedRates} disabled={trackedScraping||datesInvalid} style={{ ...btn(trackedScraping||datesInvalid,C.purple), marginBottom:4 }}>{trackedScraping?"⏳ Scraping en cours…":"🤖 Scraper les concurrents suivis"}</button>
               <p style={{ margin:"0 0 8px", fontSize:8, color:C.gray, fontStyle:"italic", textAlign:"center" }}>Le scraping automatique sert à préremplir. Vérifiez toujours le prix avant validation.</p>
               {trackedScrapeError&&<div style={{ ...cd(9), padding:"8px 11px", background:C.goldL, marginBottom:8 }}><p style={{ margin:0, fontSize:10, color:C.orange }}>{trackedScrapeError}</p></div>}
-
-              {trackedScrapeResults.length>0&&(
-                <>
-                  <p style={sml}>Résultats détectés automatiquement</p>
-                  <div style={cd()}>
-                    {trackedScrapeResults.map((r,idx)=>{
-                      const st=trackedScrapeSaved[idx];
-                      const edited=trackedScrapeEditedPrices[idx]??"";
-                      const confColor=r.confidence==="high"?C.green:r.confidence==="medium"?C.orange:C.gray;
-                      const confBg=r.confidence==="high"?C.greenL:r.confidence==="medium"?C.orangeL:C.grayL;
-                      return (
-                        <div key={idx} style={{ padding:"9px 12px", borderBottom:idx<trackedScrapeResults.length-1?`0.5px solid ${C.grayL}`:"none", opacity:st==="ignored"?0.5:1 }}>
-                          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 }}>
-                            <div style={{ flex:1, minWidth:0 }}>
-                              <span style={{ fontSize:12, fontWeight:600, color:C.text }}>{r.competitor_name}</span>
-                              <div style={{ display:"flex", gap:4, marginTop:2, alignItems:"center", flexWrap:"wrap" }}>
-                                <Badge label={r.source} color={r.channel==="direct"?C.green:C.blue} bg={r.channel==="direct"?C.greenL:C.bluePale} size={8}/>
-                                {r.price_total&&<Badge label={r.confidence} color={confColor} bg={confBg} size={8}/>}
-                              </div>
-                            </div>
-                            <a href={r.url} target="_blank" rel="noreferrer" style={{ fontSize:9, fontWeight:600, color:C.blue, background:C.white, padding:"4px 8px", borderRadius:6, textDecoration:"none", border:`1px solid ${C.grayM}`, flexShrink:0 }}>↗ Ouvrir</a>
-                          </div>
-                          {r.price_total ? (
-                            <p style={{ margin:"4px 0 0", fontSize:10, color:C.text }}>Prix détecté : <strong>{fmt(r.price_total)} €</strong></p>
-                          ) : (
-                            <p style={{ margin:"4px 0 0", fontSize:9, color:C.orange }}>{r.warning||"Prix non détecté automatiquement."}</p>
-                          )}
-                          {st==="ok" ? (
-                            <p style={{ margin:"5px 0 0", fontSize:9, color:C.green, fontWeight:600 }}>✓ Prix validé et enregistré</p>
-                          ) : st==="ignored" ? (
-                            <p style={{ margin:"5px 0 0", fontSize:9, color:C.gray }}>Résultat ignoré</p>
-                          ) : (
-                            <div style={{ display:"flex", gap:6, marginTop:6, alignItems:"center", flexWrap:"wrap" }}>
-                              <input type="number" placeholder="Prix à valider" value={edited} onChange={e=>setTrackedScrapeEditedPrices(p=>({ ...p, [idx]:e.target.value }))} style={{ flex:1, minWidth:90, padding:"5px 8px", fontSize:10, border:`1px solid ${C.grayM}`, borderRadius:6, boxSizing:"border-box" }}/>
-                              <button onClick={()=>validateTrackedScrapedRate(r,idx)} disabled={!edited||datesInvalid} style={{ padding:"5px 9px", fontSize:9, fontWeight:700, background:(edited&&!datesInvalid)?C.green:C.grayL, color:(edited&&!datesInvalid)?C.white:C.gray, border:"none", borderRadius:6, cursor:(edited&&!datesInvalid)?"pointer":"default", whiteSpace:"nowrap" }}>Valider ce prix</button>
-                              <button onClick={()=>ignoreTrackedScrapedRate(idx)} style={{ padding:"5px 9px", fontSize:9, fontWeight:600, background:C.grayL, color:C.gray, border:"none", borderRadius:6, cursor:"pointer" }}>Ignorer</button>
-                            </div>
-                          )}
-                          {st==="dup"&&<p style={{ margin:"4px 0 0", fontSize:8, color:C.gold }}>= Relevé déjà existant</p>}
-                          {st==="err"&&<p style={{ margin:"4px 0 0", fontSize:8, color:C.red }}>✗ Erreur d'enregistrement</p>}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </>
-              )}
+              {trackedScrapeResults.length>0&&(()=>{ const n=trackedScrapeResults.filter(r=>r.price_total).length; return <div style={{ ...cd(9), padding:"8px 11px", background:C.bluePale, marginBottom:8 }}><p style={{ margin:0, fontSize:10, color:C.blue, fontWeight:600 }}>{n} prix détecté(s) automatiquement. Vérifiez avant validation.</p></div>; })()}
 
               <div style={cd()}>
                 {catalog.map((c,i)=>{
@@ -2669,22 +2646,31 @@ export default function App() {
                         const vp = trackPrices[key]??"";
                         const last = lastRateFor(c.name, s.source_name);
                         const injectsDates = s.source_type==="booking" || isLfdnasSource(s);
+                        const scrape = findScrapeResultForSource(c, s);
+                        const confColor = scrape?.confidence==="high"?C.green:scrape?.confidence==="medium"?C.orange:C.gray;
+                        const confBg = scrape?.confidence==="high"?C.greenL:scrape?.confidence==="medium"?C.orangeL:C.grayL;
                         return (
                           <div key={s.id} style={{ marginTop:6, paddingTop:6, borderTop:`0.5px dashed ${C.grayL}` }}>
                             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
-                              <span style={{ fontSize:10, fontWeight:600, color:C.text }}>{s.source_name}</span>
+                              <div style={{ display:"flex", alignItems:"center", gap:5, flexWrap:"wrap" }}>
+                                <span style={{ fontSize:10, fontWeight:600, color:C.text }}>{s.source_name}</span>
+                                {scrape?.price_total&&<Badge label={scrape.confidence} color={confColor} bg={confBg} size={8}/>}
+                              </div>
                               {(injectsDates&&datesInvalid)
                                 ? <span style={{ fontSize:9, fontWeight:600, color:C.gray, background:C.grayL, padding:"4px 8px", borderRadius:6, border:`1px solid ${C.grayM}` }}>↗ Ouvrir</span>
                                 : <a href={url} target="_blank" rel="noreferrer" style={{ fontSize:9, fontWeight:600, color:C.blue, background:C.white, padding:"4px 8px", borderRadius:6, textDecoration:"none", border:`1px solid ${C.grayM}`, flexShrink:0 }}>↗ Ouvrir</a>}
                             </div>
                             {isLfdnasSource(s)&&<p style={{ margin:"2px 0 0", fontSize:8, color:C.purple, fontStyle:"italic" }}>Dates ajoutées automatiquement à l'URL TO.</p>}
+                            {scrape&&(scrape.price_total
+                              ? <p style={{ margin:"3px 0 0", fontSize:9, color:C.orange }}>Prix détecté automatiquement : {fmt(scrape.price_total)}€ — à vérifier.</p>
+                              : <p style={{ margin:"3px 0 0", fontSize:8, color:C.gray }}>{scrape.warning||"Prix non détecté automatiquement."}</p>)}
                             {last&&<p style={{ margin:"3px 0 0", fontSize:8, color:C.gray }}>Dernier {s.source_name} : {fmt(Number(last.price_total||last.price_week))}€ · {last.reliability_status} · {last.collected_at}</p>}
                             {st==="ok" ? (
                               <p style={{ margin:"4px 0 0", fontSize:9, color:C.green, fontWeight:600 }}>✓ Prix {s.source_name} enregistré</p>
                             ) : (
                               <div style={{ display:"flex", gap:6, alignItems:"center", marginTop:4 }}>
                                 <input type="number" placeholder={`Prix ${s.source_name} vérifié`} value={vp} onChange={e=>setTrackPrices(p=>({ ...p, [key]:e.target.value }))} style={{ flex:1, padding:"5px 8px", fontSize:10, border:`1px solid ${C.grayM}`, borderRadius:6, boxSizing:"border-box" }}/>
-                                <button onClick={()=>saveSourceRate(c, s, vp, key)} disabled={!vp||datesInvalid} style={{ padding:"5px 9px", fontSize:9, fontWeight:700, background:(vp&&!datesInvalid)?C.green:C.grayL, color:(vp&&!datesInvalid)?C.white:C.gray, border:"none", borderRadius:6, cursor:(vp&&!datesInvalid)?"pointer":"default", whiteSpace:"nowrap" }}>Enregistrer</button>
+                                <button onClick={()=>saveSourceRate(c, s, vp, key)} disabled={!vp||datesInvalid} style={{ padding:"5px 9px", fontSize:9, fontWeight:700, background:(vp&&!datesInvalid)?C.green:C.grayL, color:(vp&&!datesInvalid)?C.white:C.gray, border:"none", borderRadius:6, cursor:(vp&&!datesInvalid)?"pointer":"default", whiteSpace:"nowrap" }}>{scrape?.price_total?"Valider ce prix":"Enregistrer"}</button>
                               </div>
                             )}
                             {st==="dup"&&<p style={{ margin:"3px 0 0", fontSize:8, color:C.gold }}>= Relevé déjà existant</p>}
