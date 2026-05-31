@@ -366,6 +366,14 @@ function fmtDateShort(dateStr) {
   return `${d.getUTCDate()} ${mns[d.getUTCMonth()]}`;
 }
 
+// Libellé d'une période pour le sélecteur du relevé (utilise les vraies dates Booking)
+function periodOptionLabel(p) {
+  const start = p.period_start || p.week_start;
+  const nights = Number(p.stay_nights || 7);
+  const end = p.period_end || addDaysStr(start, nights);
+  return `${fmtDateShort(start)} → ${fmtDateShort(end)} · ${nights} nuits`;
+}
+
 // Lien Booking par localisation + dates corrigées (résidences/appart = property_type 204)
 function bookingSearchUrl({ location, periodStart, periodEnd, capacity, propertyTypeCode = "204" }) {
   const ss = encodeURIComponent(location || "La Foux d'Allos");
@@ -1148,6 +1156,9 @@ export default function App() {
   const [catChannel, setCatChannel]       = useState({});
   // ── Relevé concurrents suivis : dates personnalisables ────────
   const [trackedMode, setTrackedMode]       = useState("period"); // period | custom
+  const [trackedSeason, setTrackedSeason]   = useState("ete");
+  const [trackedStayNights, setTrackedStayNights] = useState(7);
+  const [trackedPeriodId, setTrackedPeriodId] = useState("");
   const [trackedCheckin, setTrackedCheckin] = useState("");
   const [trackedCheckout, setTrackedCheckout] = useState("");
   const [trackedCapacity, setTrackedCapacity] = useState(6);
@@ -1215,25 +1226,56 @@ export default function App() {
   const ourRateSource = currentOurRate ? "Supabase" : "Grille interne fallback";
   const reco     = calcReco(ourPrice,rates,settings);
 
-  // ── Relevé concurrents suivis : synchro dates avec la période ──
+  // ── Relevé concurrents suivis : périodes disponibles ──────────
+  const trackedAvailablePeriods = ALL_PERIODS.filter(p =>
+    p.id !== "custom" &&
+    (trackedSeason === "all" || p.season === trackedSeason) &&
+    Number(p.stay_nights || 7) === Number(trackedStayNights)
+  );
+
+  // Initialise la période et la capacité depuis la période ouverte ailleurs
   useEffect(() => {
+    const base = ALL_PERIODS.find(p=>p.id===selWeekId);
+    if (base && base.id!=="custom") {
+      setTrackedSeason(base.season || "ete");
+      setTrackedStayNights(Number(base.stay_nights || 7));
+      setTrackedPeriodId(base.id);
+    }
+    setTrackedCapacity(capNum);
     const start = selWeek?.period_start || selWeek?.week_start || "";
     const nights = selWeek?.stay_nights || 7;
-    const end = selWeek?.period_end || (start ? addDaysStr(start, nights) : "");
     setTrackedCheckin(start);
-    setTrackedCheckout(end);
-    setTrackedCapacity(capNum);
+    setTrackedCheckout(selWeek?.period_end || (start ? addDaysStr(start, nights) : ""));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selWeekId, capNum]);
 
+  // Si la période sélectionnée n'est plus valide après changement saison/durée → 1ère dispo
+  useEffect(() => {
+    if (trackedMode!=="period") return;
+    const stillValid = trackedAvailablePeriods.some(p=>p.id===trackedPeriodId);
+    if (!stillValid && trackedAvailablePeriods.length) setTrackedPeriodId(trackedAvailablePeriods[0].id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trackedSeason, trackedStayNights, trackedMode]);
+
   function getTrackedPeriodContext() {
-    const checkin = trackedMode === "custom" ? trackedCheckin : (selWeek?.period_start || selWeek?.week_start);
-    const nights = trackedMode === "custom" ? daysBetween(trackedCheckin, trackedCheckout) : (selWeek?.stay_nights || 7);
-    const checkout = trackedMode === "custom" ? trackedCheckout : (selWeek?.period_end || addDaysStr(checkin, nights));
+    if (trackedMode === "custom") {
+      const checkin = trackedCheckin;
+      const checkout = trackedCheckout;
+      const nights = daysBetween(trackedCheckin, trackedCheckout);
+      const capacity = Number(trackedCapacity || capNum);
+      return { periodId:`custom_${checkin}_${checkout}_${capacity}p`, label:`${checkin} → ${checkout}`, checkin, checkout, capacity, stayNights:nights, season:trackedSeason || "ete" };
+    }
+    const period = ALL_PERIODS.find(p => p.id === trackedPeriodId) || selWeek;
+    const checkin = period.period_start || period.week_start;
+    const stayNights = Number(period.stay_nights || trackedStayNights || 7);
+    const checkout = period.period_end || addDaysStr(checkin, stayNights);
     const capacity = Number(trackedCapacity || capNum);
-    const periodId = trackedMode === "custom" ? `custom_${checkin}_${checkout}_${capacity}p` : selWeekId;
-    const label = trackedMode === "custom" ? `${checkin} → ${checkout}` : (selWeek?.label || selWeek?.subtitle || "");
-    return { periodId, label, checkin, checkout, capacity, stayNights: nights, season: selWeek?.season || "ete" };
+    return {
+      periodId: period.id,
+      label: period.label || period.subtitle || `${checkin} → ${checkout}`,
+      checkin, checkout, capacity, stayNights,
+      season: period.season || trackedSeason || "ete",
+    };
   }
   function isTrackedCtxValid(ctx) {
     return !!(ctx.checkin && ctx.checkout && ctx.checkout > ctx.checkin && ctx.capacity);
@@ -2248,24 +2290,51 @@ export default function App() {
             <>
               <p style={sml}>🔍 Relevé concurrents suivis</p>
 
-              {/* Sélection des dates du relevé */}
+              {/* Sélection de la période du relevé */}
               <div style={{ ...cd(11,4), padding:"10px 12px" }}>
-                <p style={{ margin:"0 0 6px", fontSize:11, fontWeight:700, color:C.blue }}>Dates du relevé</p>
+                <p style={{ margin:"0 0 6px", fontSize:11, fontWeight:700, color:C.blue }}>Période du relevé</p>
                 <div style={{ display:"flex", gap:4, marginBottom:8 }}>
-                  {[["period","Période sélectionnée"],["custom","Dates personnalisées"]].map(([v,l])=>(
+                  {[["period","Période 7 nuits"],["custom","Dates personnalisées"]].map(([v,l])=>(
                     <button key={v} onClick={()=>setTrackedMode(v)} style={{ flex:1, padding:"6px 4px", fontSize:10, fontWeight:trackedMode===v?700:400, background:trackedMode===v?C.blue:C.white, color:trackedMode===v?C.white:C.text, border:`1px solid ${trackedMode===v?C.blue:C.grayM}`, borderRadius:8, cursor:"pointer" }}>{l}</button>
                   ))}
                 </div>
-                <div style={formGrid}>
-                  <div>
-                    <p style={{ ...sml, margin:"0 0 4px" }}>Date d'arrivée</p>
-                    <input type="date" value={trackedCheckin} onChange={e=>setTrackedCheckin(e.target.value)} disabled={trackedMode==="period"} style={{ ...inp(), ...(trackedMode==="period"?{ background:C.grayL, color:C.gray }:{}) }}/>
+
+                {trackedMode==="period" ? (<>
+                  <div style={formGrid}>
+                    <div>
+                      <p style={{ ...sml, margin:"0 0 4px" }}>Saison</p>
+                      <select value={trackedSeason} onChange={e=>setTrackedSeason(e.target.value)} style={inp()}>
+                        <option value="ete">Été</option>
+                        <option value="hiver">Hiver</option>
+                        <option value="all">Toutes</option>
+                      </select>
+                    </div>
+                    <div>
+                      <p style={{ ...sml, margin:"0 0 4px" }}>Durée</p>
+                      <select value={trackedStayNights} onChange={e=>setTrackedStayNights(Number(e.target.value))} style={inp()}>
+                        <option value={7}>7 nuits</option>
+                        <option value={2}>2 nuits</option>
+                      </select>
+                    </div>
                   </div>
-                  <div>
-                    <p style={{ ...sml, margin:"0 0 4px" }}>Date de départ</p>
-                    <input type="date" value={trackedCheckout} onChange={e=>setTrackedCheckout(e.target.value)} disabled={trackedMode==="period"} style={{ ...inp(), ...(trackedMode==="period"?{ background:C.grayL, color:C.gray }:{}) }}/>
+                  <p style={{ ...sml, margin:"8px 0 4px" }}>Période</p>
+                  <select value={trackedPeriodId} onChange={e=>setTrackedPeriodId(e.target.value)} style={inp()}>
+                    {trackedAvailablePeriods.length===0&&<option value="">Aucune période</option>}
+                    {trackedAvailablePeriods.map(p=><option key={p.id} value={p.id}>{periodOptionLabel(p)}{p.label?` — ${p.label}`:""}</option>)}
+                  </select>
+                </>) : (
+                  <div style={formGrid}>
+                    <div>
+                      <p style={{ ...sml, margin:"0 0 4px" }}>Date d'arrivée</p>
+                      <input type="date" value={trackedCheckin} onChange={e=>setTrackedCheckin(e.target.value)} style={inp()}/>
+                    </div>
+                    <div>
+                      <p style={{ ...sml, margin:"0 0 4px" }}>Date de départ</p>
+                      <input type="date" value={trackedCheckout} onChange={e=>setTrackedCheckout(e.target.value)} style={inp()}/>
+                    </div>
                   </div>
-                </div>
+                )}
+
                 <p style={{ ...sml, margin:"8px 0 4px" }}>Capacité</p>
                 <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:4 }}>
                   {[2,4,6,8].map(n=><button key={n} onClick={()=>setTrackedCapacity(n)} style={{ padding:"6px 0", background:Number(trackedCapacity)===n?C.blue:C.grayL, border:"none", borderRadius:8, cursor:"pointer", fontSize:11, fontWeight:Number(trackedCapacity)===n?700:400, color:Number(trackedCapacity)===n?C.white:C.text }}>{n}P</button>)}
@@ -2275,7 +2344,7 @@ export default function App() {
               {/* Récapitulatif contexte */}
               <div style={{ ...cd(11,4), padding:"9px 12px", background:ctxValid?C.bluePale:C.redL }}>
                 {ctxValid ? (<>
-                  <p style={{ margin:0, fontSize:11, color:C.blue, fontWeight:700 }}>{trackedMode==="custom"?"Dates personnalisées":`Période sélectionnée : ${ctx.label}`}</p>
+                  <p style={{ margin:0, fontSize:11, color:C.blue, fontWeight:700 }}>{trackedMode==="custom"?"Dates personnalisées":`Période : ${ctx.label}`}</p>
                   <p style={{ margin:"1px 0 0", fontSize:9, color:C.blueL }}>Booking : arrivée {ctx.checkin} · départ {ctx.checkout}</p>
                   <p style={{ margin:"1px 0 0", fontSize:9, color:C.blueL }}>Capacité : {ctx.capacity}P · {ctx.stayNights} nuits</p>
                 </>) : (
@@ -3354,18 +3423,36 @@ export default function App() {
     return (
       <div><SBar title="Benchmark & décisions"/>
         <div style={cnt}>
-          {/* A. Sélecteur de travail (réutilise le contexte du relevé) */}
+          {/* A. Sélecteur de travail (même sélecteur que le relevé) */}
           <div style={{ ...cd(11), padding:"10px 12px", marginTop:8 }}>
             <p style={{ margin:"0 0 6px", fontSize:11, fontWeight:700, color:C.blue }}>Période de travail</p>
             <div style={{ display:"flex", gap:4, marginBottom:8 }}>
-              {[["period","Période sélectionnée"],["custom","Dates personnalisées"]].map(([v,l])=>(
+              {[["period","Période 7 nuits"],["custom","Dates personnalisées"]].map(([v,l])=>(
                 <button key={v} onClick={()=>setTrackedMode(v)} style={{ flex:1, padding:"6px 4px", fontSize:10, fontWeight:trackedMode===v?700:400, background:trackedMode===v?C.blue:C.white, color:trackedMode===v?C.white:C.text, border:`1px solid ${trackedMode===v?C.blue:C.grayM}`, borderRadius:8, cursor:"pointer" }}>{l}</button>
               ))}
             </div>
-            <div style={formGrid}>
-              <div><p style={{ ...sml, margin:"0 0 4px" }}>Arrivée</p><input type="date" value={trackedCheckin} onChange={e=>setTrackedCheckin(e.target.value)} disabled={trackedMode==="period"} style={{ ...inp(), ...(trackedMode==="period"?{ background:C.grayL, color:C.gray }:{}) }}/></div>
-              <div><p style={{ ...sml, margin:"0 0 4px" }}>Départ</p><input type="date" value={trackedCheckout} onChange={e=>setTrackedCheckout(e.target.value)} disabled={trackedMode==="period"} style={{ ...inp(), ...(trackedMode==="period"?{ background:C.grayL, color:C.gray }:{}) }}/></div>
-            </div>
+            {trackedMode==="period" ? (<>
+              <div style={formGrid}>
+                <div>
+                  <p style={{ ...sml, margin:"0 0 4px" }}>Saison</p>
+                  <select value={trackedSeason} onChange={e=>setTrackedSeason(e.target.value)} style={inp()}><option value="ete">Été</option><option value="hiver">Hiver</option><option value="all">Toutes</option></select>
+                </div>
+                <div>
+                  <p style={{ ...sml, margin:"0 0 4px" }}>Durée</p>
+                  <select value={trackedStayNights} onChange={e=>setTrackedStayNights(Number(e.target.value))} style={inp()}><option value={7}>7 nuits</option><option value={2}>2 nuits</option></select>
+                </div>
+              </div>
+              <p style={{ ...sml, margin:"8px 0 4px" }}>Période</p>
+              <select value={trackedPeriodId} onChange={e=>setTrackedPeriodId(e.target.value)} style={inp()}>
+                {trackedAvailablePeriods.length===0&&<option value="">Aucune période</option>}
+                {trackedAvailablePeriods.map(p=><option key={p.id} value={p.id}>{periodOptionLabel(p)}{p.label?` — ${p.label}`:""}</option>)}
+              </select>
+            </>) : (
+              <div style={formGrid}>
+                <div><p style={{ ...sml, margin:"0 0 4px" }}>Arrivée</p><input type="date" value={trackedCheckin} onChange={e=>setTrackedCheckin(e.target.value)} style={inp()}/></div>
+                <div><p style={{ ...sml, margin:"0 0 4px" }}>Départ</p><input type="date" value={trackedCheckout} onChange={e=>setTrackedCheckout(e.target.value)} style={inp()}/></div>
+              </div>
+            )}
             <p style={{ ...sml, margin:"8px 0 4px" }}>Capacité</p>
             <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:4 }}>
               {[2,4,6,8].map(n=><button key={n} onClick={()=>setTrackedCapacity(n)} style={{ padding:"6px 0", background:Number(trackedCapacity)===n?C.blue:C.grayL, border:"none", borderRadius:8, cursor:"pointer", fontSize:11, fontWeight:Number(trackedCapacity)===n?700:400, color:Number(trackedCapacity)===n?C.white:C.text }}>{n}P</button>)}
