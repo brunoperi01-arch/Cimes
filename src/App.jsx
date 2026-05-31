@@ -531,6 +531,8 @@ async function saveCompetitorRate(rate, allCompetitors) {
       ...(clean.source_search_url && { source_search_url: clean.source_search_url }),
       ...(clean.validation_notes && { validation_notes: clean.validation_notes }),
       ...(clean.validated_at && { validated_at: clean.validated_at }),
+      ...(clean.source_channel && { source_channel: clean.source_channel }),
+      ...(clean.source_label && { source_label: clean.source_label }),
     };
 
     try {
@@ -836,6 +838,80 @@ function buildTrackedDirectUrl(competitor) {
   return competitor.direct_url || "";
 }
 
+// ══ SOURCES MULTIPLES PAR CONCURRENT (competitor_sources) ═══════
+const SOURCES_LS = "competitor_sources";
+const SOURCE_TYPES = [
+  { type:"booking", name:"Booking.com" },
+  { type:"direct",  name:"Site direct" },
+  { type:"maeva",   name:"Maeva" },
+  { type:"airbnb",  name:"Airbnb" },
+  { type:"abritel", name:"Abritel" },
+  { type:"expedia", name:"Expedia" },
+  { type:"other",   name:"Autre" },
+];
+
+async function getCompetitorSources() {
+  if (SB_READY) {
+    try { return await sb.select("competitor_sources", "is_active=eq.true&order=source_type.asc&select=*"); }
+    catch { return []; }
+  }
+  return ls.get(SOURCES_LS).filter(r=>r.is_active!==false);
+}
+
+async function saveCompetitorSource(source) {
+  if (!source.competitor_id) throw new Error("Concurrent requis.");
+  if (!source.source_url) throw new Error("URL de la source requise.");
+  const payload = {
+    competitor_id: source.competitor_id,
+    source_name:   source.source_name || "Autre",
+    source_type:   source.source_type || "other",
+    source_url:    source.source_url,
+    notes:         source.notes || null,
+    is_active:     source.is_active !== false,
+  };
+  if (SB_READY) {
+    if (source.id) return await sb.update("competitor_sources", `id=eq.${source.id}`, { ...payload, updated_at:new Date().toISOString() });
+    return await sb.insert("competitor_sources", payload);
+  }
+  const all = ls.get(SOURCES_LS);
+  if (source.id) {
+    const idx = all.findIndex(r=>r.id===source.id);
+    if (idx>=0) { all[idx] = { ...all[idx], ...payload, updated_at:new Date().toISOString() }; ls.set(SOURCES_LS, all); return all[idx]; }
+  }
+  const created = { ...payload, id:"cs_"+Date.now(), created_at:new Date().toISOString(), updated_at:new Date().toISOString() };
+  all.push(created); ls.set(SOURCES_LS, all); return created;
+}
+
+async function deleteCompetitorSource(id) {
+  if (SB_READY) return sb.delete("competitor_sources", `id=eq.${id}`);
+  ls.set(SOURCES_LS, ls.get(SOURCES_LS).filter(r=>r.id!==id));
+  return true;
+}
+
+// Lien Booking à partir d'une URL source (nettoyée) + dates
+function buildTrackedBookingUrlFromSource(rawUrl, competitor, ctx) {
+  return buildTrackedBookingUrl({ ...competitor, booking_url: rawUrl }, ctx);
+}
+
+// URL d'une source : Booking reçoit les dates, les autres sont ouvertes telles quelles
+function buildSourceUrl(source, competitor, ctx) {
+  if (source.source_type === "booking") {
+    return buildTrackedBookingUrlFromSource(source.source_url, competitor, ctx);
+  }
+  return source.source_url;
+}
+
+// Charge l'historique complet des relevés (1000 derniers)
+async function getAllCompetitorRatesHistory() {
+  if (SB_READY) {
+    try { return await sb.select("competitor_rates", "order=collected_at.desc&limit=1000&select=*"); }
+    catch { return []; }
+  }
+  const keys = Object.keys(localStorage).filter(k=>k.startsWith("rates_"));
+  const all = keys.flatMap(k=>ls.get(k));
+  return all.sort((a,b)=>String(b.collected_at).localeCompare(String(a.collected_at))).slice(0,1000);
+}
+
 function median(arr) {
   if (!arr.length) return null;
   const sorted=[...arr].sort((a,b)=>a-b); const mid=Math.floor(sorted.length/2);
@@ -1017,6 +1093,15 @@ export default function App() {
   const [trackedScrapeError, setTrackedScrapeError]   = useState("");
   const [trackedScrapeEditedPrices, setTrackedScrapeEditedPrices] = useState({});
   const [trackedScrapeSaved, setTrackedScrapeSaved]   = useState({});
+  // ── Sources multiples + page Suivi prix ───────────────────────
+  const [sources, setSources]             = useState([]);
+  const [sourceForm, setSourceForm]       = useState(null); // {competitor_id,...} quand ouvert
+  const [sourcesOpenFor, setSourcesOpenFor] = useState(null); // competitor_id dont les sources sont dépliées
+  const [trackPrices, setTrackPrices]     = useState({});  // saisie prix par clé source
+  const [trackSaved, setTrackSaved]       = useState({});
+  const [histAll, setHistAll]             = useState([]);
+  const [histLoading, setHistLoading]     = useState(false);
+  const [histFilters, setHistFilters]     = useState({ competitor:"", source:"", capacity:0, status:"" });
   const [catSaved, setCatSaved]           = useState({});
   const [ourForm, setOurForm]             = useState({ priceTotal:"", notes:"" });
   const [ourSaving, setOurSaving]         = useState(false);
@@ -1111,6 +1196,7 @@ export default function App() {
   useEffect(()=>{ if(user) getImports().then(setImports).catch(()=>{}); },[user]);
   useEffect(()=>{ if(user) getOurRates().then(setOurRates).catch(()=>{}); },[user]);
   useEffect(()=>{ if(user) getCompetitorCatalog().then(setCatalog).catch(()=>{}); },[user]);
+  useEffect(()=>{ if(user) getCompetitorSources().then(setSources).catch(()=>{}); },[user]);
 
   async function reloadOurRates() { try { const d=await getOurRates(); setOurRates(d||[]); } catch {} }
 
@@ -1268,6 +1354,91 @@ export default function App() {
   }
   function ignoreTrackedScrapedRate(index) {
     setTrackedScrapeSaved(p=>({ ...p, [index]:"ignored" }));
+  }
+
+  // ── Sources multiples : handlers ──────────────────────────────
+  async function reloadSources() { try { const d=await getCompetitorSources(); setSources(d||[]); } catch {} }
+
+  async function handleSaveSource() {
+    if (!sourceForm?.source_url?.trim()) { setSourceForm(f=>({ ...f, error:"URL requise." })); return; }
+    try { await saveCompetitorSource(sourceForm); await reloadSources(); setSourceForm(null); }
+    catch(e) { setSourceForm(f=>({ ...f, error:e.message })); }
+  }
+  async function handleDeleteSource(id) {
+    try { await deleteCompetitorSource(id); await reloadSources(); } catch(e) { console.error(e); }
+  }
+
+  // Sources effectives d'un concurrent : table competitor_sources + legacy booking_url/direct_url
+  function sourcesForCompetitor(c) {
+    const fromTable = (sources||[]).filter(s=>s.competitor_id===c.id && s.is_active!==false);
+    if (fromTable.length) return fromTable;
+    const legacy = [];
+    if (c.booking_url) legacy.push({ id:`legacy_b_${c.id}`, competitor_id:c.id, source_type:"booking", source_name:"Booking.com", source_url:c.booking_url });
+    if (c.direct_url) legacy.push({ id:`legacy_d_${c.id}`, competitor_id:c.id, source_type:"direct", source_name:"Site direct", source_url:c.direct_url });
+    return legacy;
+  }
+
+  // Enregistre un prix relevé pour une source précise (validé)
+  async function saveSourceRate(competitor, source, priceTotal, key) {
+    const price = Number(priceTotal)||0;
+    const ctx = getTrackedPeriodContext();
+    if (!price || isOwnProperty(competitor.name)) return;
+    if (!ctx.checkin || !ctx.checkout || !ctx.stayNights || ctx.stayNights<=0) { setTrackedScrapeError("Dates invalides : vérifiez arrivée et départ."); return; }
+    const url = buildSourceUrl(source, competitor, ctx);
+    try {
+      await saveCompetitorRate({
+        week_id:            ctx.periodId,
+        competitor:         competitor.name,
+        property_name:      competitor.name,
+        property_type:      competitor.property_type || "résidence",
+        competitor_id:      null,
+        capacity:           ctx.capacity,
+        price:              price,
+        price_total:        price,
+        price_week:         price,
+        price_night:        Math.round(price / ctx.stayNights),
+        price_week_equiv:   Math.round((price / ctx.stayNights) * 7),
+        stay_nights:        ctx.stayNights,
+        period_start:       ctx.checkin,
+        period_end:         ctx.checkout,
+        season:             ctx.season,
+        source:             source.source_name,
+        source_channel:     source.source_type,
+        source_label:       source.source_name,
+        source_url:         url,
+        source_search_url:  url,
+        collection_type:    "relevé manuel " + source.source_name,
+        reliability_status: "validé",
+        comparability_score:competitor.comparability_score || 80,
+        validated_at:       new Date().toISOString(),
+        validation_notes:   "Prix vérifié manuellement depuis " + source.source_name,
+        is_example:         false,
+      }, competitors);
+      setTrackSaved(p=>({ ...p, [key]:"ok" }));
+      setTrackPrices(p=>({ ...p, [key]:"" }));
+      loadRates();
+    } catch(e) {
+      setTrackSaved(p=>({ ...p, [key]:e.message?.includes("DUPLICATE")?"dup":"err" }));
+    }
+  }
+
+  // ── Page Suivi prix : historique + export ─────────────────────
+  async function loadHistAll() {
+    setHistLoading(true);
+    try { const d = await getAllCompetitorRatesHistory(); setHistAll((d||[]).filter(r=>!r.is_example)); }
+    catch { setHistAll([]); }
+    setHistLoading(false);
+  }
+  useEffect(()=>{ if(user && screen==="track") loadHistAll(); /* eslint-disable-next-line */ },[user,screen]);
+
+  function exportHistoryCsv(rows) {
+    const cols = ["collected_at","week_id","period_start","period_end","competitor","source","source_channel","capacity","stay_nights","price_total","price_night","reliability_status"];
+    const head = cols.join(";");
+    const lines = rows.map(r=>cols.map(c=>{ const v=r[c]??""; return String(v).includes(";")?`"${v}"`:v; }).join(";"));
+    const csv = [head, ...lines].join("\n");
+    const b = new Blob([csv], { type:"text/csv;charset=utf-8" });
+    const u = URL.createObjectURL(b);
+    const a = document.createElement("a"); a.href=u; a.download="historique_prix_concurrents.csv"; a.click();
   }
 
   // ── Enregistrer un tarif Les Cimes ────────────────────────────
@@ -1608,7 +1779,7 @@ export default function App() {
     </div>
   ):null;
 
-  const NAV=[{id:"dashboard",icon:"▣",l:"Dashboard"},{id:"weeks",icon:"📅",l:"Périodes"},{id:"collect",icon:"✏️",l:"Saisie"},{id:"import",icon:"📥",l:"Import"},{id:"diag",icon:"🔬",l:"Diagnostic"}];
+  const NAV=[{id:"dashboard",icon:"▣",l:"Dashboard"},{id:"weeks",icon:"📅",l:"Périodes"},{id:"track",icon:"📊",l:"Suivi prix"},{id:"import",icon:"📥",l:"Import"},{id:"diag",icon:"🔬",l:"Diagnostic"}];
   const goScreen=id=>{ setScreen(id); setCM(null); setIaText(null); setPasteEdit(null); };
   const BNav=()=>isMobile?(
     <div style={{ position:"sticky", bottom:0, background:C.white, borderTop:`0.5px solid ${C.grayM}`, display:"flex", padding:"6px 0 16px", zIndex:10 }}>
@@ -1838,26 +2009,65 @@ export default function App() {
         {/* Liste + ajout */}
         <div style={cd()}>
           {catalog.length===0&&<div style={{ padding:"12px 13px" }}><p style={{ margin:0, fontSize:11, color:C.gray, fontStyle:"italic" }}>Aucun concurrent suivi. Ajoutez-en un pour relever ses prix Booking facilement.</p></div>}
-          {catalog.map((c,i)=>(
-            <div key={c.id} style={rw(i===catalog.length-1)}>
+          {catalog.map((c,i)=>{
+            const compSources = (sources||[]).filter(s=>s.competitor_id===c.id);
+            const open = sourcesOpenFor===c.id;
+            return (
+            <div key={c.id} style={{ borderBottom:i===catalog.length-1?"none":`0.5px solid ${C.grayL}` }}>
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 13px" }}>
               <div style={{ flex:1, minWidth:0 }}>
                 <div style={{ display:"flex", alignItems:"center", gap:5, flexWrap:"wrap" }}>
                   <span style={{ fontSize:12, fontWeight:500, color:C.text }}>{c.name}</span>
                   <Badge label={c.property_type} color={c.property_type==="hôtel"?C.purple:c.property_type==="particulier"?"#FF5A5F":C.blue} bg={c.property_type==="hôtel"?C.purpleL:c.property_type==="particulier"?"#FFE9EA":C.bluePale} size={8}/>
                 </div>
                 <div style={{ display:"flex", gap:5, marginTop:1, alignItems:"center", flexWrap:"wrap" }}>
-                  <span style={{ fontSize:9, color:C.gray }}>score {c.comparability_score||"?"}/100 · {c.platform}</span>
-                  {c.booking_url&&<Badge label="Booking" color={C.blue} bg={C.bluePale} size={8}/>}
-                  {c.direct_url&&<Badge label="Direct" color={C.green} bg={C.greenL} size={8}/>}
+                  <span style={{ fontSize:9, color:C.gray }}>score {c.comparability_score||"?"}/100</span>
+                  {sourcesForCompetitor(c).map(s=><Badge key={s.id} label={s.source_name} color={s.source_type==="booking"?C.blue:s.source_type==="direct"?C.green:C.purple} bg={s.source_type==="booking"?C.bluePale:s.source_type==="direct"?C.greenL:C.purpleL} size={8}/>)}
                 </div>
                 {c.notes&&<p style={{ margin:"1px 0 0", fontSize:9, color:C.gray, fontStyle:"italic" }}>{c.notes}</p>}
               </div>
               <div style={{ display:"flex", gap:6, alignItems:"center", flexShrink:0 }}>
+                <button onClick={()=>setSourcesOpenFor(open?null:c.id)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:10, color:C.blue, padding:2 }}>{open?"▲ Sources":"▼ Sources"}</button>
                 <button onClick={()=>setCatForm({ ...c })} style={{ background:"none", border:"none", cursor:"pointer", fontSize:13, color:C.blue, padding:2 }}>✎</button>
                 <button onClick={()=>handleDeleteCatalogItem(c.id)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:14, color:C.gray, padding:2 }}>🗑</button>
               </div>
+              </div>
+              {open&&(
+                <div style={{ padding:"0 13px 10px", background:C.grayL }}>
+                  <p style={{ ...sml, margin:"6px 0 4px" }}>Sources suivies</p>
+                  {compSources.length===0&&<p style={{ margin:"0 0 6px", fontSize:9, color:C.gray, fontStyle:"italic" }}>Aucune source dédiée. Les URLs Booking/Direct du concurrent sont utilisées par défaut.</p>}
+                  {compSources.map(s=>(
+                    <div key={s.id} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:6, padding:"4px 0" }}>
+                      <div style={{ minWidth:0, flex:1 }}>
+                        <span style={{ fontSize:10, fontWeight:600, color:C.text }}>{s.source_name}</span>
+                        <p style={{ margin:0, fontSize:8, color:C.gray, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{s.source_url}</p>
+                      </div>
+                      <button onClick={()=>handleDeleteSource(s.id)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:12, color:C.gray, flexShrink:0 }}>🗑</button>
+                    </div>
+                  ))}
+                  {sourceForm&&sourceForm.competitor_id===c.id ? (
+                    <div style={{ ...cd(9), padding:"8px 10px", marginTop:6 }}>
+                      <div style={{ display:"flex", gap:5, marginBottom:5 }}>
+                        <select value={sourceForm.source_type} onChange={e=>{ const t=e.target.value; const m=SOURCE_TYPES.find(x=>x.type===t); setSourceForm(f=>({ ...f, source_type:t, source_name:m?.name||"Autre" })); }} style={{ ...inp(), flex:1 }}>
+                          {SOURCE_TYPES.map(t=><option key={t.type} value={t.type}>{t.name}</option>)}
+                        </select>
+                      </div>
+                      <input style={{ ...inp(), marginBottom:5 }} placeholder="URL de la source" value={sourceForm.source_url} onChange={e=>setSourceForm(f=>({ ...f, source_url:e.target.value }))}/>
+                      <input style={{ ...inp(), marginBottom:5 }} placeholder="Notes (optionnel)" value={sourceForm.notes||""} onChange={e=>setSourceForm(f=>({ ...f, notes:e.target.value }))}/>
+                      {sourceForm.error&&<p style={{ margin:"0 0 5px", fontSize:9, color:C.red }}>✗ {sourceForm.error}</p>}
+                      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:5 }}>
+                        <button onClick={()=>setSourceForm(null)} style={{ ...btn(false,C.grayL,C.text), margin:0 }}>Annuler</button>
+                        <button onClick={handleSaveSource} style={{ ...btn(false,C.blue), margin:0 }}>Enregistrer source</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button onClick={()=>setSourceForm({ competitor_id:c.id, source_type:"booking", source_name:"Booking.com", source_url:"", notes:"" })} style={{ ...btn(false,C.white,C.blue), margin:"4px 0 0", border:`1px solid ${C.blueL}`, padding:"7px" }}>+ Ajouter source</button>
+                  )}
+                </div>
+              )}
             </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Formulaire ajout/édition */}
@@ -2062,68 +2272,45 @@ export default function App() {
 
               <div style={cd()}>
                 {catalog.map((c,i)=>{
-                  const bookingUrl=buildTrackedBookingUrl(c, ctx);
-                  const directUrl=buildTrackedDirectUrl(c);
-                  const hasBooking=!!c.booking_url;
-                  const hasDirect=!!directUrl;
-                  const kB=`${c.id}_booking`;
-                  const kD=`${c.id}_direct`;
-                  const stB=catSaved[kB], stD=catSaved[kD];
-                  const vpB=catVerifyPrice[kB]??"", vpD=catVerifyPrice[kD]??"";
-                  const lastB=lastRateFor(c.name,"Booking.com");
-                  const lastD=lastRateFor(c.name,"Site direct");
+                  const compSources = sourcesForCompetitor(c);
                   return (
                     <div key={c.id} style={{ padding:"9px 12px", borderBottom:i<catalog.length-1?`0.5px solid ${C.grayL}`:"none" }}>
-                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 }}>
-                        <div style={{ flex:1, minWidth:0 }}>
-                          <span style={{ fontSize:12, fontWeight:600, color:C.text }}>{c.name}</span>
-                          <div style={{ display:"flex", gap:4, marginTop:2, alignItems:"center", flexWrap:"wrap" }}>
-                            <span style={{ fontSize:9, color:C.gray }}>{c.property_type} · score {c.comparability_score||"?"}</span>
-                            {hasBooking&&<Badge label="Booking" color={C.blue} bg={C.bluePale} size={8}/>}
-                            {hasDirect&&<Badge label="Direct" color={C.green} bg={C.greenL} size={8}/>}
-                          </div>
-                        </div>
-                        <div style={{ display:"flex", gap:4, flexShrink:0, flexWrap:"wrap", justifyContent:"flex-end" }}>
-                          {hasBooking&&(datesInvalid
-                            ? <span style={{ fontSize:9, fontWeight:600, color:C.gray, background:C.grayL, padding:"4px 8px", borderRadius:6, border:`1px solid ${C.grayM}` }}>↗ Booking</span>
-                            : <a href={bookingUrl} target="_blank" rel="noreferrer" style={{ fontSize:9, fontWeight:600, color:C.blue, background:C.white, padding:"4px 8px", borderRadius:6, textDecoration:"none", border:`1px solid ${C.grayM}` }}>↗ Booking</a>)}
-                          {hasDirect&&<a href={directUrl} target="_blank" rel="noreferrer" style={{ fontSize:9, fontWeight:600, color:C.green, background:C.white, padding:"4px 8px", borderRadius:6, textDecoration:"none", border:`1px solid ${C.grayM}` }}>↗ Site direct</a>}
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <span style={{ fontSize:12, fontWeight:600, color:C.text }}>{c.name}</span>
+                        <div style={{ display:"flex", gap:4, marginTop:2, alignItems:"center", flexWrap:"wrap" }}>
+                          <span style={{ fontSize:9, color:C.gray }}>{c.property_type} · score {c.comparability_score||"?"}</span>
+                          {compSources.map(s=><Badge key={s.id} label={s.source_name} color={s.source_type==="booking"?C.blue:s.source_type==="direct"?C.green:C.purple} bg={s.source_type==="booking"?C.bluePale:s.source_type==="direct"?C.greenL:C.purpleL} size={8}/>)}
                         </div>
                       </div>
-
-                      {/* Champ Booking */}
-                      {hasBooking&&(
-                        <div style={{ marginTop:6 }}>
-                          {lastB&&<p style={{ margin:"0 0 3px", fontSize:8, color:C.gray }}>Dernier Booking : {fmt(Number(lastB.price_total||lastB.price_week))}€ · {lastB.reliability_status} · {lastB.collected_at}</p>}
-                          {stB==="ok" ? (
-                            <p style={{ margin:0, fontSize:9, color:C.green, fontWeight:600 }}>✓ Prix Booking enregistré</p>
-                          ) : (
-                            <div style={{ display:"flex", gap:6, alignItems:"center" }}>
-                              <input type="number" placeholder="Prix Booking vérifié" value={vpB} onChange={e=>setCatVerifyPrice(p=>({ ...p, [kB]:e.target.value }))} style={{ flex:1, padding:"5px 8px", fontSize:10, border:`1px solid ${C.grayM}`, borderRadius:6, boxSizing:"border-box" }}/>
-                              <button onClick={()=>saveTrackedCompetitorRate(c,"booking",vpB)} disabled={!vpB||datesInvalid} style={{ padding:"5px 9px", fontSize:9, fontWeight:700, background:(vpB&&!datesInvalid)?C.blue:C.grayL, color:(vpB&&!datesInvalid)?C.white:C.gray, border:"none", borderRadius:6, cursor:(vpB&&!datesInvalid)?"pointer":"default", whiteSpace:"nowrap" }}>Enregistrer Booking</button>
+                      {compSources.length===0&&<p style={{ margin:"5px 0 0", fontSize:9, color:C.gray, fontStyle:"italic" }}>Aucune source. Ajoutez-en dans « Concurrents suivis ».</p>}
+                      {compSources.map(s=>{
+                        const url = buildSourceUrl(s, c, ctx);
+                        const key = `${c.id}_${s.id}`;
+                        const st = trackSaved[key];
+                        const vp = trackPrices[key]??"";
+                        const last = lastRateFor(c.name, s.source_name);
+                        return (
+                          <div key={s.id} style={{ marginTop:6, paddingTop:6, borderTop:`0.5px dashed ${C.grayL}` }}>
+                            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
+                              <span style={{ fontSize:10, fontWeight:600, color:C.text }}>{s.source_name}</span>
+                              {(s.source_type==="booking"&&datesInvalid)
+                                ? <span style={{ fontSize:9, fontWeight:600, color:C.gray, background:C.grayL, padding:"4px 8px", borderRadius:6, border:`1px solid ${C.grayM}` }}>↗ Ouvrir</span>
+                                : <a href={url} target="_blank" rel="noreferrer" style={{ fontSize:9, fontWeight:600, color:C.blue, background:C.white, padding:"4px 8px", borderRadius:6, textDecoration:"none", border:`1px solid ${C.grayM}`, flexShrink:0 }}>↗ Ouvrir</a>}
                             </div>
-                          )}
-                          {stB==="dup"&&<p style={{ margin:"3px 0 0", fontSize:8, color:C.gold }}>= Relevé Booking déjà existant</p>}
-                          {stB==="err"&&<p style={{ margin:"3px 0 0", fontSize:8, color:C.red }}>✗ Erreur Booking</p>}
-                        </div>
-                      )}
-
-                      {/* Champ Direct */}
-                      {hasDirect&&(
-                        <div style={{ marginTop:6 }}>
-                          {lastD&&<p style={{ margin:"0 0 3px", fontSize:8, color:C.gray }}>Dernier Direct : {fmt(Number(lastD.price_total||lastD.price_week))}€ · {lastD.reliability_status} · {lastD.collected_at}</p>}
-                          {stD==="ok" ? (
-                            <p style={{ margin:0, fontSize:9, color:C.green, fontWeight:600 }}>✓ Prix Direct enregistré</p>
-                          ) : (
-                            <div style={{ display:"flex", gap:6, alignItems:"center" }}>
-                              <input type="number" placeholder="Prix Direct vérifié" value={vpD} onChange={e=>setCatVerifyPrice(p=>({ ...p, [kD]:e.target.value }))} style={{ flex:1, padding:"5px 8px", fontSize:10, border:`1px solid ${C.grayM}`, borderRadius:6, boxSizing:"border-box" }}/>
-                              <button onClick={()=>saveTrackedCompetitorRate(c,"direct",vpD)} disabled={!vpD||datesInvalid} style={{ padding:"5px 9px", fontSize:9, fontWeight:700, background:(vpD&&!datesInvalid)?C.green:C.grayL, color:(vpD&&!datesInvalid)?C.white:C.gray, border:"none", borderRadius:6, cursor:(vpD&&!datesInvalid)?"pointer":"default", whiteSpace:"nowrap" }}>Enregistrer Direct</button>
-                            </div>
-                          )}
-                          {stD==="dup"&&<p style={{ margin:"3px 0 0", fontSize:8, color:C.gold }}>= Relevé Direct déjà existant</p>}
-                          {stD==="err"&&<p style={{ margin:"3px 0 0", fontSize:8, color:C.red }}>✗ Erreur Direct</p>}
-                        </div>
-                      )}
+                            {last&&<p style={{ margin:"3px 0 0", fontSize:8, color:C.gray }}>Dernier {s.source_name} : {fmt(Number(last.price_total||last.price_week))}€ · {last.reliability_status} · {last.collected_at}</p>}
+                            {st==="ok" ? (
+                              <p style={{ margin:"4px 0 0", fontSize:9, color:C.green, fontWeight:600 }}>✓ Prix {s.source_name} enregistré</p>
+                            ) : (
+                              <div style={{ display:"flex", gap:6, alignItems:"center", marginTop:4 }}>
+                                <input type="number" placeholder={`Prix ${s.source_name} vérifié`} value={vp} onChange={e=>setTrackPrices(p=>({ ...p, [key]:e.target.value }))} style={{ flex:1, padding:"5px 8px", fontSize:10, border:`1px solid ${C.grayM}`, borderRadius:6, boxSizing:"border-box" }}/>
+                                <button onClick={()=>saveSourceRate(c, s, vp, key)} disabled={!vp||datesInvalid} style={{ padding:"5px 9px", fontSize:9, fontWeight:700, background:(vp&&!datesInvalid)?C.green:C.grayL, color:(vp&&!datesInvalid)?C.white:C.gray, border:"none", borderRadius:6, cursor:(vp&&!datesInvalid)?"pointer":"default", whiteSpace:"nowrap" }}>Enregistrer</button>
+                              </div>
+                            )}
+                            {st==="dup"&&<p style={{ margin:"3px 0 0", fontSize:8, color:C.gold }}>= Relevé déjà existant</p>}
+                            {st==="err"&&<p style={{ margin:"3px 0 0", fontSize:8, color:C.red }}>✗ Erreur d'enregistrement</p>}
+                          </div>
+                        );
+                      })}
                     </div>
                   );
                 })}
@@ -2941,6 +3128,89 @@ export default function App() {
     );
   };
 
+  const TrackPrices=()=>{
+    const ctx = getTrackedPeriodContext();
+    // Historique filtré
+    const fltCompetitors = Array.from(new Set(histAll.map(r=>r.competitor||r.property_name).filter(Boolean))).sort();
+    const fltSources = Array.from(new Set(histAll.map(r=>r.source).filter(Boolean))).sort();
+    const filtered = histAll.filter(r=>{
+      if(histFilters.competitor && (r.competitor||r.property_name)!==histFilters.competitor) return false;
+      if(histFilters.source && r.source!==histFilters.source) return false;
+      if(histFilters.capacity && Number(r.capacity)!==histFilters.capacity) return false;
+      if(histFilters.status && (r.reliability_status||"à vérifier")!==histFilters.status) return false;
+      return true;
+    });
+    // Évolution vs relevé précédent (même concurrent/source/capacité/durée)
+    const evoFor = (r, idx) => {
+      const prev = filtered.slice(idx+1).find(x=>
+        (x.competitor||x.property_name)===(r.competitor||r.property_name) &&
+        (x.source_channel||x.source)===(r.source_channel||r.source) &&
+        Number(x.capacity)===Number(r.capacity) &&
+        Number(x.stay_nights||7)===Number(r.stay_nights||7));
+      if(!prev) return null;
+      const d = Number(r.price_total||r.price_week||0) - Number(prev.price_total||prev.price_week||0);
+      return d;
+    };
+    return (
+      <div><SBar title="Suivi prix"/>
+        <div style={cnt}>
+          {/* A. Relevé rapide → renvoie vers le module du Dashboard */}
+          <div style={{ ...cd(11), padding:"11px 13px", background:C.bluePale, marginTop:8 }}>
+            <p style={{ margin:"0 0 4px", fontSize:12, fontWeight:700, color:C.blue }}>📊 Suivi des prix concurrents</p>
+            <p style={{ margin:0, fontSize:10, color:C.blueL, lineHeight:1.5 }}>Le relevé rapide (concurrents suivis, sources, dates, prix) se trouve dans le Dashboard. Cette page centralise l'historique de tous les relevés.</p>
+            <button onClick={()=>setScreen("dashboard")} style={{ ...btn(false,C.blue), marginTop:8, marginBottom:0 }}>→ Aller au relevé rapide</button>
+          </div>
+
+          {/* B. Historique */}
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+            <p style={sml}>Historique des relevés</p>
+            <button onClick={loadHistAll} style={{ fontSize:10, color:C.blue, background:"none", border:"none", cursor:"pointer", fontWeight:600, marginTop:12 }}>↻ Recharger</button>
+          </div>
+
+          <div style={{ display:"flex", gap:4, marginBottom:6, flexWrap:"wrap" }}>
+            <select value={histFilters.competitor} onChange={e=>setHistFilters(f=>({ ...f, competitor:e.target.value }))} style={{ ...inp(), flex:"1 1 45%", fontSize:11, padding:"5px 7px" }}><option value="">Tous concurrents</option>{fltCompetitors.map(n=><option key={n} value={n}>{n}</option>)}</select>
+            <select value={histFilters.source} onChange={e=>setHistFilters(f=>({ ...f, source:e.target.value }))} style={{ ...inp(), flex:"1 1 45%", fontSize:11, padding:"5px 7px" }}><option value="">Toutes sources</option>{fltSources.map(n=><option key={n} value={n}>{n}</option>)}</select>
+            <select value={histFilters.capacity} onChange={e=>setHistFilters(f=>({ ...f, capacity:parseInt(e.target.value)||0 }))} style={{ ...inp(), flex:"1 1 45%", fontSize:11, padding:"5px 7px" }}><option value="0">Toutes cap.</option>{[2,4,6,8].map(n=><option key={n} value={n}>{n}P</option>)}</select>
+            <select value={histFilters.status} onChange={e=>setHistFilters(f=>({ ...f, status:e.target.value }))} style={{ ...inp(), flex:"1 1 45%", fontSize:11, padding:"5px 7px" }}><option value="">Tous statuts</option>{["validé","à vérifier","rejeté"].map(n=><option key={n} value={n}>{n}</option>)}</select>
+          </div>
+
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+            <span style={{ fontSize:10, color:C.gray }}>{filtered.length} relevé(s){filtered.length>200?" · 200 affichés":""}</span>
+            <button onClick={()=>exportHistoryCsv(filtered)} disabled={!filtered.length} style={{ fontSize:10, fontWeight:700, color:filtered.length?C.white:C.gray, background:filtered.length?C.green:C.grayL, border:"none", borderRadius:6, padding:"5px 10px", cursor:filtered.length?"pointer":"default" }}>⬇ Exporter historique prix</button>
+          </div>
+
+          {histLoading&&<p style={{ textAlign:"center", padding:16, color:C.gray, fontSize:12 }}>Chargement…</p>}
+          {!histLoading&&filtered.length===0&&<p style={{ textAlign:"center", padding:16, color:C.gray, fontSize:11, fontStyle:"italic" }}>Aucun relevé. Faites un relevé depuis le Dashboard.</p>}
+
+          <div style={cd()}>
+            {filtered.slice(0,200).map((r,idx,arr)=>{
+              const evo = evoFor(r, idx);
+              const nights = r.stay_nights||7;
+              return (
+                <div key={r.id||idx} style={rw(idx===Math.min(arr.length,200)-1)}>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <span style={{ fontSize:11, fontWeight:600, color:C.text }}>{r.competitor||r.property_name}</span>
+                    <div style={{ display:"flex", gap:4, marginTop:1, alignItems:"center", flexWrap:"wrap" }}>
+                      <Badge label={r.source||"?"} color={C.blue} bg={C.bluePale} size={8}/>
+                      <span style={{ fontSize:8, color:C.gray }}>{r.collected_at} · {r.capacity}P · {nights}n</span>
+                      <ReliaBadge status={r.reliability_status||"à vérifier"}/>
+                    </div>
+                    <p style={{ margin:"1px 0 0", fontSize:8, color:C.gray }}>{r.period_start} → {r.period_end}</p>
+                  </div>
+                  <div style={{ textAlign:"right", flexShrink:0 }}>
+                    <p style={{ margin:0, fontSize:12, fontWeight:700, color:C.text }}>{fmt(Number(r.price_total||r.price_week))}€</p>
+                    <p style={{ margin:0, fontSize:8, color:C.gray }}>{fmt(Number(r.price_night||Math.round(Number(r.price_total||r.price_week||0)/nights)))}€/n</p>
+                    {evo!==null&&<p style={{ margin:0, fontSize:9, fontWeight:700, color:evo>0?C.red:evo<0?C.green:C.gray }}>{evo>0?"+":""}{evo===0?"stable":fmt(evo)+"€"}</p>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div><BNav/>
+      </div>
+    );
+  };
+
  return (
   <div style={appShell}>
     <div style={appContainer}>
@@ -2965,6 +3235,7 @@ export default function App() {
             {screen === "weeks" && Weeks()}
             {screen === "week" && WeekDetail()}
             {screen === "collect" && Collect()}
+            {screen === "track" && TrackPrices()}
             {screen === "import" && ImportScreen()}
             {screen === "diag" && Diagnostic()}
           </div>
@@ -2977,6 +3248,7 @@ export default function App() {
           {screen === "weeks" && Weeks()}
           {screen === "week" && WeekDetail()}
           {screen === "collect" && Collect()}
+            {screen === "track" && TrackPrices()}
           {screen === "import" && ImportScreen()}
           {screen === "diag" && Diagnostic()}
         </div>
