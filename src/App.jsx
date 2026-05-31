@@ -1012,6 +1012,11 @@ export default function App() {
   const [trackedCheckout, setTrackedCheckout] = useState("");
   const [trackedCapacity, setTrackedCapacity] = useState(6);
   const [trackedLinksVisible, setTrackedLinksVisible] = useState(false);
+  const [trackedScraping, setTrackedScraping]         = useState(false);
+  const [trackedScrapeResults, setTrackedScrapeResults] = useState([]);
+  const [trackedScrapeError, setTrackedScrapeError]   = useState("");
+  const [trackedScrapeEditedPrices, setTrackedScrapeEditedPrices] = useState({});
+  const [trackedScrapeSaved, setTrackedScrapeSaved]   = useState({});
   const [catSaved, setCatSaved]           = useState({});
   const [ourForm, setOurForm]             = useState({ priceTotal:"", notes:"" });
   const [ourSaving, setOurSaving]         = useState(false);
@@ -1185,6 +1190,84 @@ export default function App() {
     if (list.length === 0) return;
     if (list.length > 5) { setPlanError("Trop de liens : seuls les 5 premiers seront ouverts (limite navigateur)."); }
     list.slice(0,5).forEach(u => window.open(u, "_blank", "noopener,noreferrer"));
+  }
+
+  // ── Scraping ciblé des concurrents suivis (prévalidation) ─────
+  async function scrapeTrackedRates() {
+    const ctx = getTrackedPeriodContext();
+    if (!ctx.checkin || !ctx.checkout || !ctx.stayNights || ctx.stayNights<=0) {
+      setTrackedScrapeError("Dates invalides : vérifiez arrivée et départ."); return;
+    }
+    const list = (catalog||[]).filter(c=>!isOwnProperty(c.name)).slice(0,5);
+    if (!list.length) { setTrackedScrapeError("Aucun concurrent suivi à scraper."); return; }
+    setTrackedScraping(true); setTrackedScrapeError(""); setTrackedScrapeResults([]); setTrackedScrapeSaved({});
+    try {
+      const res = await fetch("/api/scrape-tracked-rates", {
+        method:"POST", headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({
+          context: ctx,
+          competitors: list.map(c=>({ id:c.id, name:c.name, property_type:c.property_type, preferred_channel:c.preferred_channel, booking_url:c.booking_url, direct_url:c.direct_url, search_location:c.search_location, comparability_score:c.comparability_score })),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+      setTrackedScrapeResults(data.results || []);
+      // pré-remplir les prix éditables avec les prix détectés
+      const edits = {};
+      (data.results||[]).forEach((r,i)=>{ if(r.price_total) edits[i]=String(r.price_total); });
+      setTrackedScrapeEditedPrices(edits);
+      if ((data.results||[]).length===0) setTrackedScrapeError("Aucun résultat. Ouvrez les liens manuellement.");
+    } catch(e) {
+      setTrackedScrapeError("Erreur scraping : "+e.message+" — vérifiez les liens manuellement.");
+    }
+    setTrackedScraping(false);
+  }
+
+  // Validation manuelle d'un résultat scrapé → enregistré en "validé"
+  async function validateTrackedScrapedRate(result, index) {
+    const ctx = getTrackedPeriodContext();
+    const price = Number(trackedScrapeEditedPrices[index] || 0);
+    if (!price) return;
+    if (!ctx.checkin || !ctx.checkout || !ctx.stayNights || ctx.stayNights<=0) {
+      setTrackedScrapeError("Dates invalides : vérifiez arrivée et départ."); return;
+    }
+    const competitor = (catalog||[]).find(c=>c.id===result.competitor_id) || { name:result.competitor_name };
+    if (isOwnProperty(competitor.name)) return;
+    try {
+      await saveCompetitorRate({
+        week_id:            ctx.periodId,
+        competitor:         result.competitor_name,
+        property_name:      result.competitor_name,
+        property_type:      competitor.property_type || "résidence",
+        competitor_id:      null,
+        capacity:           ctx.capacity,
+        price:              price,
+        price_total:        price,
+        price_week:         price,
+        price_night:        Math.round(price / ctx.stayNights),
+        price_week_equiv:   Math.round((price / ctx.stayNights) * 7),
+        stay_nights:        ctx.stayNights,
+        period_start:       ctx.checkin,
+        period_end:         ctx.checkout,
+        season:             ctx.season,
+        source:             result.source,
+        source_url:         result.url,
+        source_search_url:  result.url,
+        collection_type:    "scraping ciblé vérifié",
+        reliability_status: "validé",
+        comparability_score:competitor.comparability_score || 80,
+        validated_at:       new Date().toISOString(),
+        validation_notes:   "Prix détecté automatiquement puis validé manuellement",
+        is_example:         false,
+      }, competitors);
+      setTrackedScrapeSaved(p=>({ ...p, [index]:"ok" }));
+      loadRates();
+    } catch(e) {
+      setTrackedScrapeSaved(p=>({ ...p, [index]:e.message?.includes("DUPLICATE")?"dup":"err" }));
+    }
+  }
+  function ignoreTrackedScrapedRate(index) {
+    setTrackedScrapeSaved(p=>({ ...p, [index]:"ignored" }));
   }
 
   // ── Enregistrer un tarif Les Cimes ────────────────────────────
@@ -1925,6 +2008,58 @@ export default function App() {
                   </div>
                 )}
               </div>
+
+              {/* Scraping ciblé automatique (prévalidation) */}
+              <button onClick={scrapeTrackedRates} disabled={trackedScraping||datesInvalid} style={{ ...btn(trackedScraping||datesInvalid,C.purple), marginBottom:4 }}>{trackedScraping?"⏳ Scraping en cours…":"🤖 Scraper les concurrents suivis"}</button>
+              <p style={{ margin:"0 0 8px", fontSize:8, color:C.gray, fontStyle:"italic", textAlign:"center" }}>Le scraping automatique sert à préremplir. Vérifiez toujours le prix avant validation.</p>
+              {trackedScrapeError&&<div style={{ ...cd(9), padding:"8px 11px", background:C.goldL, marginBottom:8 }}><p style={{ margin:0, fontSize:10, color:C.orange }}>{trackedScrapeError}</p></div>}
+
+              {trackedScrapeResults.length>0&&(
+                <>
+                  <p style={sml}>Résultats détectés automatiquement</p>
+                  <div style={cd()}>
+                    {trackedScrapeResults.map((r,idx)=>{
+                      const st=trackedScrapeSaved[idx];
+                      const edited=trackedScrapeEditedPrices[idx]??"";
+                      const confColor=r.confidence==="high"?C.green:r.confidence==="medium"?C.orange:C.gray;
+                      const confBg=r.confidence==="high"?C.greenL:r.confidence==="medium"?C.orangeL:C.grayL;
+                      return (
+                        <div key={idx} style={{ padding:"9px 12px", borderBottom:idx<trackedScrapeResults.length-1?`0.5px solid ${C.grayL}`:"none", opacity:st==="ignored"?0.5:1 }}>
+                          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 }}>
+                            <div style={{ flex:1, minWidth:0 }}>
+                              <span style={{ fontSize:12, fontWeight:600, color:C.text }}>{r.competitor_name}</span>
+                              <div style={{ display:"flex", gap:4, marginTop:2, alignItems:"center", flexWrap:"wrap" }}>
+                                <Badge label={r.source} color={r.channel==="direct"?C.green:C.blue} bg={r.channel==="direct"?C.greenL:C.bluePale} size={8}/>
+                                {r.price_total&&<Badge label={r.confidence} color={confColor} bg={confBg} size={8}/>}
+                              </div>
+                            </div>
+                            <a href={r.url} target="_blank" rel="noreferrer" style={{ fontSize:9, fontWeight:600, color:C.blue, background:C.white, padding:"4px 8px", borderRadius:6, textDecoration:"none", border:`1px solid ${C.grayM}`, flexShrink:0 }}>↗ Ouvrir</a>
+                          </div>
+                          {r.price_total ? (
+                            <p style={{ margin:"4px 0 0", fontSize:10, color:C.text }}>Prix détecté : <strong>{fmt(r.price_total)} €</strong></p>
+                          ) : (
+                            <p style={{ margin:"4px 0 0", fontSize:9, color:C.orange }}>{r.warning||"Prix non détecté automatiquement."}</p>
+                          )}
+                          {st==="ok" ? (
+                            <p style={{ margin:"5px 0 0", fontSize:9, color:C.green, fontWeight:600 }}>✓ Prix validé et enregistré</p>
+                          ) : st==="ignored" ? (
+                            <p style={{ margin:"5px 0 0", fontSize:9, color:C.gray }}>Résultat ignoré</p>
+                          ) : (
+                            <div style={{ display:"flex", gap:6, marginTop:6, alignItems:"center", flexWrap:"wrap" }}>
+                              <input type="number" placeholder="Prix à valider" value={edited} onChange={e=>setTrackedScrapeEditedPrices(p=>({ ...p, [idx]:e.target.value }))} style={{ flex:1, minWidth:90, padding:"5px 8px", fontSize:10, border:`1px solid ${C.grayM}`, borderRadius:6, boxSizing:"border-box" }}/>
+                              <button onClick={()=>validateTrackedScrapedRate(r,idx)} disabled={!edited||datesInvalid} style={{ padding:"5px 9px", fontSize:9, fontWeight:700, background:(edited&&!datesInvalid)?C.green:C.grayL, color:(edited&&!datesInvalid)?C.white:C.gray, border:"none", borderRadius:6, cursor:(edited&&!datesInvalid)?"pointer":"default", whiteSpace:"nowrap" }}>Valider ce prix</button>
+                              <button onClick={()=>ignoreTrackedScrapedRate(idx)} style={{ padding:"5px 9px", fontSize:9, fontWeight:600, background:C.grayL, color:C.gray, border:"none", borderRadius:6, cursor:"pointer" }}>Ignorer</button>
+                            </div>
+                          )}
+                          {st==="dup"&&<p style={{ margin:"4px 0 0", fontSize:8, color:C.gold }}>= Relevé déjà existant</p>}
+                          {st==="err"&&<p style={{ margin:"4px 0 0", fontSize:8, color:C.red }}>✗ Erreur d'enregistrement</p>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+
               <div style={cd()}>
                 {catalog.map((c,i)=>{
                   const bookingUrl=buildTrackedBookingUrl(c, ctx);
