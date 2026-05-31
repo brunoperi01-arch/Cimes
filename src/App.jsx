@@ -1216,6 +1216,7 @@ export default function App() {
   // ── Concurrents suivis (competitor_catalog) ───────────────────
   const [catalog, setCatalog]             = useState([]);
   const [catForm, setCatForm]             = useState(null); // null = fermé ; objet = formulaire ouvert
+  const [competitorFormSources, setCompetitorFormSources] = useState([]);
   const [catSaving, setCatSaving]         = useState(false);
   const [catCsvText, setCatCsvText]       = useState("");
   const [srcCsvText, setSrcCsvText]       = useState("");
@@ -1384,13 +1385,67 @@ export default function App() {
   // ── Concurrents suivis : chargement + handlers ────────────────
   async function reloadCatalog() { try { const d=await getCompetitorCatalog(); setCatalog(d||[]); } catch {} }
 
+  function addCompetitorFormSource(kind) {
+    const presets = {
+      booking:   { source_type:"booking",       source_name:"Booking.com" },
+      direct:    { source_type:"direct",         source_name:"Site direct" },
+      maeva:     { source_type:"tour_operator",  source_name:"Maeva" },
+      lafrance:  { source_type:"tour_operator",  source_name:"La France du Nord au Sud" },
+      travelski: { source_type:"tour_operator",  source_name:"Travelski" },
+      locasun:   { source_type:"tour_operator",  source_name:"Locasun" },
+      abritel:   { source_type:"marketplace",    source_name:"Abritel" },
+      airbnb:    { source_type:"marketplace",    source_name:"Airbnb" },
+      expedia:   { source_type:"marketplace",    source_name:"Expedia" },
+      other:     { source_type:"other",          source_name:"" },
+    };
+    const p = presets[kind] || presets.other;
+    setCompetitorFormSources(prev => [...prev, { ...p, source_url:"", notes:"" }]);
+  }
+  function updateCompetitorFormSource(idx, patch) {
+    setCompetitorFormSources(prev => prev.map((s,i)=>i===idx?{ ...s, ...patch }:s));
+  }
+  function removeCompetitorFormSource(idx) {
+    setCompetitorFormSources(prev => prev.filter((_,i)=>i!==idx));
+  }
+  // Ouvre le formulaire concurrent en préchargeant ses sources existantes (édition)
+  function openCatForm(c) {
+    if (c) {
+      setCatForm({ ...c });
+      const existing = (sources||[]).filter(s=>s.competitor_id===c.id && s.is_active!==false)
+        .map(s=>({ id:s.id, source_type:s.source_type, source_name:s.source_name, source_url:s.source_url, notes:s.notes||"" }));
+      setCompetitorFormSources(existing);
+    } else {
+      setCatForm({ property_type:"résidence", search_location:"La Foux d'Allos" });
+      setCompetitorFormSources([]);
+    }
+  }
+
   async function handleSaveCatalogItem() {
     if (!catForm?.name?.trim()) return;
     setCatSaving(true);
     try {
-      await saveCompetitorCatalogItem(catForm);
+      const saved = await saveCompetitorCatalogItem(catForm);
+      const compId = saved?.id || saved?.[0]?.id || catForm.id;
+      // Enregistrer les sources renseignées
+      if (compId) {
+        for (const s of competitorFormSources) {
+          if (!s.source_url?.trim()) continue;
+          if (s.source_type==="other" && !s.source_name?.trim()) continue;
+          await saveCompetitorSource({
+            id: s.id,
+            competitor_id: compId,
+            source_type: s.source_type,
+            source_name: s.source_name?.trim() || "Autre",
+            source_url: normalizeSourceUrl(s.source_url),
+            notes: s.notes || null,
+            is_active: true,
+          });
+        }
+        await reloadSources();
+      }
       await reloadCatalog();
       setCatForm(null);
+      setCompetitorFormSources([]);
     } catch(e) { setCatForm(f=>({ ...f, error:e.message })); }
     setCatSaving(false);
   }
@@ -2230,7 +2285,7 @@ export default function App() {
               </div>
               <div style={{ display:"flex", gap:6, alignItems:"center", flexShrink:0 }}>
                 <button onClick={()=>setSourcesOpenFor(open?null:c.id)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:10, color:C.blue, padding:2 }}>{open?"▲ Sources":"▼ Sources"}</button>
-                <button onClick={()=>setCatForm({ ...c })} style={{ background:"none", border:"none", cursor:"pointer", fontSize:13, color:C.blue, padding:2 }}>✎</button>
+                <button onClick={()=>openCatForm(c)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:13, color:C.blue, padding:2 }}>✎</button>
                 <button onClick={()=>handleDeleteCatalogItem(c.id)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:14, color:C.gray, padding:2 }}>🗑</button>
               </div>
               </div>
@@ -2297,29 +2352,40 @@ export default function App() {
             <p style={{ margin:"0 0 6px", fontSize:11, fontWeight:700, color:C.blue }}>{catForm.id?"Modifier le concurrent":"Ajouter un concurrent"}</p>
             <p style={{ ...sml, margin:"0 0 4px" }}>Nom *</p>
             <input style={{ ...inp(), marginBottom:6 }} placeholder="Résidence Les Chalets du Verdon" value={catForm.name||""} onChange={e=>setCatForm(f=>({ ...f, name:e.target.value }))}/>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:6 }}>
-              <div>
-                <p style={{ ...sml, margin:"0 0 4px" }}>Type</p>
-                <select value={catForm.property_type||"résidence"} onChange={e=>setCatForm(f=>({ ...f, property_type:e.target.value }))} style={inp()}>{["résidence","hôtel","particulier"].map(t=><option key={t} value={t}>{t}</option>)}</select>
-              </div>
-              <div>
-                <p style={{ ...sml, margin:"0 0 4px" }}>Plateforme</p>
-                <select value={catForm.preferred_channel||"booking"} onChange={e=>{ const ch=e.target.value; setCatForm(f=>({ ...f, preferred_channel:ch, platform:ch==="direct"?"Site direct":ch==="both"?"Booking + Direct":"Booking.com" })); }} style={inp()}>
-                  <option value="booking">Booking.com</option>
-                  <option value="direct">Site direct</option>
-                  <option value="both">Booking + site direct</option>
-                </select>
-              </div>
+            <div style={{ marginBottom:6 }}>
+              <p style={{ ...sml, margin:"0 0 4px" }}>Type</p>
+              <select value={catForm.property_type||"résidence"} onChange={e=>setCatForm(f=>({ ...f, property_type:e.target.value }))} style={inp()}>{["résidence","hôtel","particulier"].map(t=><option key={t} value={t}>{t}</option>)}</select>
             </div>
-            {(catForm.preferred_channel==="booking"||catForm.preferred_channel==="both"||!catForm.preferred_channel)&&(<>
-              <p style={{ ...sml, margin:"0 0 4px" }}>URL Booking</p>
-              <input style={{ ...inp(), marginBottom:3 }} placeholder="https://www.booking.com/hotel/..." value={catForm.booking_url||""} onChange={e=>setCatForm(f=>({ ...f, booking_url:e.target.value }))}/>
-              <p style={{ margin:"0 0 6px", fontSize:8, color:C.gray, fontStyle:"italic" }}>Collez l'URL Booking, l'application supprimera automatiquement les anciens paramètres de dates.</p>
-            </>)}
-            {(catForm.preferred_channel==="direct"||catForm.preferred_channel==="both")&&(<>
-              <p style={{ ...sml, margin:"0 0 4px" }}>URL site direct</p>
-              <input style={{ ...inp(), marginBottom:6 }} placeholder="https://www.site-du-concurrent.com" value={catForm.direct_url||""} onChange={e=>setCatForm(f=>({ ...f, direct_url:e.target.value }))}/>
-            </>)}
+
+            {/* Sources du concurrent */}
+            <div style={{ ...cd(9), padding:"9px 11px", marginBottom:8, background:C.grayL }}>
+              <p style={{ margin:"0 0 5px", fontSize:11, fontWeight:700, color:C.blue }}>Sources du concurrent</p>
+              <div style={{ display:"flex", gap:4, flexWrap:"wrap", marginBottom:competitorFormSources.length?8:0 }}>
+                {[["booking","+ Booking"],["direct","+ Site direct"],["maeva","+ Maeva"],["lafrance","+ La France du Nord au Sud"],["travelski","+ Travelski"],["locasun","+ Locasun"],["abritel","+ Abritel"],["airbnb","+ Airbnb"],["expedia","+ Expedia"],["other","+ Autre"]].map(([k,l])=>(
+                  <button key={k} onClick={()=>addCompetitorFormSource(k)} style={{ fontSize:9, fontWeight:600, color:C.blue, background:C.bluePale, border:"none", borderRadius:6, padding:"5px 8px", cursor:"pointer" }}>{l}</button>
+                ))}
+              </div>
+              {competitorFormSources.map((s,idx)=>{
+                const m = sourceBadgeMeta(s.source_type);
+                return (
+                  <div key={idx} style={{ ...cd(8), padding:"7px 9px", marginTop:6, background:C.white }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:6, marginBottom:4 }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:5 }}>
+                        <Badge label={m.l} color={m.c} bg={m.bg} size={8}/>
+                        <span style={{ fontSize:10, fontWeight:600, color:C.text }}>{s.source_name||"Autre source"}</span>
+                      </div>
+                      <button onClick={()=>removeCompetitorFormSource(idx)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:12, color:C.gray }}>🗑</button>
+                    </div>
+                    {s.source_type==="other"&&(
+                      <input style={{ ...inp(), marginBottom:4 }} placeholder="Nom de la source (ex : Vente privée)" value={s.source_name} onChange={e=>updateCompetitorFormSource(idx,{ source_name:e.target.value })}/>
+                    )}
+                    <input style={{ ...inp(), marginBottom:4 }} placeholder="URL de la fiche" value={s.source_url} onChange={e=>updateCompetitorFormSource(idx,{ source_url:e.target.value })}/>
+                    <input style={inp()} placeholder="Notes (optionnel)" value={s.notes} onChange={e=>updateCompetitorFormSource(idx,{ notes:e.target.value })}/>
+                  </div>
+                );
+              })}
+              {competitorFormSources.length===0&&<p style={{ margin:"6px 0 0", fontSize:9, color:C.gray, fontStyle:"italic" }}>Cliquez sur un bouton pour ajouter une source (Booking, TO, marketplace…).</p>}
+            </div>
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:6 }}>
               <div>
                 <p style={{ ...sml, margin:"0 0 4px" }}>Score comparabilité</p>
@@ -2334,12 +2400,12 @@ export default function App() {
             <input style={{ ...inp(), marginBottom:8 }} placeholder="Concurrent direct" value={catForm.notes||""} onChange={e=>setCatForm(f=>({ ...f, notes:e.target.value }))}/>
             {catForm.error&&<div style={{ ...cd(8), padding:"7px 10px", background:C.redL, marginBottom:6 }}><p style={{ margin:0, fontSize:11, color:C.red }}>✗ {catForm.error}</p></div>}
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
-              <button onClick={()=>setCatForm(null)} style={{ ...btn(false,C.grayL,C.text), margin:0 }}>Annuler</button>
+              <button onClick={()=>{ setCatForm(null); setCompetitorFormSources([]); }} style={{ ...btn(false,C.grayL,C.text), margin:0 }}>Annuler</button>
               <button onClick={handleSaveCatalogItem} disabled={catSaving||!catForm.name?.trim()} style={{ ...btn(catSaving||!catForm.name?.trim(),C.blue), margin:0 }}>{catSaving?"…":"Enregistrer"}</button>
             </div>
           </div>
         ) : (
-          <button onClick={()=>setCatForm({ name:"", property_type:"résidence", preferred_channel:"booking", platform:"Booking.com", booking_url:"", direct_url:"", search_location:"La Foux d'Allos", comparability_score:80, notes:"" })} style={{ ...btn(false,C.blue), marginBottom:8 }}>+ Ajouter concurrent</button>
+          <button onClick={()=>openCatForm(null)} style={{ ...btn(false,C.blue), marginBottom:8 }}>+ Ajouter concurrent</button>
         )}
 
         {/* Import CSV concurrents suivis */}
