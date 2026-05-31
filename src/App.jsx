@@ -622,6 +622,32 @@ async function getOurRate(periodId, capacity, stayNights=7) {
   ) || null;
 }
 
+// Récupère le tarif Les Cimes correspondant au contexte : priorité aux dates réelles, puis period_id
+function getOurRateForContext(ourRates, ctx) {
+  if (!ourRates?.length || !ctx) return null;
+  const capacity = Number(ctx.capacity);
+  const stayNights = Number(ctx.stayNights || ctx.stay_nights || 7);
+  const start = ctx.checkin || ctx.period_start || ctx.week_start;
+  const end = ctx.checkout || ctx.period_end;
+  const active = ourRates.filter(r => r.is_active !== false);
+  // 1. Priorité : dates + capacité + durée
+  const byDates = active.find(r =>
+    String(r.period_start || "") === String(start || "") &&
+    String(r.period_end || "") === String(end || "") &&
+    Number(r.capacity) === capacity &&
+    Number(r.stay_nights || 7) === stayNights
+  );
+  if (byDates) return { ...byDates, match_type: "dates" };
+  // 2. Fallback : period_id + capacité + durée
+  const byPeriodId = active.find(r =>
+    String(r.period_id || "") === String(ctx.periodId || ctx.period_id || "") &&
+    Number(r.capacity) === capacity &&
+    Number(r.stay_nights || 7) === stayNights
+  );
+  if (byPeriodId) return { ...byPeriodId, match_type: "period_id" };
+  return null;
+}
+
 async function saveOurRate(rate) {
   const stayNights = Number(rate.stay_nights || 7);
   const priceTotal = Number(rate.price_total || 0);
@@ -1012,6 +1038,16 @@ function buildLfdnasUrl(source, ctx) {
   return url.toString();
 }
 
+// Détecte un prix peu plausible (miroir de la logique API)
+function isSuspiciousDetectedPrice(price, ctx, source) {
+  const p = Number(price || 0);
+  if (!p) return true;
+  if (source.source_type === "direct" && (p === 300 || p === 250 || p === 350)) return true;
+  if (Number(ctx.stayNights) >= 7 && p < 400) return true;
+  if (Number(ctx.capacity) >= 6 && Number(ctx.stayNights) >= 7 && p < 500) return true;
+  return false;
+}
+
 function isLfdnasSource(source) {
   const name = String(source.source_name || "").toLowerCase();
   const raw = String(source.source_url || "").toLowerCase();
@@ -1331,16 +1367,22 @@ export default function App() {
   const selWeek  = ALL_PERIODS.find(p=>p.id===selWeekId) || ALL_PERIODS[0];
   const capNum   = parseInt(cap);
   const _nights  = selWeek?.stay_nights || 7;
-  const currentOurRate = ourRates.find(r =>
-    r.period_id === selWeekId &&
-    Number(r.capacity) === capNum &&
-    Number(r.stay_nights || 7) === Number(_nights) &&
-    r.is_active !== false
-  );
+  const currentCtx = {
+    periodId: selWeekId,
+    checkin: selWeek?.period_start || selWeek?.week_start,
+    checkout: selWeek?.period_end || addDaysStr(selWeek?.period_start || selWeek?.week_start, _nights),
+    stayNights: _nights,
+    capacity: capNum,
+  };
+  const currentOurRate = getOurRateForContext(ourRates, currentCtx);
   const fallbackOurPrice = OUR_TARIFS[cap]?.[selWeek?.season_type] || 0;
-  const ourPrice = currentOurRate?.price_total ? Number(currentOurRate.price_total) : fallbackOurPrice;
+  const ourPrice = currentOurRate
+    ? Number(currentOurRate.price_total || currentOurRate.price_week || currentOurRate.price || 0)
+    : fallbackOurPrice;
   const ourNight = ourPrice ? Math.round(ourPrice / _nights) : 0;
-  const ourRateSource = currentOurRate ? "Supabase" : "Grille interne fallback";
+  const ourRateSource = currentOurRate
+    ? (currentOurRate.match_type === "dates" ? "Supabase · correspondance dates" : "Supabase · correspondance period_id")
+    : "Grille interne fallback";
   const reco     = calcReco(ourPrice,rates,settings);
 
   // ── Relevé concurrents suivis : périodes disponibles ──────────
@@ -1586,7 +1628,8 @@ export default function App() {
       if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
       const results = data.results || [];
       setTrackedScrapeResults(results);
-      // Préremplir le champ "Prix vérifié" de chaque source correspondante (sans valider)
+      // Préremplir le champ "Prix vérifié" uniquement pour les prix fiables (pas direct, pas suspect, pas low/warning)
+      const ctxF = getTrackedPeriodContext();
       const prefill = {};
       (catalog||[]).forEach(c=>{
         sourcesForCompetitor(c).forEach(s=>{
@@ -1596,7 +1639,12 @@ export default function App() {
             const sameSrc = rs===sn || String(r.channel||"").toLowerCase()===String(s.source_type||"").toLowerCase() || (sn&&rs&&(rs.includes(sn)||sn.includes(rs)));
             return sameComp && sameSrc && r.price_total;
           });
-          if (match) prefill[`${c.id}_${s.id}`] = String(match.price_total);
+          if (!match) return;
+          // Conditions de préremplissage : pas de site direct/other, pas de warning, confiance non low, prix non suspect
+          if (s.source_type==="direct" || s.source_type==="other") return;
+          if (match.warning || match.confidence==="low") return;
+          if (isSuspiciousDetectedPrice(match.price_total, ctxF, s)) return;
+          prefill[`${c.id}_${s.id}`] = String(match.price_total);
         });
       });
       if (Object.keys(prefill).length) setTrackPrices(p=>({ ...p, ...prefill }));
@@ -2624,7 +2672,7 @@ export default function App() {
               <button onClick={scrapeTrackedRates} disabled={trackedScraping||datesInvalid} style={{ ...btn(trackedScraping||datesInvalid,C.purple), marginBottom:4 }}>{trackedScraping?"⏳ Scraping en cours…":"🤖 Scraper les concurrents suivis"}</button>
               <p style={{ margin:"0 0 8px", fontSize:8, color:C.gray, fontStyle:"italic", textAlign:"center" }}>Le scraping automatique sert à préremplir. Vérifiez toujours le prix avant validation.</p>
               {trackedScrapeError&&<div style={{ ...cd(9), padding:"8px 11px", background:C.goldL, marginBottom:8 }}><p style={{ margin:0, fontSize:10, color:C.orange }}>{trackedScrapeError}</p></div>}
-              {trackedScrapeResults.length>0&&(()=>{ const n=trackedScrapeResults.filter(r=>r.price_total).length; return <div style={{ ...cd(9), padding:"8px 11px", background:C.bluePale, marginBottom:8 }}><p style={{ margin:0, fontSize:10, color:C.blue, fontWeight:600 }}>{n} prix détecté(s) automatiquement. Vérifiez avant validation.</p></div>; })()}
+              {trackedScrapeResults.length>0&&(()=>{ const n=trackedScrapeResults.filter(r=>r.price_total&&r.confidence!=="low"&&!r.warning&&r.channel!=="direct"&&!isSuspiciousDetectedPrice(r.price_total,ctx,{source_type:r.channel})).length; return <div style={{ ...cd(9), padding:"8px 11px", background:C.bluePale, marginBottom:8 }}><p style={{ margin:0, fontSize:10, color:C.blue, fontWeight:600 }}>{n} prix détecté(s) automatiquement. Vérifiez avant validation.</p></div>; })()}
 
               <div style={cd()}>
                 {catalog.map((c,i)=>{
@@ -2649,28 +2697,34 @@ export default function App() {
                         const scrape = findScrapeResultForSource(c, s);
                         const confColor = scrape?.confidence==="high"?C.green:scrape?.confidence==="medium"?C.orange:C.gray;
                         const confBg = scrape?.confidence==="high"?C.greenL:scrape?.confidence==="medium"?C.orangeL:C.grayL;
+                        const scrapeSuspicious = scrape?.price_total ? isSuspiciousDetectedPrice(scrape.price_total, ctx, s) : false;
+                        const scrapeUsable = scrape?.price_total && !scrapeSuspicious && scrape.confidence!=="low" && !scrape.warning && s.source_type!=="direct" && s.source_type!=="other";
                         return (
                           <div key={s.id} style={{ marginTop:6, paddingTop:6, borderTop:`0.5px dashed ${C.grayL}` }}>
                             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
                               <div style={{ display:"flex", alignItems:"center", gap:5, flexWrap:"wrap" }}>
                                 <span style={{ fontSize:10, fontWeight:600, color:C.text }}>{s.source_name}</span>
-                                {scrape?.price_total&&<Badge label={scrape.confidence} color={confColor} bg={confBg} size={8}/>}
+                                {scrapeUsable&&<Badge label={scrape.confidence} color={confColor} bg={confBg} size={8}/>}
                               </div>
                               {(injectsDates&&datesInvalid)
                                 ? <span style={{ fontSize:9, fontWeight:600, color:C.gray, background:C.grayL, padding:"4px 8px", borderRadius:6, border:`1px solid ${C.grayM}` }}>↗ Ouvrir</span>
                                 : <a href={url} target="_blank" rel="noreferrer" style={{ fontSize:9, fontWeight:600, color:C.blue, background:C.white, padding:"4px 8px", borderRadius:6, textDecoration:"none", border:`1px solid ${C.grayM}`, flexShrink:0 }}>↗ Ouvrir</a>}
                             </div>
                             {isLfdnasSource(s)&&<p style={{ margin:"2px 0 0", fontSize:8, color:C.purple, fontStyle:"italic" }}>Dates ajoutées automatiquement à l'URL TO.</p>}
-                            {scrape&&(scrape.price_total
-                              ? <p style={{ margin:"3px 0 0", fontSize:9, color:C.orange }}>Prix détecté automatiquement : {fmt(scrape.price_total)}€ — à vérifier.</p>
-                              : <p style={{ margin:"3px 0 0", fontSize:8, color:C.gray }}>{scrape.warning||"Prix non détecté automatiquement."}</p>)}
+                            {scrape&&(
+                              scrapeUsable
+                                ? <p style={{ margin:"3px 0 0", fontSize:9, color:C.orange }}>Prix détecté automatiquement : {fmt(scrape.price_total)}€ — à vérifier.</p>
+                                : scrapeSuspicious
+                                  ? <p style={{ margin:"3px 0 0", fontSize:8, color:C.gold }}>Prix détecté automatiquement : {fmt(scrape.price_total)}€ — ignoré car suspect.</p>
+                                  : <p style={{ margin:"3px 0 0", fontSize:8, color:C.gray }}>{scrape.warning||(s.source_type==="direct"?"Site direct : vérification manuelle nécessaire.":"Prix non détecté automatiquement.")}</p>
+                            )}
                             {last&&<p style={{ margin:"3px 0 0", fontSize:8, color:C.gray }}>Dernier {s.source_name} : {fmt(Number(last.price_total||last.price_week))}€ · {last.reliability_status} · {last.collected_at}</p>}
                             {st==="ok" ? (
                               <p style={{ margin:"4px 0 0", fontSize:9, color:C.green, fontWeight:600 }}>✓ Prix {s.source_name} enregistré</p>
                             ) : (
                               <div style={{ display:"flex", gap:6, alignItems:"center", marginTop:4 }}>
                                 <input type="number" placeholder={`Prix ${s.source_name} vérifié`} value={vp} onChange={e=>setTrackPrices(p=>({ ...p, [key]:e.target.value }))} style={{ flex:1, padding:"5px 8px", fontSize:10, border:`1px solid ${C.grayM}`, borderRadius:6, boxSizing:"border-box" }}/>
-                                <button onClick={()=>saveSourceRate(c, s, vp, key)} disabled={!vp||datesInvalid} style={{ padding:"5px 9px", fontSize:9, fontWeight:700, background:(vp&&!datesInvalid)?C.green:C.grayL, color:(vp&&!datesInvalid)?C.white:C.gray, border:"none", borderRadius:6, cursor:(vp&&!datesInvalid)?"pointer":"default", whiteSpace:"nowrap" }}>{scrape?.price_total?"Valider ce prix":"Enregistrer"}</button>
+                                <button onClick={()=>saveSourceRate(c, s, vp, key)} disabled={!vp||datesInvalid} style={{ padding:"5px 9px", fontSize:9, fontWeight:700, background:(vp&&!datesInvalid)?C.green:C.grayL, color:(vp&&!datesInvalid)?C.white:C.gray, border:"none", borderRadius:6, cursor:(vp&&!datesInvalid)?"pointer":"default", whiteSpace:"nowrap" }}>{scrapeUsable?"Valider ce prix":"Enregistrer"}</button>
                               </div>
                             )}
                             {st==="dup"&&<p style={{ margin:"3px 0 0", fontSize:8, color:C.gold }}>= Relevé déjà existant</p>}
