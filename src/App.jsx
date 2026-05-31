@@ -871,6 +871,11 @@ async function saveCompetitorSource(source) {
   };
   if (SB_READY) {
     if (source.id) return await sb.update("competitor_sources", `id=eq.${source.id}`, { ...payload, updated_at:new Date().toISOString() });
+    // Anti-doublon : même concurrent + type + URL → mise à jour
+    try {
+      const existing = await sb.select("competitor_sources", `competitor_id=eq.${source.competitor_id}&source_type=eq.${encodeURIComponent(source.source_type||"other")}&source_url=eq.${encodeURIComponent(source.source_url)}&select=id`);
+      if (existing && existing.length) return await sb.update("competitor_sources", `id=eq.${existing[0].id}`, { ...payload, updated_at:new Date().toISOString() });
+    } catch { /* si la requête échoue on insère */ }
     return await sb.insert("competitor_sources", payload);
   }
   const all = ls.get(SOURCES_LS);
@@ -878,6 +883,8 @@ async function saveCompetitorSource(source) {
     const idx = all.findIndex(r=>r.id===source.id);
     if (idx>=0) { all[idx] = { ...all[idx], ...payload, updated_at:new Date().toISOString() }; ls.set(SOURCES_LS, all); return all[idx]; }
   }
+  const dupIdx = all.findIndex(r=>r.competitor_id===source.competitor_id && r.source_type===payload.source_type && r.source_url===payload.source_url);
+  if (dupIdx>=0) { all[dupIdx] = { ...all[dupIdx], ...payload, updated_at:new Date().toISOString() }; ls.set(SOURCES_LS, all); return all[dupIdx]; }
   const created = { ...payload, id:"cs_"+Date.now(), created_at:new Date().toISOString(), updated_at:new Date().toISOString() };
   all.push(created); ls.set(SOURCES_LS, all); return created;
 }
@@ -1423,7 +1430,8 @@ export default function App() {
 
   async function handleSaveSource() {
     if (!sourceForm?.source_url?.trim()) { setSourceForm(f=>({ ...f, error:"URL requise." })); return; }
-    try { await saveCompetitorSource(sourceForm); await reloadSources(); setSourceForm(null); }
+    if (sourceForm.source_type==="other" && !sourceForm.source_name?.trim()) { setSourceForm(f=>({ ...f, error:"Nom de la source requis." })); return; }
+    try { await saveCompetitorSource({ ...sourceForm, source_name:sourceForm.source_name?.trim()||"Autre" }); await reloadSources(); setSourceForm(null); }
     catch(e) { setSourceForm(f=>({ ...f, error:e.message })); }
   }
   async function handleDeleteSource(id) {
@@ -2097,7 +2105,9 @@ export default function App() {
                 </div>
                 <div style={{ display:"flex", gap:5, marginTop:1, alignItems:"center", flexWrap:"wrap" }}>
                   <span style={{ fontSize:9, color:C.gray }}>score {c.comparability_score||"?"}/100</span>
-                  {sourcesForCompetitor(c).map(s=><Badge key={s.id} label={s.source_name} color={s.source_type==="booking"?C.blue:s.source_type==="direct"?C.green:C.purple} bg={s.source_type==="booking"?C.bluePale:s.source_type==="direct"?C.greenL:C.purpleL} size={8}/>)}
+                  {sourcesForCompetitor(c).length===0
+                    ? <span style={{ fontSize:8, color:C.gray, fontStyle:"italic" }}>Aucune source suivie</span>
+                    : sourcesForCompetitor(c).map(s=><Badge key={s.id} label={s.source_name} color={s.source_type==="booking"?C.blue:s.source_type==="direct"?C.green:C.purple} bg={s.source_type==="booking"?C.bluePale:s.source_type==="direct"?C.greenL:C.purpleL} size={8}/>)}
                 </div>
                 {c.notes&&<p style={{ margin:"1px 0 0", fontSize:9, color:C.gray, fontStyle:"italic" }}>{c.notes}</p>}
               </div>
@@ -2123,11 +2133,14 @@ export default function App() {
                   {sourceForm&&sourceForm.competitor_id===c.id ? (
                     <div style={{ ...cd(9), padding:"8px 10px", marginTop:6 }}>
                       <div style={{ display:"flex", gap:5, marginBottom:5 }}>
-                        <select value={sourceForm.source_type} onChange={e=>{ const t=e.target.value; const m=SOURCE_TYPES.find(x=>x.type===t); setSourceForm(f=>({ ...f, source_type:t, source_name:m?.name||"Autre" })); }} style={{ ...inp(), flex:1 }}>
-                          {SOURCE_TYPES.map(t=><option key={t.type} value={t.type}>{t.name}</option>)}
+                        <select value={sourceForm.source_type} onChange={e=>{ const t=e.target.value; const m=SOURCE_TYPES.find(x=>x.type===t); setSourceForm(f=>({ ...f, source_type:t, source_name:t==="other"?(f.source_name==="Autre"||SOURCE_TYPES.some(x=>x.name===f.source_name)?"":f.source_name):(m?.name||"Autre") })); }} style={{ ...inp(), flex:1 }}>
+                          {SOURCE_TYPES.map(t=><option key={t.type} value={t.type}>{t.type==="other"?"Autre page internet":t.name}</option>)}
                         </select>
                       </div>
-                      <input style={{ ...inp(), marginBottom:5 }} placeholder="URL de la source" value={sourceForm.source_url} onChange={e=>setSourceForm(f=>({ ...f, source_url:e.target.value }))}/>
+                      {sourceForm.source_type==="other"&&(
+                        <input style={{ ...inp(), marginBottom:5 }} placeholder="Nom personnalisé (ex : Vente privée, Office tourisme)" value={sourceForm.source_name||""} onChange={e=>setSourceForm(f=>({ ...f, source_name:e.target.value }))}/>
+                      )}
+                      <input style={{ ...inp(), marginBottom:5 }} placeholder="URL de la page" value={sourceForm.source_url} onChange={e=>setSourceForm(f=>({ ...f, source_url:e.target.value }))}/>
                       <input style={{ ...inp(), marginBottom:5 }} placeholder="Notes (optionnel)" value={sourceForm.notes||""} onChange={e=>setSourceForm(f=>({ ...f, notes:e.target.value }))}/>
                       {sourceForm.error&&<p style={{ margin:"0 0 5px", fontSize:9, color:C.red }}>✗ {sourceForm.error}</p>}
                       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:5 }}>
@@ -2136,7 +2149,11 @@ export default function App() {
                       </div>
                     </div>
                   ) : (
-                    <button onClick={()=>setSourceForm({ competitor_id:c.id, source_type:"booking", source_name:"Booking.com", source_url:"", notes:"" })} style={{ ...btn(false,C.white,C.blue), margin:"4px 0 0", border:`1px solid ${C.blueL}`, padding:"7px" }}>+ Ajouter source</button>
+                    <div style={{ display:"flex", gap:4, flexWrap:"wrap", marginTop:4 }}>
+                      {SOURCE_TYPES.map(t=>(
+                        <button key={t.type} onClick={()=>setSourceForm({ competitor_id:c.id, source_type:t.type, source_name:t.type==="other"?"":t.name, source_url:"", notes:"" })} style={{ fontSize:9, fontWeight:600, color:C.blue, background:C.bluePale, border:"none", borderRadius:6, padding:"5px 8px", cursor:"pointer" }}>+ {t.type==="other"?"Autre":t.name.replace(".com","")}</button>
+                      ))}
+                    </div>
                   )}
                 </div>
               )}
@@ -2265,6 +2282,7 @@ export default function App() {
                   <p style={{ margin:0, fontSize:11, color:C.red, fontWeight:600 }}>Dates invalides : vérifiez arrivée et départ.</p>
                 )}
                 <p style={{ margin:"4px 0 0", fontSize:9, color:C.gray, fontStyle:"italic" }}>Les prix saisis ici sont considérés comme vérifiés manuellement.</p>
+                <p style={{ margin:"2px 0 0", fontSize:8, color:C.gray, fontStyle:"italic" }}>Pour les sources hors Booking, les dates peuvent devoir être renseignées directement sur le site.</p>
                 <div style={{ display:"flex", gap:5, marginTop:7, flexWrap:"wrap" }}>
                   {(allBookingUrls.length>0||allDirectUrls.length>0)&&<button onClick={()=>setTrackedLinksVisible(v=>!v)} disabled={datesInvalid} style={{ fontSize:9, fontWeight:600, color:datesInvalid?C.gray:C.white, background:datesInvalid?C.grayL:C.blue, padding:"5px 9px", borderRadius:6, border:"none", cursor:datesInvalid?"default":"pointer" }}>{trackedLinksVisible?"▲ Masquer les liens":`↗ Ouvrir tous les Booking (${allBookingUrls.length})`}</button>}
                   {allBookingUrls.length>1&&!datesInvalid&&<button onClick={()=>openAllLinks(allBookingUrls)} style={{ fontSize:9, fontWeight:600, color:C.blue, background:C.white, padding:"5px 9px", borderRadius:6, border:`1px solid ${C.blueL}`, cursor:"pointer" }}>Ouvrir les {Math.min(allBookingUrls.length,5)} premiers</button>}
@@ -3270,11 +3288,13 @@ export default function App() {
                   <div style={{ flex:1, minWidth:0 }}>
                     <span style={{ fontSize:11, fontWeight:600, color:C.text }}>{r.competitor||r.property_name}</span>
                     <div style={{ display:"flex", gap:4, marginTop:1, alignItems:"center", flexWrap:"wrap" }}>
-                      <Badge label={r.source||"?"} color={C.blue} bg={C.bluePale} size={8}/>
+                      <Badge label={r.source_label||r.source||"?"} color={C.blue} bg={C.bluePale} size={8}/>
+                      {r.source_channel&&<span style={{ fontSize:8, color:C.gray }}>({r.source_channel})</span>}
                       <span style={{ fontSize:8, color:C.gray }}>{r.collected_at} · {r.capacity}P · {nights}n</span>
                       <ReliaBadge status={r.reliability_status||"à vérifier"}/>
                     </div>
                     <p style={{ margin:"1px 0 0", fontSize:8, color:C.gray }}>{r.period_start} → {r.period_end}</p>
+                    {(r.source_url||r.source_search_url)&&<a href={r.source_url||r.source_search_url} target="_blank" rel="noreferrer" style={{ fontSize:8, color:C.blue, textDecoration:"none" }}>↗ source</a>}
                   </div>
                   <div style={{ textAlign:"right", flexShrink:0 }}>
                     <p style={{ margin:0, fontSize:12, fontWeight:700, color:C.text }}>{fmt(Number(r.price_total||r.price_week))}€</p>
