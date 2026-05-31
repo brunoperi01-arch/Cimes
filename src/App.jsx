@@ -1236,6 +1236,88 @@ function calcBenchmarkDecision({ ourPrice, marketRates, stayNights }) {
   return { marketMedian, marketMin, marketMax, validatedCount, actionType, actionLabel, priority, recommendedPrice, directPrice, gapPct, potentialGain };
 }
 
+// ══ PROMOTIONS & COURTS SÉJOURS ════════════════════════════════
+const PROMO_OPP_LS = "promo_opportunities";
+const PROMO_RULES_LS = "promo_rules";
+
+async function getPromoOpportunities() {
+  if (SB_READY) {
+    try { return await sb.select("promo_opportunities", "order=created_at.desc&limit=300&select=*"); }
+    catch { return []; }
+  }
+  return ls.get(PROMO_OPP_LS).slice().sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at))).slice(0,300);
+}
+async function savePromoOpportunity(opp) {
+  const payload = { ...opp }; delete payload.id;
+  if (SB_READY) return await sb.insert("promo_opportunities", payload);
+  const all = ls.get(PROMO_OPP_LS);
+  const created = { ...payload, id:"po_"+Date.now(), created_at:new Date().toISOString(), updated_at:new Date().toISOString() };
+  all.push(created); ls.set(PROMO_OPP_LS, all); return created;
+}
+async function updatePromoOpportunity(id, patch) {
+  if (SB_READY) return await sb.update("promo_opportunities", `id=eq.${id}`, { ...patch, updated_at:new Date().toISOString() });
+  const all = ls.get(PROMO_OPP_LS); const i = all.findIndex(r=>r.id===id);
+  if (i>=0) { all[i] = { ...all[i], ...patch, updated_at:new Date().toISOString() }; ls.set(PROMO_OPP_LS, all); return all[i]; }
+  return null;
+}
+async function deletePromoOpportunity(id) {
+  if (SB_READY) return sb.delete("promo_opportunities", `id=eq.${id}`);
+  ls.set(PROMO_OPP_LS, ls.get(PROMO_OPP_LS).filter(r=>r.id!==id)); return true;
+}
+async function getPromoRules() {
+  if (SB_READY) {
+    try { return await sb.select("promo_rules", "is_active=eq.true&select=*"); }
+    catch { return []; }
+  }
+  return ls.get(PROMO_RULES_LS).filter(r=>r.is_active!==false);
+}
+
+// Calcule une opportunité promo locale (sans IA, sans prix non validé)
+function calcPromoOpportunity({ ourPrice, marketRates, stayNights, accommodationType, capacity, promoRule, daysToArrival }) {
+  const priceOf = r => Number(r.price_total || r.price_week || r.price || 0);
+  const all = (marketRates||[]).map(priceOf).filter(Boolean);
+  const res = (marketRates||[]).filter(r=>r.property_type==="résidence").map(priceOf).filter(Boolean);
+  const marketMedian = median(res.length ? res : all);
+  const validatedCount = all.length;
+  const n = Number(stayNights||7);
+  // Type de promo
+  let promoType="semaine", promoLabel="Semaine 7 nuits";
+  if (n===2) { promoType="weekend"; promoLabel="Week-end 2 nuits"; }
+  else if (n===3 || n===4) { promoType="court_sejour"; promoLabel=`Court séjour ${n} nuits`; }
+  else if (n===7) { promoType="semaine"; promoLabel="Semaine 7 nuits"; }
+  if (daysToArrival!=null && promoRule && Number(daysToArrival) <= Number(promoRule.last_minute_days||14)) {
+    promoType="last_minute"; promoLabel="Dernière minute";
+  }
+  if (validatedCount < 3 || !marketMedian) {
+    return { promoType, promoLabel, marketMedian, validatedCount, recommendedPrice:null, directPrice:null, priority:"high", needData:true };
+  }
+  let recommendedPrice = Math.round(marketMedian * 0.97);
+  // dernière minute : remise supplémentaire
+  if (promoType==="last_minute" && promoRule) recommendedPrice = Math.round(recommendedPrice * (1 - Number(promoRule.last_minute_discount_pct||10)/100));
+  if (promoType==="weekend" && promoRule?.weekend_premium_pct) recommendedPrice = Math.round(recommendedPrice * (1 + Number(promoRule.weekend_premium_pct)/100));
+  // bornes
+  if (promoRule?.min_price && recommendedPrice < Number(promoRule.min_price)) recommendedPrice = Number(promoRule.min_price);
+  if (promoRule?.max_price && recommendedPrice > Number(promoRule.max_price)) recommendedPrice = Number(promoRule.max_price);
+  const directPct = promoRule?.direct_discount_pct != null ? Number(promoRule.direct_discount_pct) : 5;
+  const directPrice = Math.round(recommendedPrice * (1 - directPct/100));
+  // priorité : si notre prix est très au-dessus du conseillé → opportunité forte
+  let priority = "normal";
+  if (ourPrice && recommendedPrice < ourPrice * 0.9) priority = "high";
+  else if (promoType==="last_minute") priority = "medium";
+  return { promoType, promoLabel, marketMedian, validatedCount, recommendedPrice, directPrice, priority, needData:false };
+}
+
+// Message promo local (sans IA)
+function buildPromoMessage(opportunity) {
+  const type = opportunity.promo_type || opportunity.promoType;
+  switch (type) {
+    case "weekend": return "Évasion montagne le temps d'un week-end : 2 nuits aux Cimes du Val d'Allos, piscine intérieure chauffée et station à pied.";
+    case "court_sejour": return `Profitez d'un court séjour à La Foux d'Allos : ${opportunity.stay_nights||opportunity.stayNights||3} nuits en appartement tout équipé, accès piscine et espace bien-être inclus.`;
+    case "last_minute": return "Dernière minute aux Cimes : profitez d'un tarif spécial pour un séjour montagne tout confort.";
+    case "semaine": default: return "Séjour famille 7 nuits aux Cimes du Val d'Allos : appartement spacieux, piscine intérieure et activités montagne à proximité.";
+  }
+}
+
 function median(arr) {
   if (!arr.length) return null;
   const sorted=[...arr].sort((a,b)=>a-b); const mid=Math.floor(sorted.length/2);
@@ -1440,6 +1522,16 @@ export default function App() {
   const [benchSourceFilter, setBenchSourceFilter] = useState({ booking:true, direct:true, tour_operator:true, marketplace:false, other:false });
   const [benchAccType, setBenchAccType]   = useState("2P6");
   const [benchOccupancy, setBenchOccupancy] = useState(6);
+  // ── Promotions & courts séjours ───────────────────────────────
+  const [promoOpps, setPromoOpps]         = useState([]);
+  const [promoRules, setPromoRules]       = useState([]);
+  const [promoStayNights, setPromoStayNights] = useState(3);
+  const [promoAccType, setPromoAccType]   = useState("2P6");
+  const [promoCheckin, setPromoCheckin]   = useState("");
+  const [promoCheckout, setPromoCheckout] = useState("");
+  const [promoSeason, setPromoSeason]     = useState("ete");
+  const [promoMsg, setPromoMsg]           = useState(null);
+  const [promoMsgPreview, setPromoMsgPreview] = useState(null);
   const [catSaved, setCatSaved]           = useState({});
   const [ourForm, setOurForm]             = useState({ priceTotal:"", notes:"" });
   const [ourSaving, setOurSaving]         = useState(false);
@@ -1897,6 +1989,9 @@ export default function App() {
   // L'occupation cible suit par défaut la capacité de la typologie choisie
   useEffect(()=>{ const a=ACCOMMODATION_TYPES[benchAccType]; if(a) setBenchOccupancy(a.capacity); },[benchAccType]);
   async function reloadDecisions() { try { const d=await getCommercialDecisions(); setDecisions(d||[]); } catch {} }
+  useEffect(()=>{ if(user){ getPromoOpportunities().then(setPromoOpps).catch(()=>{}); getPromoRules().then(setPromoRules).catch(()=>{}); } },[user]);
+  useEffect(()=>{ if(user && screen==="promotions") loadHistAll(); /* eslint-disable-next-line */ },[user,screen]);
+  async function reloadPromoOpps() { try { const d=await getPromoOpportunities(); setPromoOpps(d||[]); } catch {} }
 
   function exportHistoryCsv(rows) {
     const cols = ["collected_at","week_id","period_start","period_end","competitor","source","source_channel","capacity","stay_nights","price_total","price_night","reliability_status"];
@@ -2246,7 +2341,7 @@ export default function App() {
     </div>
   ):null;
 
-  const NAV=[{id:"dashboard",icon:"▣",l:"Dashboard"},{id:"benchmark",icon:"📊",l:"Benchmark"},{id:"track",icon:"💶",l:"Suivi prix"},{id:"weeks",icon:"📡",l:"Radar marché"},{id:"diag",icon:"🔬",l:"Diagnostic"}];
+  const NAV=[{id:"dashboard",icon:"▣",l:"Dashboard"},{id:"benchmark",icon:"📊",l:"Benchmark"},{id:"track",icon:"💶",l:"Suivi prix"},{id:"promotions",icon:"🎯",l:"Promos"},{id:"weeks",icon:"📡",l:"Radar"},{id:"diag",icon:"🔬",l:"Diag"}];
   const goScreen=id=>{ setScreen(id); setCM(null); setIaText(null); setPasteEdit(null); };
   const BNav=()=>isMobile?(
     <div style={{ position:"sticky", bottom:0, background:C.white, borderTop:`0.5px solid ${C.grayM}`, display:"flex", padding:"6px 0 16px", zIndex:10 }}>
@@ -2328,6 +2423,17 @@ export default function App() {
           </div>
           {decisions[0]&&<p style={{ margin:"2px 0 0", fontSize:9, color:C.blueL }}>Dernière : {decisions[0].action_label||decisions[0].action_type} · {decisions[0].period_label||decisions[0].period_id} ({(decisions[0].created_at||"").slice(0,10)})</p>}
           <button onClick={()=>setScreen("benchmark")} style={{ ...btn(false,C.blue), marginTop:8, marginBottom:0 }}>Ouvrir Benchmark &amp; décisions</button>
+        </div>
+
+        {/* Résumé promotions */}
+        <div style={{ ...cd(11), padding:"10px 13px", background:C.purpleL, marginTop:8 }}>
+          <p style={{ margin:"0 0 3px", fontSize:11, fontWeight:700, color:C.purple }}>🎯 Promotions & courts séjours</p>
+          <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+            <span style={{ fontSize:10, color:C.orange, fontWeight:600 }}>{promoOpps.filter(o=>o.status==="à étudier").length} à étudier</span>
+            <span style={{ fontSize:10, color:C.blue, fontWeight:600 }}>{promoOpps.filter(o=>o.status==="à publier").length} à publier</span>
+          </div>
+          {(()=>{ const cs=promoOpps.find(o=>o.promo_type==="court_sejour"||o.promo_type==="weekend"); return cs?<p style={{ margin:"2px 0 0", fontSize:9, color:C.purple }}>Prochaine offre : {cs.promo_label} · {cs.period_label||cs.period_id}</p>:null; })()}
+          <button onClick={()=>setScreen("promotions")} style={{ ...btn(false,C.purple), marginTop:8, marginBottom:0 }}>Ouvrir Promotions</button>
         </div>
 
         <div style={{ ...responsiveGrid(3), marginTop:8 }}>
@@ -4009,6 +4115,167 @@ export default function App() {
     );
   };
 
+  const Promotions=()=>{
+    const acc = ACCOMMODATION_TYPES[promoAccType] || ACCOMMODATION_TYPES["2P6"];
+    const capacity = acc.capacity;
+    const n = Number(promoStayNights);
+    // Contexte dates : 7 nuits = période samedi→samedi ; 2/3/4 = dates perso
+    let checkin = promoCheckin, checkout = promoCheckout, periodId, label;
+    if (n===7) {
+      const per = trackedAvailablePeriods[0] || ALL_PERIODS.find(p=>p.season===promoSeason && Number(p.stay_nights||7)===7);
+      // on réutilise le sélecteur de période du module via trackedPeriodId si dispo
+      const chosen = ALL_PERIODS.find(p=>p.id===trackedPeriodId && Number(p.stay_nights)===7) || per;
+      if (chosen) { checkin = chosen.period_start||chosen.week_start; checkout = chosen.period_end||addDaysStr(checkin,7); periodId = chosen.id; label = chosen.label||`${checkin} → ${checkout}`; }
+    } else {
+      if (checkin && !checkout) checkout = addDaysStr(checkin, n);
+      if (checkin && checkout) { periodId = `promo_${checkin}_${checkout}_${capacity}p`; label = `${checkin} → ${checkout}`; }
+    }
+    const datesInvalid = !checkin || !checkout || daysBetween(checkin,checkout)<=0;
+    const stayNights = n;
+    const daysToArrival = checkin ? daysBetween(new Date().toISOString().slice(0,10), checkin) : null;
+    // Marché validé pour ce contexte
+    const verified = (histAll||[]).filter(r=>
+      !r.is_example &&
+      TRUSTED_STATUSES.includes(r.reliability_status||"à vérifier") &&
+      Number(r.capacity)===capacity &&
+      Number(r.stay_nights||7)===stayNights &&
+      (periodId ? r.week_id===periodId : true)
+    );
+    // Tarif Les Cimes
+    const ourRate = getOurRateForContext(ourRates, { periodId, checkin, checkout, stayNights, capacity }, promoAccType);
+    const ourPrice = ourRate ? Number(ourRate.price_total||ourRate.price_week||ourRate.price||0) : 0;
+    // Règle promo applicable
+    const rule = (promoRules||[]).find(r=>r.is_active!==false && (!r.accommodation_type||r.accommodation_type===promoAccType) && (!r.stay_nights||Number(r.stay_nights)===stayNights) && (!r.season||r.season===promoSeason)) || null;
+    const opp = calcPromoOpportunity({ ourPrice, marketRates:verified, stayNights, accommodationType:promoAccType, capacity, promoRule:rule, daysToArrival });
+    const usableSources = (catalog||[]).flatMap(c=>sourcesForCompetitor(c).map(s=>s.source_name));
+    const distinctSources = Array.from(new Set(usableSources));
+    const promoColor = t => t==="last_minute"?C.red:t==="weekend"?C.purple:t==="court_sejour"?C.orange:C.blue;
+
+    async function saveOpp() {
+      const message = buildPromoMessage({ promo_type:opp.promoType, stay_nights:stayNights });
+      try {
+        await savePromoOpportunity({
+          period_id:periodId, period_label:label, period_start:checkin, period_end:checkout, stay_nights:stayNights,
+          accommodation_type:promoAccType, capacity,
+          our_price:ourPrice||null, market_median:opp.marketMedian||null,
+          recommended_price:opp.recommendedPrice||null, direct_price:opp.directPrice||null,
+          promo_type:opp.promoType, promo_label:opp.promoLabel, priority:opp.priority||"normal",
+          source_summary:distinctSources.slice(0,6).join(", "),
+          suggested_message:message,
+          status:"à étudier", notes:null,
+        });
+        await reloadPromoOpps(); setPromoMsg("ok"); setTimeout(()=>setPromoMsg(null),3000);
+      } catch(e) { setPromoMsg("err:"+e.message); }
+    }
+
+    return (
+      <div><SBar title="Promotions & courts séjours"/>
+        <div style={cnt}>
+          <div style={{ ...cd(11), padding:"11px 13px", background:C.purpleL, marginTop:8 }}>
+            <p style={{ margin:0, fontSize:12, fontWeight:700, color:C.purple }}>🎯 Promotions & courts séjours</p>
+            <p style={{ margin:"2px 0 0", fontSize:10, color:C.purple }}>Analyse des offres marché par durée et propositions promo (nuitée, week-end, mid-week, dernière minute).</p>
+          </div>
+
+          {/* Sélecteurs */}
+          <div style={{ ...cd(11), padding:"10px 12px" }}>
+            <p style={{ ...sml, margin:"0 0 4px" }}>Durée analysée</p>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:4, marginBottom:8 }}>
+              {[2,3,4,7].map(d=><button key={d} onClick={()=>setPromoStayNights(d)} style={{ padding:"6px 0", background:n===d?C.purple:C.grayL, border:"none", borderRadius:8, cursor:"pointer", fontSize:11, fontWeight:n===d?700:400, color:n===d?C.white:C.text }}>{d}n</button>)}
+            </div>
+            <div style={formGrid}>
+              <div>
+                <p style={{ ...sml, margin:"0 0 4px" }}>Typologie</p>
+                <select value={promoAccType} onChange={e=>setPromoAccType(e.target.value)} style={inp()}>{Object.entries(ACCOMMODATION_TYPES).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}</select>
+              </div>
+              <div>
+                <p style={{ ...sml, margin:"0 0 4px" }}>Saison</p>
+                <select value={promoSeason} onChange={e=>setPromoSeason(e.target.value)} style={inp()}><option value="ete">Été</option><option value="hiver">Hiver</option></select>
+              </div>
+            </div>
+            {n===7 ? (<>
+              <p style={{ ...sml, margin:"8px 0 4px" }}>Période (samedi → samedi)</p>
+              <select value={trackedPeriodId} onChange={e=>setTrackedPeriodId(e.target.value)} style={inp()}>
+                {ALL_PERIODS.filter(p=>p.season===promoSeason && Number(p.stay_nights||7)===7).map(p=><option key={p.id} value={p.id}>{periodOptionLabel(p)}{p.label?` — ${p.label}`:""}</option>)}
+              </select>
+            </>) : (
+              <div style={{ ...formGrid, marginTop:8 }}>
+                <div><p style={{ ...sml, margin:"0 0 4px" }}>Arrivée</p><input type="date" value={promoCheckin} onChange={e=>setPromoCheckin(e.target.value)} style={inp()}/></div>
+                <div><p style={{ ...sml, margin:"0 0 4px" }}>Départ</p><input type="date" value={promoCheckout} onChange={e=>setPromoCheckout(e.target.value)} style={inp()}/></div>
+              </div>
+            )}
+            <p style={{ margin:"6px 0 0", fontSize:9, color:datesInvalid?C.red:C.gray }}>{datesInvalid?"Choisissez des dates valides.":`${label} · ${capacity}P · ${stayNights} nuits${daysToArrival!=null?` · J-${daysToArrival}`:""}`}</p>
+            {distinctSources.length>0&&<p style={{ margin:"4px 0 0", fontSize:8, color:C.gray }}>Sources marché suivies : {distinctSources.slice(0,8).join(", ")}</p>}
+          </div>
+
+          {/* Proposition */}
+          {opp.needData ? (
+            <div style={{ ...cd(11), padding:"12px", textAlign:"center", border:`2px dashed ${C.grayM}` }}>
+              <p style={{ margin:"0 0 8px", fontSize:11, color:C.gray }}>Pas assez de relevés marché validés ({opp.validatedCount}/3) pour cette durée et capacité.</p>
+              <button onClick={()=>setScreen("track")} style={{ ...btn(false,C.blue), width:"auto", padding:"7px 14px", margin:0 }}>Faire un relevé marché →</button>
+            </div>
+          ) : (
+            <div style={{ ...cd(11), padding:"12px 13px", borderLeft:`3px solid ${promoColor(opp.promoType)}` }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
+                <p style={{ margin:0, fontSize:13, fontWeight:700, color:C.text }}>{opp.promoType==="last_minute"?"🔥 ":"🎯 "}{opp.promoLabel}</p>
+                <Badge label={opp.priority} color={opp.priority==="high"?C.red:opp.priority==="medium"?C.orange:C.green} bg={C.grayL} size={9}/>
+              </div>
+              <p style={{ margin:0, fontSize:10, color:C.gray }}>{acc.label} · {label}</p>
+              <div style={{ margin:"6px 0", display:"flex", gap:14, flexWrap:"wrap" }}>
+                <div><p style={{ margin:0, fontSize:8, color:C.gray }}>Prix marché</p><p style={{ margin:0, fontSize:14, fontWeight:700, color:C.text }}>{fmt(opp.marketMedian)}€</p></div>
+                <div><p style={{ margin:0, fontSize:8, color:C.gray }}>Conseillé</p><p style={{ margin:0, fontSize:14, fontWeight:700, color:C.blue }}>{fmt(opp.recommendedPrice)}€</p></div>
+                <div><p style={{ margin:0, fontSize:8, color:C.gray }}>Direct</p><p style={{ margin:0, fontSize:14, fontWeight:700, color:C.green }}>{fmt(opp.directPrice)}€</p></div>
+                {ourPrice>0&&<div><p style={{ margin:0, fontSize:8, color:C.gray }}>Notre tarif</p><p style={{ margin:0, fontSize:14, fontWeight:700, color:C.gray }}>{fmt(ourPrice)}€</p></div>}
+              </div>
+              <div style={{ ...cd(8), padding:"7px 10px", background:C.grayL, marginBottom:8 }}>
+                <p style={{ margin:0, fontSize:10, color:C.text, fontStyle:"italic" }}>"{buildPromoMessage({ promo_type:opp.promoType, stay_nights:stayNights })}"</p>
+              </div>
+              {promoMsg==="ok"&&<p style={{ margin:"0 0 6px", fontSize:11, color:C.green, fontWeight:600 }}>✓ Opportunité enregistrée</p>}
+              {promoMsg?.startsWith("err")&&<p style={{ margin:"0 0 6px", fontSize:11, color:C.red }}>✗ {promoMsg.slice(4)}</p>}
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
+                <button onClick={saveOpp} style={{ ...btn(false,C.purple), margin:0 }}>Enregistrer opportunité</button>
+                <button onClick={()=>setPromoMsgPreview({ kind:"facebook", text:buildPromoMessage({ promo_type:opp.promoType, stay_nights:stayNights }) })} style={{ ...btn(false,C.blue), margin:0 }}>Message Facebook</button>
+                <button onClick={()=>setPromoMsgPreview({ kind:"email", text:buildPromoMessage({ promo_type:opp.promoType, stay_nights:stayNights }) })} style={{ ...btn(false,C.white,C.blue), margin:0, border:`1px solid ${C.blueL}` }}>Email promo</button>
+                <button onClick={()=>setPromoMsgPreview(null)} style={{ ...btn(false,C.grayL,C.text), margin:0 }}>Effacer aperçu</button>
+              </div>
+              {promoMsgPreview&&(
+                <div style={{ ...cd(8), padding:"9px 11px", marginTop:8, background:C.bluePale }}>
+                  <p style={{ margin:"0 0 4px", fontSize:9, fontWeight:700, color:C.blue, textTransform:"uppercase" }}>{promoMsgPreview.kind==="email"?"Email promo":"Post Facebook"}</p>
+                  {promoMsgPreview.kind==="email"&&<p style={{ margin:"0 0 4px", fontSize:10, color:C.text }}><strong>Objet :</strong> {opp.promoLabel} aux Cimes du Val d'Allos — {fmt(opp.directPrice)}€</p>}
+                  <p style={{ margin:0, fontSize:10, color:C.text, whiteSpace:"pre-wrap" }}>{promoMsgPreview.text}{"\n\n"}📅 {label} · {capacity} personnes{"\n"}💶 À partir de {fmt(opp.directPrice)}€ en réservation directe{"\n"}📞 Réservez dès maintenant !</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Historique des opportunités */}
+          <p style={sml}>Opportunités enregistrées</p>
+          {promoOpps.length===0&&<p style={{ fontSize:11, color:C.gray, textAlign:"center", padding:"12px 0", fontStyle:"italic" }}>Aucune opportunité enregistrée.</p>}
+          <div style={cd()}>
+            {promoOpps.slice(0,50).map((o,i,arr)=>(
+              <div key={o.id||i} style={{ padding:"9px 12px", borderBottom:i===Math.min(arr.length,50)-1?"none":`0.5px solid ${C.grayL}` }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 }}>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <span style={{ fontSize:11, fontWeight:600, color:C.text }}>{o.promo_label||o.promo_type}</span>
+                    <div style={{ display:"flex", gap:4, marginTop:1, alignItems:"center", flexWrap:"wrap" }}>
+                      <span style={{ fontSize:8, color:C.gray }}>{(o.created_at||"").slice(0,10)} · {o.accommodation_type} · {o.capacity}P · {o.stay_nights}n</span>
+                    </div>
+                    <p style={{ margin:"1px 0 0", fontSize:9, color:C.gray }}>{o.period_label||o.period_id} · conseillé {fmt(Number(o.recommended_price||0))}€ · direct {fmt(Number(o.direct_price||0))}€</p>
+                  </div>
+                  <div style={{ flexShrink:0 }}>
+                    <select value={o.status||"à étudier"} onChange={async e=>{ await updatePromoOpportunity(o.id,{ status:e.target.value }); reloadPromoOpps(); }} style={{ ...inp(), fontSize:9, padding:"4px 6px" }}>
+                      {["à étudier","à publier","publié","ignoré"].map(s=><option key={s} value={s}>{s}</option>)}
+                    </select>
+                    <button onClick={async()=>{ await deletePromoOpportunity(o.id); reloadPromoOpps(); }} style={{ marginTop:4, width:"100%", fontSize:8, color:C.gray, background:C.grayL, border:"none", borderRadius:5, padding:"3px 6px", cursor:"pointer" }}>🗑</button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div><BNav/>
+      </div>
+    );
+  };
+
  return (
   <div style={appShell}>
     <div style={appContainer}>
@@ -4034,6 +4301,7 @@ export default function App() {
             {screen === "week" && WeekDetail()}
             {screen === "collect" && Collect()}
             {screen === "benchmark" && BenchmarkDecision()}
+            {screen === "promotions" && Promotions()}
             {screen === "track" && TrackPrices()}
             {screen === "import" && ImportScreen()}
             {screen === "diag" && Diagnostic()}
@@ -4048,6 +4316,7 @@ export default function App() {
           {screen === "week" && WeekDetail()}
           {screen === "collect" && Collect()}
             {screen === "benchmark" && BenchmarkDecision()}
+            {screen === "promotions" && Promotions()}
             {screen === "track" && TrackPrices()}
           {screen === "import" && ImportScreen()}
           {screen === "diag" && Diagnostic()}
