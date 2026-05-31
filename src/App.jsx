@@ -848,6 +848,17 @@ function buildTrackedDirectUrl(competitor) {
 
 // ══ SOURCES MULTIPLES PAR CONCURRENT (competitor_sources) ═══════
 const SOURCES_LS = "competitor_sources";
+// Familles de sources
+const SOURCE_FAMILIES = [
+  { type:"booking",       name:"Booking.com" },
+  { type:"direct",        name:"Site direct" },
+  { type:"tour_operator", name:"Tour opérateur" },
+  { type:"marketplace",   name:"Marketplace / OTA" },
+  { type:"other",         name:"Autre page internet" },
+];
+const TOUR_OPERATORS = ["Maeva","La France du Nord au Sud","Travelski","Locasun","Vacancéole","Montagne Vacances","Autre tour opérateur"];
+const MARKETPLACES   = ["Airbnb","Abritel","Expedia","Booking.com","Autre marketplace"];
+// Conservé pour compat (anciens types maeva/airbnb/…) — utilisé par les boutons rapides
 const SOURCE_TYPES = [
   { type:"booking", name:"Booking.com" },
   { type:"direct",  name:"Site direct" },
@@ -857,6 +868,18 @@ const SOURCE_TYPES = [
   { type:"expedia", name:"Expedia" },
   { type:"other",   name:"Autre" },
 ];
+// Badge (label + couleur) selon le type de source, gère aussi les anciens types
+function sourceBadgeMeta(type) {
+  switch (type) {
+    case "booking":       return { l:"Booking", c:"#0A6CFF", bg:"#E8F1FF" };
+    case "direct":        return { l:"Direct",  c:"#1DB954", bg:"#E6F9EE" };
+    case "tour_operator": return { l:"TO",      c:"#7C3AED", bg:"#F1E9FF" };
+    case "marketplace":   return { l:"OTA",     c:"#F5A623", bg:"#FFF4E0" };
+    case "maeva":         return { l:"TO",      c:"#7C3AED", bg:"#F1E9FF" };
+    case "airbnb": case "abritel": case "expedia": return { l:"OTA", c:"#F5A623", bg:"#FFF4E0" };
+    default:              return { l:"Autre",   c:"#8E8E93", bg:"#F2F2F7" };
+  }
+}
 
 async function getCompetitorSources() {
   if (SB_READY) {
@@ -901,6 +924,26 @@ async function deleteCompetitorSource(id) {
   if (SB_READY) return sb.delete("competitor_sources", `id=eq.${id}`);
   ls.set(SOURCES_LS, ls.get(SOURCES_LS).filter(r=>r.id!==id));
   return true;
+}
+
+// Import CSV : competitor_name;source_type;source_name;source_url;notes
+async function importSourcesCsv(csvText, catalog) {
+  const lines = String(csvText||"").trim().split(/\r?\n/).filter(Boolean);
+  if (!lines.length) return { added:0, skipped:0, errors:["CSV vide"] };
+  const start = /competitor_name/i.test(lines[0]) ? 1 : 0;
+  let added=0, skipped=0; const errors=[];
+  for (let i=start; i<lines.length; i++) {
+    const cols = lines[i].split(";").map(s=>s.trim());
+    const [cname, stype, sname, surl, notes] = cols;
+    if (!cname || !surl) { skipped++; continue; }
+    const comp = (catalog||[]).find(c=>String(c.name).toLowerCase()===String(cname).toLowerCase());
+    if (!comp) { errors.push(`Concurrent introuvable : ${cname}`); skipped++; continue; }
+    try {
+      await saveCompetitorSource({ competitor_id:comp.id, source_type:stype||"other", source_name:sname||stype||"Autre", source_url:surl, notes:notes||null, is_active:true });
+      added++;
+    } catch(e) { errors.push(`${cname}/${sname} : ${e.message}`); skipped++; }
+  }
+  return { added, skipped, errors };
 }
 
 // Lien Booking à partir d'une URL source (nettoyée) + dates
@@ -1151,6 +1194,8 @@ export default function App() {
   const [catForm, setCatForm]             = useState(null); // null = fermé ; objet = formulaire ouvert
   const [catSaving, setCatSaving]         = useState(false);
   const [catCsvText, setCatCsvText]       = useState("");
+  const [srcCsvText, setSrcCsvText]       = useState("");
+  const [srcCsvResult, setSrcCsvResult]   = useState(null);
   const [catCsvResult, setCatCsvResult]   = useState(null);
   const [catVerifyPrice, setCatVerifyPrice] = useState({});
   const [catChannel, setCatChannel]       = useState({});
@@ -1182,6 +1227,7 @@ export default function App() {
   const [decForm, setDecForm]             = useState({ action_type:"maintain", our_price_after:"", direct_price:"", decision_status:"à faire", notes:"" });
   const [decSaving, setDecSaving]         = useState(false);
   const [decMsg, setDecMsg]               = useState(null);
+  const [benchSourceFilter, setBenchSourceFilter] = useState({ booking:true, direct:true, tour_operator:true, marketplace:false, other:false });
   const [catSaved, setCatSaved]           = useState({});
   const [ourForm, setOurForm]             = useState({ priceTotal:"", notes:"" });
   const [ourSaving, setOurSaving]         = useState(false);
@@ -1334,6 +1380,11 @@ export default function App() {
     try { const r = await importCatalogCsv(catCsvText); setCatCsvResult(r); await reloadCatalog(); }
     catch(e) { setCatCsvResult({ ok:0, skipped:0, errors:[e.message] }); }
   }
+  async function handleImportSourcesCsv() {
+    if (!srcCsvText.trim()) return;
+    try { const r = await importSourcesCsv(srcCsvText, catalog); setSrcCsvResult(r); await reloadSources(); }
+    catch(e) { setSrcCsvResult({ added:0, skipped:0, errors:[e.message] }); }
+  }
 
   // Enregistre un prix vérifié pour un concurrent suivi (validé immédiatement)
   async function saveTrackedCompetitorRate(competitor, channel, priceTotal) {
@@ -1472,8 +1523,8 @@ export default function App() {
 
   async function handleSaveSource() {
     if (!sourceForm?.source_url?.trim()) { setSourceForm(f=>({ ...f, error:"URL requise." })); return; }
-    if (sourceForm.source_type==="other" && !sourceForm.source_name?.trim()) { setSourceForm(f=>({ ...f, error:"Nom de la source requis." })); return; }
-    try { await saveCompetitorSource({ ...sourceForm, source_name:sourceForm.source_name?.trim()||"Autre" }); await reloadSources(); setSourceForm(null); }
+    if (!sourceForm.source_name?.trim()) { setSourceForm(f=>({ ...f, error:"Nom de la source requis." })); return; }
+    try { await saveCompetitorSource({ competitor_id:sourceForm.competitor_id, source_type:sourceForm.source_type, source_name:sourceForm.source_name.trim(), source_url:sourceForm.source_url, notes:sourceForm.notes, is_active:true }); await reloadSources(); setSourceForm(null); }
     catch(e) { setSourceForm(f=>({ ...f, error:e.message })); }
   }
   async function handleDeleteSource(id) {
@@ -2149,7 +2200,7 @@ export default function App() {
                   <span style={{ fontSize:9, color:C.gray }}>score {c.comparability_score||"?"}/100</span>
                   {sourcesForCompetitor(c).length===0
                     ? <span style={{ fontSize:8, color:C.gray, fontStyle:"italic" }}>Aucune source suivie</span>
-                    : sourcesForCompetitor(c).map(s=><Badge key={s.id} label={s.source_name} color={s.source_type==="booking"?C.blue:s.source_type==="direct"?C.green:C.purple} bg={s.source_type==="booking"?C.bluePale:s.source_type==="direct"?C.greenL:C.purpleL} size={8}/>)}
+                    : sourcesForCompetitor(c).map(s=>(()=>{ const m=sourceBadgeMeta(s.source_type); return <Badge key={s.id} label={s.source_name} color={m.c} bg={m.bg} size={8}/>; })())}
                 </div>
                 {c.notes&&<p style={{ margin:"1px 0 0", fontSize:9, color:C.gray, fontStyle:"italic" }}>{c.notes}</p>}
               </div>
@@ -2174,15 +2225,27 @@ export default function App() {
                   ))}
                   {sourceForm&&sourceForm.competitor_id===c.id ? (
                     <div style={{ ...cd(9), padding:"8px 10px", marginTop:6 }}>
-                      <div style={{ display:"flex", gap:5, marginBottom:5 }}>
-                        <select value={sourceForm.source_type} onChange={e=>{ const t=e.target.value; const m=SOURCE_TYPES.find(x=>x.type===t); setSourceForm(f=>({ ...f, source_type:t, source_name:t==="other"?(f.source_name==="Autre"||SOURCE_TYPES.some(x=>x.name===f.source_name)?"":f.source_name):(m?.name||"Autre") })); }} style={{ ...inp(), flex:1 }}>
-                          {SOURCE_TYPES.map(t=><option key={t.type} value={t.type}>{t.type==="other"?"Autre page internet":t.name}</option>)}
+                      <p style={{ ...sml, margin:"0 0 3px" }}>Famille de source</p>
+                      <select value={sourceForm.family} onChange={e=>{ const fam=e.target.value; setSourceForm(f=>{ let st=fam, sn=f.source_name; if(fam==="booking"){st="booking";sn="Booking.com";} else if(fam==="direct"){st="direct";sn="Site direct";} else if(fam==="tour_operator"){st="tour_operator";sn=TOUR_OPERATORS[0];} else if(fam==="marketplace"){st="marketplace";sn=MARKETPLACES[0];} else {st="other";sn="";} return { ...f, family:fam, source_type:st, source_name:sn }; }); }} style={{ ...inp(), marginBottom:5 }}>
+                        {SOURCE_FAMILIES.map(t=><option key={t.type} value={t.type}>{t.name}</option>)}
+                      </select>
+                      {sourceForm.family==="tour_operator"&&(<>
+                        <p style={{ ...sml, margin:"0 0 3px" }}>Tour opérateur</p>
+                        <select value={TOUR_OPERATORS.includes(sourceForm.source_name)?sourceForm.source_name:"Autre tour opérateur"} onChange={e=>setSourceForm(f=>({ ...f, source_name:e.target.value==="Autre tour opérateur"?"":e.target.value, _toOther:e.target.value==="Autre tour opérateur" }))} style={{ ...inp(), marginBottom:5 }}>
+                          {TOUR_OPERATORS.map(o=><option key={o} value={o}>{o}</option>)}
                         </select>
-                      </div>
-                      {sourceForm.source_type==="other"&&(
-                        <input style={{ ...inp(), marginBottom:5 }} placeholder="Nom personnalisé (ex : Vente privée, Office tourisme)" value={sourceForm.source_name||""} onChange={e=>setSourceForm(f=>({ ...f, source_name:e.target.value }))}/>
+                        {(sourceForm._toOther||!TOUR_OPERATORS.includes(sourceForm.source_name))&&<input style={{ ...inp(), marginBottom:5 }} placeholder="Nom du tour opérateur" value={sourceForm.source_name||""} onChange={e=>setSourceForm(f=>({ ...f, source_name:e.target.value }))}/>}
+                      </>)}
+                      {sourceForm.family==="marketplace"&&(<>
+                        <p style={{ ...sml, margin:"0 0 3px" }}>Marketplace / OTA</p>
+                        <select value={MARKETPLACES.includes(sourceForm.source_name)?sourceForm.source_name:MARKETPLACES[0]} onChange={e=>setSourceForm(f=>({ ...f, source_name:e.target.value }))} style={{ ...inp(), marginBottom:5 }}>
+                          {MARKETPLACES.map(o=><option key={o} value={o}>{o}</option>)}
+                        </select>
+                      </>)}
+                      {sourceForm.family==="other"&&(
+                        <input style={{ ...inp(), marginBottom:5 }} placeholder="Nom de la source (ex : Vente privée, Office tourisme)" value={sourceForm.source_name||""} onChange={e=>setSourceForm(f=>({ ...f, source_name:e.target.value }))}/>
                       )}
-                      <input style={{ ...inp(), marginBottom:5 }} placeholder="URL de la page" value={sourceForm.source_url} onChange={e=>setSourceForm(f=>({ ...f, source_url:e.target.value }))}/>
+                      <input style={{ ...inp(), marginBottom:5 }} placeholder="URL de la fiche" value={sourceForm.source_url} onChange={e=>setSourceForm(f=>({ ...f, source_url:e.target.value }))}/>
                       <input style={{ ...inp(), marginBottom:5 }} placeholder="Notes (optionnel)" value={sourceForm.notes||""} onChange={e=>setSourceForm(f=>({ ...f, notes:e.target.value }))}/>
                       {sourceForm.error&&<p style={{ margin:"0 0 5px", fontSize:9, color:C.red }}>✗ {sourceForm.error}</p>}
                       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:5 }}>
@@ -2192,8 +2255,8 @@ export default function App() {
                     </div>
                   ) : (
                     <div style={{ display:"flex", gap:4, flexWrap:"wrap", marginTop:4 }}>
-                      {SOURCE_TYPES.map(t=>(
-                        <button key={t.type} onClick={()=>setSourceForm({ competitor_id:c.id, source_type:t.type, source_name:t.type==="other"?"":t.name, source_url:"", notes:"" })} style={{ fontSize:9, fontWeight:600, color:C.blue, background:C.bluePale, border:"none", borderRadius:6, padding:"5px 8px", cursor:"pointer" }}>+ {t.type==="other"?"Autre":t.name.replace(".com","")}</button>
+                      {[["booking","booking","Booking.com","+ Booking"],["direct","direct","Site direct","+ Direct"],["tour_operator","tour_operator",TOUR_OPERATORS[0],"+ TO"],["marketplace","marketplace",MARKETPLACES[0],"+ OTA"],["other","other","","+ Autre"]].map(([fam,st,sn,lbl])=>(
+                        <button key={fam} onClick={()=>setSourceForm({ competitor_id:c.id, family:fam, source_type:st, source_name:sn, source_url:"", notes:"" })} style={{ fontSize:9, fontWeight:600, color:C.blue, background:C.bluePale, border:"none", borderRadius:6, padding:"5px 8px", cursor:"pointer" }}>{lbl}</button>
                       ))}
                     </div>
                   )}
@@ -2273,6 +2336,24 @@ export default function App() {
           </div>
         </div>
 
+        {/* Import CSV des sources (TO, marketplaces, direct…) */}
+        <details style={{ ...cd(11), padding:"10px 13px" }}>
+          <summary style={{ fontSize:11, fontWeight:700, color:C.blue, cursor:"pointer" }}>Import CSV des sources (TO / marketplaces)</summary>
+          <p style={{ margin:"6px 0", fontSize:9, color:C.gray }}>Format : competitor_name;source_type;source_name;source_url;notes</p>
+          {srcCsvResult&&(
+            <div style={{ ...cd(8), padding:"7px 10px", background:C.grayL, marginBottom:6 }}>
+              <p style={{ margin:"0 0 1px", fontSize:11, color:C.green }}>✓ Ajoutées : {srcCsvResult.added}</p>
+              <p style={{ margin:"0 0 1px", fontSize:11, color:C.gray }}>⊝ Ignorées : {srcCsvResult.skipped}</p>
+              {(srcCsvResult.errors||[]).map((e,i)=><p key={i} style={{ margin:0, fontSize:10, color:C.red }}>✗ {e}</p>)}
+            </div>
+          )}
+          <textarea value={srcCsvText} onChange={e=>setSrcCsvText(e.target.value)} placeholder={"Résidence Les Chalets du Verdon;tour_operator;La France du Nord au Sud;https://www.lafrancedunordausud.fr/...;Fiche TO"} style={{ width:"100%", minHeight:60, padding:"8px", fontSize:10, fontFamily:"monospace", border:`1px solid ${C.grayM}`, borderRadius:9, background:C.grayL, color:C.text, resize:"vertical", boxSizing:"border-box", marginBottom:6 }}/>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
+            <button onClick={()=>{ const tpl=["competitor_name;source_type;source_name;source_url;notes","Résidence Les Chalets du Verdon;tour_operator;La France du Nord au Sud;https://www.lafrancedunordausud.fr/...;Fiche TO","Résidence Les Chalets du Verdon;tour_operator;Maeva;https://www.maeva.com/...;Fiche Maeva","Résidence Labellemontagne;direct;Site direct;https://...;Site officiel"].join("\n"); const b=new Blob([tpl],{ type:"text/csv;charset=utf-8" }); const u=URL.createObjectURL(b); const a=document.createElement("a"); a.href=u; a.download="modele_sources.csv"; a.click(); }} style={{ ...btn(false,C.grayL,C.blueL), margin:0, border:`1px solid ${C.blueL}` }}>⬇ Modèle CSV</button>
+            <button onClick={handleImportSourcesCsv} disabled={!srcCsvText.trim()} style={{ ...btn(!srcCsvText.trim(),C.blue), margin:0 }}>Importer les sources</button>
+          </div>
+        </details>
+
         {/* Relevé rapide concurrents suivis (période + capacité courantes) */}
         {catalog.length>0&&(()=>{
           const ctx = getTrackedPeriodContext();
@@ -2351,7 +2432,7 @@ export default function App() {
                   <p style={{ margin:0, fontSize:11, color:C.red, fontWeight:600 }}>Dates invalides : vérifiez arrivée et départ.</p>
                 )}
                 <p style={{ margin:"4px 0 0", fontSize:9, color:C.gray, fontStyle:"italic" }}>Les prix saisis ici sont considérés comme vérifiés manuellement.</p>
-                <p style={{ margin:"2px 0 0", fontSize:8, color:C.gray, fontStyle:"italic" }}>Pour les sources hors Booking, les dates peuvent devoir être renseignées directement sur le site.</p>
+                <p style={{ margin:"2px 0 0", fontSize:8, color:C.gray, fontStyle:"italic" }}>Pour les TO et sites hors Booking, vérifiez les dates directement sur la fiche avant de saisir le prix.</p>
                 <div style={{ display:"flex", gap:5, marginTop:7, flexWrap:"wrap" }}>
                   {(allBookingUrls.length>0||allDirectUrls.length>0)&&<button onClick={()=>setTrackedLinksVisible(v=>!v)} disabled={datesInvalid} style={{ fontSize:9, fontWeight:600, color:datesInvalid?C.gray:C.white, background:datesInvalid?C.grayL:C.blue, padding:"5px 9px", borderRadius:6, border:"none", cursor:datesInvalid?"default":"pointer" }}>{trackedLinksVisible?"▲ Masquer les liens":`↗ Ouvrir tous les Booking (${allBookingUrls.length})`}</button>}
                   {allBookingUrls.length>1&&!datesInvalid&&<button onClick={()=>openAllLinks(allBookingUrls)} style={{ fontSize:9, fontWeight:600, color:C.blue, background:C.white, padding:"5px 9px", borderRadius:6, border:`1px solid ${C.blueL}`, cursor:"pointer" }}>Ouvrir les {Math.min(allBookingUrls.length,5)} premiers</button>}
@@ -2441,7 +2522,7 @@ export default function App() {
                         <span style={{ fontSize:12, fontWeight:600, color:C.text }}>{c.name}</span>
                         <div style={{ display:"flex", gap:4, marginTop:2, alignItems:"center", flexWrap:"wrap" }}>
                           <span style={{ fontSize:9, color:C.gray }}>{c.property_type} · score {c.comparability_score||"?"}</span>
-                          {compSources.map(s=><Badge key={s.id} label={s.source_name} color={s.source_type==="booking"?C.blue:s.source_type==="direct"?C.green:C.purple} bg={s.source_type==="booking"?C.bluePale:s.source_type==="direct"?C.greenL:C.purpleL} size={8}/>)}
+                          {compSources.map(s=>(()=>{ const m=sourceBadgeMeta(s.source_type); return <Badge key={s.id} label={s.source_name} color={m.c} bg={m.bg} size={8}/>; })())}
                         </div>
                       </div>
                       {compSources.length===0&&<p style={{ margin:"5px 0 0", fontSize:9, color:C.gray, fontStyle:"italic" }}>Aucune source. Ajoutez-en dans « Concurrents suivis ».</p>}
@@ -3383,12 +3464,20 @@ export default function App() {
     const ctx = getTrackedPeriodContext();
     const datesInvalid = !ctx.checkin || !ctx.checkout || !ctx.stayNights || ctx.stayNights<=0;
     // Relevés validés correspondant au contexte (période/dates + capacité + durée)
+    // Famille d'une source (gère les anciens types)
+    const famOf = ch => {
+      if (ch==="booking"||ch==="direct"||ch==="tour_operator"||ch==="marketplace") return ch;
+      if (ch==="maeva") return "tour_operator";
+      if (ch==="airbnb"||ch==="abritel"||ch==="expedia") return "marketplace";
+      return "other";
+    };
     const verified = (histAll||[]).filter(r=>
       !r.is_example &&
       TRUSTED_STATUSES.includes(r.reliability_status || "à vérifier") &&
       r.week_id===ctx.periodId &&
       Number(r.capacity)===Number(ctx.capacity) &&
-      Number(r.stay_nights||7)===Number(ctx.stayNights)
+      Number(r.stay_nights||7)===Number(ctx.stayNights) &&
+      (!r.source_channel || benchSourceFilter[famOf(r.source_channel)] !== false)
     );
     const dec = calcBenchmarkDecision({ ourPrice, marketRates:verified, stayNights:ctx.stayNights });
     const priceOf = r => Number(r.price_total||r.price_week||r.price||0);
@@ -3458,6 +3547,16 @@ export default function App() {
               {[2,4,6,8].map(n=><button key={n} onClick={()=>setTrackedCapacity(n)} style={{ padding:"6px 0", background:Number(trackedCapacity)===n?C.blue:C.grayL, border:"none", borderRadius:8, cursor:"pointer", fontSize:11, fontWeight:Number(trackedCapacity)===n?700:400, color:Number(trackedCapacity)===n?C.white:C.text }}>{n}P</button>)}
             </div>
             <p style={{ margin:"6px 0 0", fontSize:9, color:datesInvalid?C.red:C.gray }}>{datesInvalid?"Dates invalides : vérifiez arrivée et départ.":`${trackedMode==="custom"?"Dates personnalisées":ctx.label} · ${ctx.capacity}P · ${ctx.stayNights} nuits`}</p>
+          </div>
+
+          {/* Filtre sources incluses */}
+          <div style={{ ...cd(11), padding:"9px 12px" }}>
+            <p style={{ ...sml, margin:"0 0 5px" }}>Sources incluses</p>
+            <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
+              {[["booking","Booking"],["direct","Direct"],["tour_operator","Tour opérateurs"],["marketplace","Marketplaces"],["other","Autres"]].map(([k,l])=>(
+                <button key={k} onClick={()=>setBenchSourceFilter(f=>({ ...f, [k]:!f[k] }))} style={{ fontSize:10, fontWeight:benchSourceFilter[k]?700:400, color:benchSourceFilter[k]?C.white:C.gray, background:benchSourceFilter[k]?C.blue:C.grayL, border:"none", borderRadius:14, padding:"5px 11px", cursor:"pointer" }}>{benchSourceFilter[k]?"✓ ":""}{l}</button>
+              ))}
+            </div>
           </div>
 
           {/* B + C : cartes */}
