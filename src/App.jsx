@@ -892,11 +892,14 @@ async function getCompetitorSources() {
 async function saveCompetitorSource(source) {
   if (!source.competitor_id) throw new Error("Concurrent requis.");
   if (!source.source_url) throw new Error("URL de la source requise.");
+  // Nettoyage spécifique La France du Nord au Sud : on stocke une URL vierge (sans dates)
+  const isLfdnas = String(source.source_name||"").toLowerCase().includes("france du nord") || String(source.source_url||"").toLowerCase().includes("lafrancedunordausud.fr");
+  const cleanedUrl = isLfdnas ? normalizeLfdnasBaseUrl(source.source_url) : source.source_url;
   const payload = {
     competitor_id: source.competitor_id,
     source_name:   source.source_name || "Autre",
     source_type:   source.source_type || "other",
-    source_url:    source.source_url,
+    source_url:    cleanedUrl,
     notes:         source.notes || null,
     is_active:     source.is_active !== false,
   };
@@ -904,7 +907,7 @@ async function saveCompetitorSource(source) {
     if (source.id) return await sb.update("competitor_sources", `id=eq.${source.id}`, { ...payload, updated_at:new Date().toISOString() });
     // Anti-doublon : même concurrent + type + URL → mise à jour
     try {
-      const existing = await sb.select("competitor_sources", `competitor_id=eq.${source.competitor_id}&source_type=eq.${encodeURIComponent(source.source_type||"other")}&source_url=eq.${encodeURIComponent(source.source_url)}&select=id`);
+      const existing = await sb.select("competitor_sources", `competitor_id=eq.${source.competitor_id}&source_type=eq.${encodeURIComponent(source.source_type||"other")}&source_url=eq.${encodeURIComponent(cleanedUrl)}&select=id`);
       if (existing && existing.length) return await sb.update("competitor_sources", `id=eq.${existing[0].id}`, { ...payload, updated_at:new Date().toISOString() });
     } catch { /* si la requête échoue on insère */ }
     return await sb.insert("competitor_sources", payload);
@@ -975,10 +978,53 @@ function buildTrackedBookingUrlFromSource(rawUrl, competitor, ctx) {
   return buildTrackedBookingUrl({ ...competitor, booking_url: rawUrl }, ctx);
 }
 
-// URL d'une source : Booking reçoit les dates, les autres sont ouvertes telles quelles
+// Nettoie une URL "La France du Nord au Sud" : garde domaine+chemin+residence_cle+ordreSeo, retire les dates
+function normalizeLfdnasBaseUrl(rawUrl) {
+  if (!rawUrl) return "";
+  try {
+    let fixed = String(rawUrl).trim();
+    if (fixed.startsWith("ww.")) fixed = "https://www." + fixed.slice(3);
+    else if (fixed.startsWith("www.")) fixed = "https://" + fixed;
+    else if (!fixed.startsWith("http://") && !fixed.startsWith("https://")) fixed = "https://" + fixed;
+    const url = new URL(fixed);
+    if (!url.hostname.includes("lafrancedunordausud.fr")) return fixed;
+    const clean = new URL(url.origin + url.pathname);
+    const residenceCle = url.searchParams.get("residence_cle") || (url.pathname.match(/_(\d+)\.html/)?.[1] || "");
+    if (residenceCle) clean.searchParams.set("residence_cle", residenceCle);
+    clean.searchParams.set("ordreSeo", url.searchParams.get("ordreSeo") || "prixAsc");
+    return clean.toString();
+  } catch {
+    return rawUrl;
+  }
+}
+
+// Reconstruit l'URL LFDNAS avec les dates + capacité du contexte de relevé
+function buildLfdnasUrl(source, ctx) {
+  const base = normalizeLfdnasBaseUrl(source.source_url);
+  const url = new URL(base);
+  url.searchParams.set("date_debut", ctx.checkin);
+  url.searchParams.set("date_fin", ctx.checkout);
+  url.searchParams.set("nbPax", String(ctx.capacity));
+  url.searchParams.set("adultePax", String(ctx.capacity));
+  url.searchParams.set("enfantPax", "0");
+  url.searchParams.set("babiePax", "0");
+  if (!url.searchParams.get("ordreSeo")) url.searchParams.set("ordreSeo", "prixAsc");
+  return url.toString();
+}
+
+function isLfdnasSource(source) {
+  const name = String(source.source_name || "").toLowerCase();
+  const raw = String(source.source_url || "").toLowerCase();
+  return name.includes("france du nord") || raw.includes("lafrancedunordausud.fr");
+}
+
+// URL d'une source : Booking et LFDNAS reçoivent les dates, les autres sont ouvertes telles quelles
 function buildSourceUrl(source, competitor, ctx) {
   if (source.source_type === "booking") {
     return buildTrackedBookingUrlFromSource(source.source_url, competitor, ctx);
+  }
+  if (isLfdnasSource(source)) {
+    return buildLfdnasUrl(source, ctx);
   }
   return source.source_url;
 }
@@ -2622,14 +2668,16 @@ export default function App() {
                         const st = trackSaved[key];
                         const vp = trackPrices[key]??"";
                         const last = lastRateFor(c.name, s.source_name);
+                        const injectsDates = s.source_type==="booking" || isLfdnasSource(s);
                         return (
                           <div key={s.id} style={{ marginTop:6, paddingTop:6, borderTop:`0.5px dashed ${C.grayL}` }}>
                             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
                               <span style={{ fontSize:10, fontWeight:600, color:C.text }}>{s.source_name}</span>
-                              {(s.source_type==="booking"&&datesInvalid)
+                              {(injectsDates&&datesInvalid)
                                 ? <span style={{ fontSize:9, fontWeight:600, color:C.gray, background:C.grayL, padding:"4px 8px", borderRadius:6, border:`1px solid ${C.grayM}` }}>↗ Ouvrir</span>
                                 : <a href={url} target="_blank" rel="noreferrer" style={{ fontSize:9, fontWeight:600, color:C.blue, background:C.white, padding:"4px 8px", borderRadius:6, textDecoration:"none", border:`1px solid ${C.grayM}`, flexShrink:0 }}>↗ Ouvrir</a>}
                             </div>
+                            {isLfdnasSource(s)&&<p style={{ margin:"2px 0 0", fontSize:8, color:C.purple, fontStyle:"italic" }}>Dates ajoutées automatiquement à l'URL TO.</p>}
                             {last&&<p style={{ margin:"3px 0 0", fontSize:8, color:C.gray }}>Dernier {s.source_name} : {fmt(Number(last.price_total||last.price_week))}€ · {last.reliability_status} · {last.collected_at}</p>}
                             {st==="ok" ? (
                               <p style={{ margin:"4px 0 0", fontSize:9, color:C.green, fontWeight:600 }}>✓ Prix {s.source_name} enregistré</p>
