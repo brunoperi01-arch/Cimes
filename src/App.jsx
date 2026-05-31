@@ -682,14 +682,26 @@ async function getOurRate(periodId, capacity, stayNights=7) {
 }
 
 // Récupère le tarif Les Cimes correspondant au contexte : priorité aux dates réelles, puis period_id
-function getOurRateForContext(ourRates, ctx) {
+function getOurRateForContext(ourRates, ctx, accommodationType) {
   if (!ourRates?.length || !ctx) return null;
   const capacity = Number(ctx.capacity);
   const stayNights = Number(ctx.stayNights || ctx.stay_nights || 7);
   const start = ctx.checkin || ctx.period_start || ctx.week_start;
   const end = ctx.checkout || ctx.period_end;
   const active = ourRates.filter(r => r.is_active !== false);
-  // 1. Priorité : dates + capacité + durée
+  const accType = String(accommodationType || "");
+  // 1. Priorité absolue : dates + durée + capacité + typologie
+  if (accType) {
+    const byDatesAndType = active.find(r =>
+      String(r.period_start || "") === String(start || "") &&
+      String(r.period_end || "") === String(end || "") &&
+      Number(r.capacity) === capacity &&
+      Number(r.stay_nights || 7) === stayNights &&
+      String(r.accommodation_type || "") === accType
+    );
+    if (byDatesAndType) return { ...byDatesAndType, match_type: "dates+typologie" };
+  }
+  // 2. Fallback : dates + capacité + durée (sans typologie)
   const byDates = active.find(r =>
     String(r.period_start || "") === String(start || "") &&
     String(r.period_end || "") === String(end || "") &&
@@ -697,7 +709,16 @@ function getOurRateForContext(ourRates, ctx) {
     Number(r.stay_nights || 7) === stayNights
   );
   if (byDates) return { ...byDates, match_type: "dates" };
-  // 2. Fallback : period_id + capacité + durée
+  // 3. Fallback : period_id + capacité + durée (+ typologie si fournie)
+  if (accType) {
+    const byPeriodIdAndType = active.find(r =>
+      String(r.period_id || "") === String(ctx.periodId || ctx.period_id || "") &&
+      Number(r.capacity) === capacity &&
+      Number(r.stay_nights || 7) === stayNights &&
+      String(r.accommodation_type || "") === accType
+    );
+    if (byPeriodIdAndType) return { ...byPeriodIdAndType, match_type: "period_id+typologie" };
+  }
   const byPeriodId = active.find(r =>
     String(r.period_id || "") === String(ctx.periodId || ctx.period_id || "") &&
     Number(r.capacity) === capacity &&
@@ -1873,6 +1894,8 @@ export default function App() {
   }
   useEffect(()=>{ if(user && (screen==="track"||screen==="benchmark")) loadHistAll(); /* eslint-disable-next-line */ },[user,screen]);
   useEffect(()=>{ if(user) getCommercialDecisions().then(setDecisions).catch(()=>{}); },[user]);
+  // L'occupation cible suit par défaut la capacité de la typologie choisie
+  useEffect(()=>{ const a=ACCOMMODATION_TYPES[benchAccType]; if(a) setBenchOccupancy(a.capacity); },[benchAccType]);
   async function reloadDecisions() { try { const d=await getCommercialDecisions(); setDecisions(d||[]); } catch {} }
 
   function exportHistoryCsv(rows) {
@@ -3723,9 +3746,24 @@ export default function App() {
   };
 
   const BenchmarkDecision=()=>{
-    const ctx = getTrackedPeriodContext();
+    const baseCtx = getTrackedPeriodContext();
+    const acc = ACCOMMODATION_TYPES[benchAccType] || ACCOMMODATION_TYPES["2P6"];
+    // La capacité de travail est imposée par la typologie choisie
+    const ctx = { ...baseCtx, capacity: acc.capacity };
     const datesInvalid = !ctx.checkin || !ctx.checkout || !ctx.stayNights || ctx.stayNights<=0;
-    // Relevés validés correspondant au contexte (période/dates + capacité + durée)
+    // Tarif Les Cimes pour cette typologie (dates + durée + capacité + typologie)
+    const benchOurRate = getOurRateForContext(ourRates, ctx, benchAccType);
+    const benchFallback = OUR_TARIFS[`${acc.capacity}p`]?.[selWeek?.season_type] || 0;
+    const benchOurPrice = benchOurRate
+      ? Number(benchOurRate.price_total || benchOurRate.price_week || benchOurRate.price || 0)
+      : benchFallback;
+    const benchOurNight = benchOurPrice ? Math.round(benchOurPrice / ctx.stayNights) : 0;
+    const benchOurSource = benchOurRate
+      ? (benchOurRate.match_type==="dates+typologie" ? "Supabase · correspondance dates+typologie"
+        : benchOurRate.match_type==="period_id+typologie" ? "Supabase · correspondance period_id+typologie"
+        : benchOurRate.match_type==="dates" ? "Supabase · correspondance dates"
+        : "Supabase · correspondance period_id")
+      : "Grille interne fallback";
     // Famille d'une source (gère les anciens types)
     const famOf = ch => {
       if (ch==="booking"||ch==="direct"||ch==="tour_operator"||ch==="marketplace") return ch;
@@ -3733,15 +3771,16 @@ export default function App() {
       if (ch==="airbnb"||ch==="abritel"||ch==="expedia") return "marketplace";
       return "other";
     };
+    // Marché vérifié : capacité = celle de la typologie
     const verified = (histAll||[]).filter(r=>
       !r.is_example &&
       TRUSTED_STATUSES.includes(r.reliability_status || "à vérifier") &&
       r.week_id===ctx.periodId &&
-      Number(r.capacity)===Number(ctx.capacity) &&
+      Number(r.capacity)===Number(acc.capacity) &&
       Number(r.stay_nights||7)===Number(ctx.stayNights) &&
       (!r.source_channel || benchSourceFilter[famOf(r.source_channel)] !== false)
     );
-    const dec = calcBenchmarkDecision({ ourPrice, marketRates:verified, stayNights:ctx.stayNights });
+    const dec = calcBenchmarkDecision({ ourPrice:benchOurPrice, marketRates:verified, stayNights:ctx.stayNights });
     const priceOf = r => Number(r.price_total||r.price_week||r.price||0);
     const usedSources = Array.from(new Set(verified.map(r=>r.source).filter(Boolean)));
     const actChoices = [["increase","Augmenter"],["promo","Baisser / promo"],["maintain","Maintenir"],["surveiller","Surveiller"],["need_data","Relevés insuffisants"]];
@@ -3753,7 +3792,7 @@ export default function App() {
         await saveCommercialDecision({
           period_id: ctx.periodId, period_label: ctx.label, period_start: ctx.checkin, period_end: ctx.checkout,
           stay_nights: ctx.stayNights, capacity: ctx.capacity,
-          our_price_before: ourPrice||null,
+          our_price_before: benchOurPrice||null,
           our_price_after: parseFloat(decForm.our_price_after)||null,
           direct_price: parseFloat(decForm.direct_price)||null,
           market_median: dec.marketMedian||null, market_min: dec.marketMin||null, market_max: dec.marketMax||null,
@@ -3761,7 +3800,7 @@ export default function App() {
           action_type: decForm.action_type, action_label: (actChoices.find(a=>a[0]===decForm.action_type)||[])[1]||decForm.action_type,
           priority: dec.priority||"normal",
           decision_status: decForm.decision_status||"à faire",
-          notes: decForm.notes||null,
+          notes: decForm.notes ? `[${acc.label}] ${decForm.notes}` : `[${acc.label}]`,
         });
         await reloadDecisions();
         setDecMsg("ok");
@@ -3804,11 +3843,10 @@ export default function App() {
                 <div><p style={{ ...sml, margin:"0 0 4px" }}>Départ</p><input type="date" value={trackedCheckout} onChange={e=>setTrackedCheckout(e.target.value)} style={inp()}/></div>
               </div>
             )}
-            <p style={{ ...sml, margin:"8px 0 4px" }}>Capacité</p>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:4 }}>
-              {[2,4,6,8].map(n=><button key={n} onClick={()=>setTrackedCapacity(n)} style={{ padding:"6px 0", background:Number(trackedCapacity)===n?C.blue:C.grayL, border:"none", borderRadius:8, cursor:"pointer", fontSize:11, fontWeight:Number(trackedCapacity)===n?700:400, color:Number(trackedCapacity)===n?C.white:C.text }}>{n}P</button>)}
+            <div style={{ ...cd(9), padding:"7px 10px", background:C.bluePale, marginTop:8 }}>
+              <p style={{ margin:0, fontSize:9, color:C.blue, fontWeight:600 }}>Capacité liée à la typologie : {acc.capacity}P ({acc.label})</p>
             </div>
-            <p style={{ margin:"6px 0 0", fontSize:9, color:datesInvalid?C.red:C.gray }}>{datesInvalid?"Dates invalides : vérifiez arrivée et départ.":`${trackedMode==="custom"?"Dates personnalisées":ctx.label} · ${ctx.capacity}P · ${ctx.stayNights} nuits`}</p>
+            <p style={{ margin:"6px 0 0", fontSize:9, color:datesInvalid?C.red:C.gray }}>{datesInvalid?"Dates invalides : vérifiez arrivée et départ.":`${trackedMode==="custom"?"Dates personnalisées":ctx.label} · ${acc.capacity}P · ${ctx.stayNights} nuits`}</p>
           </div>
 
           {/* Filtre sources incluses */}
@@ -3844,12 +3882,13 @@ export default function App() {
           <div style={responsiveGrid(2)}>
             <div style={{ ...cd(11,0), padding:"10px 12px", background:C.bluePale }}>
               <p style={{ margin:"0 0 1px", fontSize:8, color:C.blueL, fontWeight:700, textTransform:"uppercase" }}>Nos tarifs Les Cimes</p>
-              {ourPrice>0?(<>
-                <p style={{ margin:0, fontSize:18, fontWeight:700, color:C.blue }}>{fmt(ourPrice)}€<span style={{ fontSize:10 }}>/séjour</span></p>
-                <p style={{ margin:0, fontSize:10, color:C.blueL }}>{fmt(ourNight)}€/nuit · {ourRateSource}</p>
-                {(()=>{ const ppn=pricePerPersonNight(ourPrice, ctx.stayNights, benchOccupancy); return ppn?<p style={{ margin:"1px 0 0", fontSize:10, color:C.blueL, fontWeight:600 }}>{fmt(ppn)}€/pers/nuit ({benchOccupancy}P)</p>:null; })()}
-              </>):(<p style={{ margin:0, fontSize:13, color:C.gray, fontStyle:"italic" }}>Tarif à définir</p>)}
-              <button onClick={()=>{ setScreen("dashboard"); setDashTarifTab("saisie"); setDashOurPeriodId(selWeekId); setDashOurCap(capNum); }} style={{ ...btn(false,C.white,C.blue), margin:"7px 0 0", border:`1px solid ${C.blueL}`, padding:"6px" }}>Modifier tarif</button>
+              <p style={{ margin:"0 0 2px", fontSize:9, color:C.blueL }}>Typologie : <strong>{acc.label}</strong> · Capacité : <strong>{acc.capacity}P</strong></p>
+              {benchOurPrice>0?(<>
+                <p style={{ margin:0, fontSize:18, fontWeight:700, color:C.blue }}>{fmt(benchOurPrice)}€<span style={{ fontSize:10 }}>/séjour</span></p>
+                <p style={{ margin:0, fontSize:10, color:C.blueL }}>{fmt(benchOurNight)}€/nuit · {benchOurSource}</p>
+                {(()=>{ const ppn=pricePerPersonNight(benchOurPrice, ctx.stayNights, benchOccupancy); return ppn?<p style={{ margin:"1px 0 0", fontSize:10, color:C.blueL, fontWeight:600 }}>{fmt(ppn)}€/pers/nuit ({benchOccupancy}P)</p>:null; })()}
+              </>):(<p style={{ margin:0, fontSize:13, color:C.gray, fontStyle:"italic" }}>Tarif {acc.label} à définir</p>)}
+              <button onClick={()=>{ setScreen("dashboard"); setDashTarifTab("saisie"); setDashOurPeriodId(selWeekId); setDashOurCap(acc.capacity); }} style={{ ...btn(false,C.white,C.blue), margin:"7px 0 0", border:`1px solid ${C.blueL}`, padding:"6px" }}>Modifier tarif</button>
             </div>
             <div style={{ ...cd(11,0), padding:"10px 12px", background:dec.validatedCount>=3?C.greenL:C.goldL }}>
               <p style={{ margin:"0 0 1px", fontSize:8, color:dec.validatedCount>=3?C.green:C.gold, fontWeight:700, textTransform:"uppercase" }}>Marché vérifié ({dec.validatedCount})</p>
