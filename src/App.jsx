@@ -2615,13 +2615,13 @@ export default function App() {
         </button>
       ))}
       <div style={{ borderTop:"0.5px solid rgba(255,255,255,0.14)", margin:"10px 4px", paddingTop:10 }}>
-        <button onClick={()=>{ setDashCompSegment("residence"); goScreen("dashboard"); }} style={{ width:"100%", display:"flex", alignItems:"center", gap:11, padding:"9px 11px", marginBottom:3, background:"transparent", border:"none", borderRadius:10, cursor:"pointer", textAlign:"left" }}>
+        <button onClick={()=>goScreen("competitors_residence")} style={{ width:"100%", display:"flex", alignItems:"center", gap:11, padding:"9px 11px", marginBottom:3, background:screen==="competitors_residence"?"rgba(255,255,255,0.16)":"transparent", border:"none", borderRadius:10, cursor:"pointer", textAlign:"left" }}>
           <span style={{ fontSize:14, width:18, textAlign:"center" }}>🏢</span>
-          <span style={{ fontSize:12, fontWeight:500, color:"rgba(255,255,255,0.78)" }}>Concurrents Résidences</span>
+          <span style={{ fontSize:12, fontWeight:screen==="competitors_residence"?700:500, color:screen==="competitors_residence"?C.white:"rgba(255,255,255,0.78)" }}>Concurrents Résidences</span>
         </button>
-        <button onClick={()=>{ setDashCompSegment("private"); goScreen("dashboard"); }} style={{ width:"100%", display:"flex", alignItems:"center", gap:11, padding:"9px 11px", background:"transparent", border:"none", borderRadius:10, cursor:"pointer", textAlign:"left" }}>
+        <button onClick={()=>goScreen("competitors_private")} style={{ width:"100%", display:"flex", alignItems:"center", gap:11, padding:"9px 11px", background:screen==="competitors_private"?"rgba(255,255,255,0.16)":"transparent", border:"none", borderRadius:10, cursor:"pointer", textAlign:"left" }}>
           <span style={{ fontSize:14, width:18, textAlign:"center" }}>🏠</span>
-          <span style={{ fontSize:12, fontWeight:500, color:"rgba(255,255,255,0.78)" }}>Concurrents Particuliers</span>
+          <span style={{ fontSize:12, fontWeight:screen==="competitors_private"?700:500, color:screen==="competitors_private"?C.white:"rgba(255,255,255,0.78)" }}>Concurrents Particuliers</span>
         </button>
       </div>
       <div style={{ marginTop:"auto", paddingTop:12 }}>
@@ -2857,7 +2857,7 @@ export default function App() {
             <div style={card({ background:dfPrivGap!=null&&dfPrivGap>15?"#FFF4E0":C.greenL, borderColor:dfPrivGap!=null&&dfPrivGap>15?"#F5D9A8":"#C9E8D2" })}>
               <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom:4 }}><span style={{ fontSize:15 }}>👁️</span><span style={{ fontSize:12, fontWeight:700, color:dfPrivGap!=null&&dfPrivGap>15?C.orange:C.green }}>Surveiller les particuliers</span></div>
               <p style={{ margin:"0 0 8px", fontSize:10, color:C.text, lineHeight:1.4 }}>{dfPrivGap!=null&&dfPrivGap>15?"Les particuliers exercent une pression prix. Réponse : offre directe ciblée.":"Les prix particuliers sont stables. Restez attentif à l'évolution."}</p>
-              <button onClick={()=>setScreen("track")} style={{ fontSize:10, fontWeight:700, color:C.white, background:dfPrivGap!=null&&dfPrivGap>15?C.orange:C.green, border:"none", borderRadius:8, padding:"6px 11px", cursor:"pointer" }}>Suivre le marché</button>
+              <button onClick={()=>setScreen("competitors_private")} style={{ fontSize:10, fontWeight:700, color:C.white, background:dfPrivGap!=null&&dfPrivGap>15?C.orange:C.green, border:"none", borderRadius:8, padding:"6px 11px", cursor:"pointer" }}>Suivre le marché</button>
             </div>
           </div>
         </div>
@@ -3066,115 +3066,22 @@ export default function App() {
         )}
 
         {/* ══ CONCURRENTS SUIVIS ════════════════════════════════ */}
-        <p style={sml}>🏢 Concurrents suivis</p>
-
-        {/* Résumé segments */}
-        <div style={{ ...responsiveGrid(2), marginBottom:8 }}>
-          <div style={{ ...cd(11,0), padding:"8px 11px", background:C.bluePale }}>
-            <p style={{ margin:0, fontSize:9, color:C.blueL, fontWeight:700 }}>🏢 Résidences / Pros</p>
-            <p style={{ margin:"1px 0 0", fontSize:13, fontWeight:700, color:C.blue }}>{prosList.length} concurrents · {proSourcesCount} sources</p>
+        {sectionTitle("Concurrents suivis","🏨")}
+        <div style={responsiveGrid(2)}>
+          <div style={card()}>
+            <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom:5 }}><span style={{ fontSize:15 }}>🏢</span><span style={{ fontSize:13, fontWeight:700, color:C.blue }}>Résidences / Pros</span></div>
+            <p style={{ margin:0, fontSize:20, fontWeight:700, color:C.text }}>{prosList.length}<span style={{ fontSize:10, color:C.gray, fontWeight:400 }}> concurrents</span></p>
+            <p style={{ margin:"1px 0 0", fontSize:10, color:C.gray }}>{proSourcesCount} sources actives</p>
+            <button onClick={()=>setScreen("competitors_residence")} style={{ ...btn(false,C.blue), marginTop:8, marginBottom:0 }}>Gérer les résidences</button>
           </div>
-          <div style={{ ...cd(11,0), padding:"8px 11px", background:"#FFE9EA" }}>
-            <p style={{ margin:0, fontSize:9, color:"#C2185B", fontWeight:700 }}>🏠 Particuliers</p>
-            <p style={{ margin:"1px 0 0", fontSize:13, fontWeight:700, color:"#FF5A5F" }}>{privList.length} concurrents · {privSourcesCount} sources</p>
+          <div style={card({ background:"#FFF7F7" })}>
+            <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom:5 }}><span style={{ fontSize:15 }}>🏠</span><span style={{ fontSize:13, fontWeight:700, color:"#FF5A5F" }}>Particuliers</span></div>
+            <p style={{ margin:0, fontSize:20, fontWeight:700, color:C.text }}>{privList.length}<span style={{ fontSize:10, color:C.gray, fontWeight:400 }}> concurrents</span></p>
+            <p style={{ margin:"1px 0 0", fontSize:10, color:C.gray }}>{privSourcesCount} sources actives{dfPrivGap!=null?` · pression ${dfPrivGap>30?"forte":dfPrivGap>=15?"moyenne":"faible"}`:""}</p>
+            <button onClick={()=>setScreen("competitors_private")} style={{ ...btn(false,"#FF5A5F"), marginTop:8, marginBottom:0 }}>Gérer les particuliers</button>
           </div>
         </div>
 
-        <div style={{ ...cd(11), padding:"9px 12px", background:C.goldL, marginBottom:8 }}>
-          <p style={{ margin:0, fontSize:9, color:C.orange, fontWeight:600, lineHeight:1.4 }}>Les prix Claude sont indicatifs. Les prix validés manuellement sont prioritaires.</p>
-        </div>
-
-        {/* Bloc A : Résidences / Pros */}
-        <p style={{ ...sml, marginTop:4 }}>🏢 Concurrents suivis — Résidences / Pros</p>
-        <div style={cd()}>
-          {prosList.length===0&&<div style={{ padding:"12px 13px" }}><p style={{ margin:0, fontSize:11, color:C.gray, fontStyle:"italic" }}>Aucune résidence / pro suivie.</p></div>}
-          {prosList.map((c,i)=>renderCompetitorRow(c,i,prosList))}
-        </div>
-        <button onClick={()=>openCatForm({ market_segment:"residence", is_private_rental:false, property_type:"résidence", search_location:"La Foux d'Allos" })} style={{ ...btn(false,C.blue), marginBottom:10 }}>+ Ajouter résidence / pro</button>
-
-        {/* Bloc B : Particuliers */}
-        <p style={sml}>🏠 Concurrents suivis — Particuliers</p>
-        <div style={cd()}>
-          {privList.length===0&&<div style={{ padding:"12px 13px" }}><p style={{ margin:0, fontSize:11, color:C.gray, fontStyle:"italic" }}>Aucun particulier suivi. Ajoutez les annonces Booking / Airbnb / Abritel concurrentes.</p></div>}
-          {privList.map((c,i)=>renderCompetitorRow(c,i,privList))}
-        </div>
-        <button onClick={()=>openCatForm({ market_segment:"private", is_private_rental:true, property_type:"particulier", search_location:"La Foux d'Allos" })} style={{ ...btn(false,"#FF5A5F"), marginBottom:4 }}>+ Ajouter particulier</button>
-
-        {/* Formulaire ajout/édition */}
-        {catForm ? (
-          <div style={{ ...cd(11), padding:"11px 13px" }}>
-            <p style={{ margin:"0 0 6px", fontSize:11, fontWeight:700, color:C.blue }}>{catForm.id?"Modifier le concurrent":"Ajouter un concurrent"}</p>
-            <p style={{ ...sml, margin:"0 0 4px" }}>Nom *</p>
-            <input style={{ ...inp(), marginBottom:6 }} placeholder="Résidence Les Chalets du Verdon" value={catForm.name||""} onChange={e=>setCatForm(f=>({ ...f, name:e.target.value }))}/>
-            <div style={{ marginBottom:6 }}>
-              <p style={{ ...sml, margin:"0 0 4px" }}>Type de concurrent</p>
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:5, marginBottom:6 }}>
-                {[["residence","🏢 Résidence / pro"],["private","🏠 Particulier"]].map(([seg,l])=>{
-                  const active = (catForm.market_segment||"residence")===seg;
-                  return <button key={seg} onClick={()=>setCatForm(f=>({ ...f, market_segment:seg, is_private_rental:seg==="private", property_type:seg==="private"?"particulier":(f.property_type==="particulier"?"résidence":f.property_type||"résidence") }))} style={{ padding:"7px 4px", fontSize:10, fontWeight:active?700:400, background:active?(seg==="private"?C.purple:C.blue):C.grayL, color:active?C.white:C.text, border:"none", borderRadius:8, cursor:"pointer" }}>{l}</button>;
-                })}
-              </div>
-              <p style={{ ...sml, margin:"0 0 4px" }}>Sous-type</p>
-              <select value={catForm.property_type||"résidence"} onChange={e=>setCatForm(f=>({ ...f, property_type:e.target.value }))} style={inp()}>{((catForm.market_segment||"residence")==="private"?["particulier","studio"]:["résidence","hôtel"]).map(t=><option key={t} value={t}>{t}</option>)}</select>
-            </div>
-            {(catForm.market_segment||"residence")==="private"&&(
-              <div style={{ ...formGrid, marginBottom:6 }}>
-                <div><p style={{ ...sml, margin:"0 0 4px" }}>Capacité détectée</p><input type="number" style={inp()} placeholder="6" value={catForm.detected_capacity||""} onChange={e=>setCatForm(f=>({ ...f, detected_capacity:e.target.value }))}/></div>
-                <div><p style={{ ...sml, margin:"0 0 4px" }}>Pièces / surface</p><input style={inp()} placeholder="3P / 45m²" value={catForm.detected_rooms||""} onChange={e=>setCatForm(f=>({ ...f, detected_rooms:e.target.value }))}/></div>
-              </div>
-            )}
-
-            {/* Sources du concurrent */}
-            <div style={{ ...cd(9), padding:"9px 11px", marginBottom:8, background:C.grayL }}>
-              <p style={{ margin:"0 0 5px", fontSize:11, fontWeight:700, color:C.blue }}>Sources du concurrent</p>
-              <div style={{ display:"flex", gap:4, flexWrap:"wrap", marginBottom:competitorFormSources.length?8:0 }}>
-                {((catForm.market_segment||"residence")==="private"
-                  ? [["bookingpart","+ Booking particulier"],["airbnb","+ Airbnb"],["abritel","+ Abritel"],["pap","+ PAP vacances"],["leboncoin","+ Leboncoin"],["other","+ Autre"]]
-                  : [["booking","+ Booking"],["direct","+ Site direct"],["maeva","+ Maeva"],["lafrance","+ La France du Nord au Sud"],["travelski","+ Travelski"],["locasun","+ Locasun"],["abritel","+ Abritel"],["airbnb","+ Airbnb"],["expedia","+ Expedia"],["other","+ Autre"]]
-                ).map(([k,l])=>(
-                  <button key={k} onClick={()=>addCompetitorFormSource(k)} style={{ fontSize:9, fontWeight:600, color:C.blue, background:C.bluePale, border:"none", borderRadius:6, padding:"5px 8px", cursor:"pointer" }}>{l}</button>
-                ))}
-              </div>
-              {competitorFormSources.map((s,idx)=>{
-                const m = sourceBadgeMeta(s.source_type);
-                return (
-                  <div key={idx} style={{ ...cd(8), padding:"7px 9px", marginTop:6, background:C.white }}>
-                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:6, marginBottom:4 }}>
-                      <div style={{ display:"flex", alignItems:"center", gap:5 }}>
-                        <Badge label={m.l} color={m.c} bg={m.bg} size={8}/>
-                        <span style={{ fontSize:10, fontWeight:600, color:C.text }}>{s.source_name||"Autre source"}</span>
-                      </div>
-                      <button onClick={()=>removeCompetitorFormSource(idx)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:12, color:C.gray }}>🗑</button>
-                    </div>
-                    {s.source_type==="other"&&(
-                      <input style={{ ...inp(), marginBottom:4 }} placeholder="Nom de la source (ex : Vente privée)" value={s.source_name} onChange={e=>updateCompetitorFormSource(idx,{ source_name:e.target.value })}/>
-                    )}
-                    <input style={{ ...inp(), marginBottom:4 }} placeholder="URL de la fiche" value={s.source_url} onChange={e=>updateCompetitorFormSource(idx,{ source_url:e.target.value })}/>
-                    <input style={inp()} placeholder="Notes (optionnel)" value={s.notes} onChange={e=>updateCompetitorFormSource(idx,{ notes:e.target.value })}/>
-                  </div>
-                );
-              })}
-              {competitorFormSources.length===0&&<p style={{ margin:"6px 0 0", fontSize:9, color:C.gray, fontStyle:"italic" }}>Cliquez sur un bouton pour ajouter une source (Booking, TO, marketplace…).</p>}
-            </div>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:6 }}>
-              <div>
-                <p style={{ ...sml, margin:"0 0 4px" }}>Score comparabilité</p>
-                <input type="number" style={inp()} placeholder="88" value={catForm.comparability_score??""} onChange={e=>setCatForm(f=>({ ...f, comparability_score:e.target.value }))}/>
-              </div>
-              <div>
-                <p style={{ ...sml, margin:"0 0 4px" }}>Localisation</p>
-                <input style={inp()} placeholder="La Foux d'Allos" value={catForm.search_location||""} onChange={e=>setCatForm(f=>({ ...f, search_location:e.target.value }))}/>
-              </div>
-            </div>
-            <p style={{ ...sml, margin:"0 0 4px" }}>Notes</p>
-            <input style={{ ...inp(), marginBottom:8 }} placeholder="Concurrent direct" value={catForm.notes||""} onChange={e=>setCatForm(f=>({ ...f, notes:e.target.value }))}/>
-            {catForm.error&&<div style={{ ...cd(8), padding:"7px 10px", background:C.redL, marginBottom:6 }}><p style={{ margin:0, fontSize:11, color:C.red }}>✗ {catForm.error}</p></div>}
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
-              <button onClick={()=>{ setCatForm(null); setCompetitorFormSources([]); }} style={{ ...btn(false,C.grayL,C.text), margin:0 }}>Annuler</button>
-              <button onClick={handleSaveCatalogItem} disabled={catSaving||!catForm.name?.trim()} style={{ ...btn(catSaving||!catForm.name?.trim(),C.blue), margin:0 }}>{catSaving?"…":"Enregistrer"}</button>
-            </div>
-          </div>
-        ) : null}
 
         {/* Import CSV concurrents suivis */}
         <div style={{ ...cd(11), padding:"11px 13px" }}>
@@ -3485,6 +3392,157 @@ export default function App() {
         </>)}
       </div><BNav/>
     </div>
+    );
+  };
+
+  // Page dédiée concurrents par segment (résidences/pros ou particuliers)
+  const CompetitorsSegmentScreen = ({ segment }) => {
+    const isPrivate = segment === "private";
+    const title = isPrivate ? "🏠 Concurrents suivis — Particuliers" : "🏢 Concurrents suivis — Résidences / Pros";
+    const description = isPrivate
+      ? "Les particuliers servent à mesurer la pression prix. Ils ne doivent pas piloter seuls la grille tarifaire."
+      : "Les résidences et professionnels servent de référence principale pour le benchmark.";
+    const list = (catalog||[]).filter(c => isPrivate ? isPrivateCompetitor(c) : !isPrivateCompetitor(c));
+    const srcCount = (sources||[]).filter(s=>{ const c=catalog.find(x=>x.id===s.competitor_id); return c && (isPrivate?isPrivateCompetitor(c):!isPrivateCompetitor(c)) && s.is_active!==false; }).length;
+    const accent = isPrivate ? "#FF5A5F" : C.blue;
+    const emptyMsg = isPrivate
+      ? "Aucun particulier suivi pour l'instant. Ajoutez les annonces trouvées sur Booking, Airbnb ou Abritel pour mesurer la pression prix."
+      : "Aucune résidence suivie pour l'instant. Ajoutez les résidences concurrentes, TO ou sites directs à surveiller.";
+    const addPreset = isPrivate
+      ? { market_segment:"private", is_private_rental:true, property_type:"particulier", search_location:"La Foux d'Allos" }
+      : { market_segment:"residence", is_private_rental:false, property_type:"résidence", search_location:"La Foux d'Allos" };
+    const quickAdds = isPrivate
+      ? [["bookingpart","marketplace","Booking particulier","+ Booking part."],["airbnb","marketplace","Airbnb","+ Airbnb"],["abritel","marketplace","Abritel","+ Abritel"],["pap","marketplace","PAP vacances","+ PAP"],["other","other","","+ Autre"]]
+      : [["booking","booking","Booking.com","+ Booking"],["direct","direct","Site direct","+ Direct"],["tour_operator","tour_operator",TOUR_OPERATORS[0],"+ TO"],["marketplace","marketplace",MARKETPLACES[0],"+ OTA"],["other","other","","+ Autre"]];
+
+    return (
+      <div><SBar title={isPrivate?"Concurrents Particuliers":"Concurrents Résidences"}/>
+        <div style={cnt}>
+          <div style={{ ...cd(11), padding:"11px 13px", background:isPrivate?"#FFE9EA":C.bluePale, marginTop:8, borderLeft:`3px solid ${accent}` }}>
+            <p style={{ margin:0, fontSize:13, fontWeight:700, color:accent }}>{title}</p>
+            <p style={{ margin:"3px 0 0", fontSize:10, color:isPrivate?"#C2185B":C.blueL, lineHeight:1.4 }}>{description}</p>
+            <div style={{ display:"flex", gap:14, marginTop:6, flexWrap:"wrap" }}>
+              <span style={{ fontSize:11, fontWeight:700, color:accent }}>{list.length} concurrents</span>
+              <span style={{ fontSize:11, fontWeight:700, color:accent }}>{srcCount} sources actives</span>
+            </div>
+          </div>
+
+          <div style={cd()}>
+            {list.length===0&&<div style={{ padding:"14px 13px" }}><p style={{ margin:0, fontSize:11, color:C.gray, fontStyle:"italic", lineHeight:1.5 }}>{emptyMsg}</p></div>}
+            {list.map((c,i)=>{
+              const compSources = sourcesForCompetitor(c);
+              const open = sourcesOpenFor===c.id;
+              return (
+                <div key={c.id} style={{ borderBottom:i===list.length-1?"none":`0.5px solid ${C.grayL}` }}>
+                  <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"11px 13px", gap:8 }}>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:5, flexWrap:"wrap" }}>
+                        <span style={{ fontSize:12, fontWeight:600, color:C.text }}>{c.name}</span>
+                        <Badge label={isPrivate?"Particulier":c.property_type==="hôtel"?"Hôtel":"Pro"} color={isPrivate?"#FF5A5F":c.property_type==="hôtel"?C.purple:C.blue} bg={isPrivate?"#FFE9EA":c.property_type==="hôtel"?C.purpleL:C.bluePale} size={8}/>
+                        {isPrivate&&c.detected_capacity&&<span style={{ fontSize:8, color:C.gray }}>{c.detected_capacity}P{c.detected_rooms?` · ${c.detected_rooms}`:""}</span>}
+                      </div>
+                      <div style={{ display:"flex", gap:4, marginTop:2, alignItems:"center", flexWrap:"wrap" }}>
+                        <span style={{ fontSize:9, color:C.gray }}>score {c.comparability_score||"?"}/100</span>
+                        {compSources.length===0
+                          ? <span style={{ fontSize:8, color:C.gray, fontStyle:"italic" }}>Aucune source suivie</span>
+                          : compSources.map(s=>(()=>{ const m=sourceBadgeMeta(s.source_type); return <Badge key={s.id} label={s.source_name} color={m.c} bg={m.bg} size={8}/>; })())}
+                      </div>
+                      {c.notes&&<p style={{ margin:"2px 0 0", fontSize:9, color:C.gray, fontStyle:"italic" }}>{c.notes}</p>}
+                    </div>
+                    <div style={{ display:"flex", gap:6, alignItems:"center", flexShrink:0 }}>
+                      <button onClick={()=>setSourcesOpenFor(open?null:c.id)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:10, color:C.blue, padding:2 }}>{open?"▲ Sources":"▼ Sources"}</button>
+                      <button onClick={()=>openCatForm(c)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:13, color:C.blue, padding:2 }}>✎</button>
+                      <button onClick={()=>handleDeleteCatalogItem(c.id)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:14, color:C.gray, padding:2 }}>🗑</button>
+                    </div>
+                  </div>
+                  {open&&(
+                    <div style={{ padding:"0 13px 10px", background:C.grayL }}>
+                      <p style={{ ...sml, margin:"6px 0 4px" }}>Sources suivies</p>
+                      {(sources||[]).filter(s=>s.competitor_id===c.id).length===0&&<p style={{ margin:"0 0 6px", fontSize:9, color:C.gray, fontStyle:"italic" }}>Aucune source dédiée.</p>}
+                      {(sources||[]).filter(s=>s.competitor_id===c.id).map(s=>(
+                        <div key={s.id} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:6, padding:"4px 0" }}>
+                          <div style={{ minWidth:0, flex:1 }}>
+                            <span style={{ fontSize:10, fontWeight:600, color:C.text }}>{s.source_name}</span>
+                            <p style={{ margin:0, fontSize:8, color:C.gray, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{s.source_url}</p>
+                          </div>
+                          <button onClick={()=>handleDeleteSource(s.id)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:12, color:C.gray, flexShrink:0 }}>🗑</button>
+                        </div>
+                      ))}
+                      {sourceForm&&sourceForm.competitor_id===c.id ? (
+                        <div style={{ ...cd(9), padding:"8px 10px", marginTop:6 }}>
+                          <p style={{ ...sml, margin:"0 0 3px" }}>Famille de source</p>
+                          <select value={sourceForm.family} onChange={e=>{ const fam=e.target.value; setSourceForm(f=>{ let st=fam, sn=f.source_name; if(fam==="booking"){st="booking";sn="Booking.com";} else if(fam==="direct"){st="direct";sn="Site direct";} else if(fam==="tour_operator"){st="tour_operator";sn=TOUR_OPERATORS[0];} else if(fam==="marketplace"){st="marketplace";sn=MARKETPLACES[0];} else {st="other";sn="";} return { ...f, family:fam, source_type:st, source_name:sn }; }); }} style={{ ...inp(), marginBottom:5 }}>
+                            {SOURCE_FAMILIES.map(t=><option key={t.type} value={t.type}>{t.name}</option>)}
+                          </select>
+                          {sourceForm.family==="tour_operator"&&(<>
+                            <p style={{ ...sml, margin:"0 0 3px" }}>Tour opérateur</p>
+                            <select value={TOUR_OPERATORS.includes(sourceForm.source_name)?sourceForm.source_name:"Autre tour opérateur"} onChange={e=>setSourceForm(f=>({ ...f, source_name:e.target.value==="Autre tour opérateur"?"":e.target.value, _toOther:e.target.value==="Autre tour opérateur" }))} style={{ ...inp(), marginBottom:5 }}>
+                              {TOUR_OPERATORS.map(o=><option key={o} value={o}>{o}</option>)}
+                            </select>
+                            {(sourceForm._toOther||!TOUR_OPERATORS.includes(sourceForm.source_name))&&<input style={{ ...inp(), marginBottom:5 }} placeholder="Nom du tour opérateur" value={sourceForm.source_name||""} onChange={e=>setSourceForm(f=>({ ...f, source_name:e.target.value }))}/>}
+                          </>)}
+                          {sourceForm.family==="marketplace"&&(<>
+                            <p style={{ ...sml, margin:"0 0 3px" }}>Marketplace / OTA</p>
+                            <select value={MARKETPLACES.includes(sourceForm.source_name)?sourceForm.source_name:MARKETPLACES[0]} onChange={e=>setSourceForm(f=>({ ...f, source_name:e.target.value }))} style={{ ...inp(), marginBottom:5 }}>
+                              {MARKETPLACES.map(o=><option key={o} value={o}>{o}</option>)}
+                            </select>
+                          </>)}
+                          {sourceForm.family==="other"&&(
+                            <input style={{ ...inp(), marginBottom:5 }} placeholder="Nom de la source" value={sourceForm.source_name||""} onChange={e=>setSourceForm(f=>({ ...f, source_name:e.target.value }))}/>
+                          )}
+                          <input style={{ ...inp(), marginBottom:5 }} placeholder="URL de la fiche" value={sourceForm.source_url} onChange={e=>setSourceForm(f=>({ ...f, source_url:e.target.value }))}/>
+                          <input style={{ ...inp(), marginBottom:5 }} placeholder="Notes (optionnel)" value={sourceForm.notes||""} onChange={e=>setSourceForm(f=>({ ...f, notes:e.target.value }))}/>
+                          {sourceForm.error&&<p style={{ margin:"0 0 5px", fontSize:9, color:C.red }}>✗ {sourceForm.error}</p>}
+                          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:5 }}>
+                            <button onClick={()=>setSourceForm(null)} style={{ ...btn(false,C.grayL,C.text), margin:0 }}>Annuler</button>
+                            <button onClick={handleSaveSource} style={{ ...btn(false,C.blue), margin:0 }}>Enregistrer source</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{ display:"flex", gap:4, flexWrap:"wrap", marginTop:4 }}>
+                          {quickAdds.map(([fam,st,sn,lbl],bi)=>(
+                            <button key={bi} onClick={()=>setSourceForm({ competitor_id:c.id, family:fam, source_type:st, source_name:sn, source_url:"", notes:"" })} style={{ fontSize:9, fontWeight:600, color:C.blue, background:C.bluePale, border:"none", borderRadius:6, padding:"5px 8px", cursor:"pointer" }}>{lbl}</button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <button onClick={()=>openCatForm(addPreset)} style={{ ...btn(false,accent), marginBottom:8 }}>{isPrivate?"+ Ajouter particulier":"+ Ajouter résidence / pro"}</button>
+
+          {/* Formulaire ajout/édition (partagé) */}
+          {catForm&&(catForm.market_segment===segment || (segment==="residence"&&catForm.market_segment!=="private"))&&(
+            <div style={{ ...cd(11), padding:"11px 13px" }}>
+              <p style={{ margin:"0 0 6px", fontSize:11, fontWeight:700, color:C.blue }}>{catForm.id?"Modifier le concurrent":isPrivate?"Ajouter un particulier":"Ajouter une résidence / pro"}</p>
+              <p style={{ ...sml, margin:"0 0 4px" }}>Nom *</p>
+              <input style={{ ...inp(), marginBottom:6 }} placeholder={isPrivate?"Appartement Central Park 6P":"Résidence Les Chalets du Verdon"} value={catForm.name||""} onChange={e=>setCatForm(f=>({ ...f, name:e.target.value }))}/>
+              <p style={{ ...sml, margin:"0 0 4px" }}>Sous-type</p>
+              <select value={catForm.property_type||(isPrivate?"particulier":"résidence")} onChange={e=>setCatForm(f=>({ ...f, property_type:e.target.value }))} style={{ ...inp(), marginBottom:6 }}>{(isPrivate?["particulier","studio"]:["résidence","hôtel"]).map(t=><option key={t} value={t}>{t}</option>)}</select>
+              {isPrivate&&(
+                <div style={{ ...formGrid, marginBottom:6 }}>
+                  <div><p style={{ ...sml, margin:"0 0 4px" }}>Capacité détectée</p><input type="number" style={inp()} placeholder="6" value={catForm.detected_capacity||""} onChange={e=>setCatForm(f=>({ ...f, detected_capacity:e.target.value }))}/></div>
+                  <div><p style={{ ...sml, margin:"0 0 4px" }}>Pièces / surface</p><input style={inp()} placeholder="3P / 45m²" value={catForm.detected_rooms||""} onChange={e=>setCatForm(f=>({ ...f, detected_rooms:e.target.value }))}/></div>
+                </div>
+              )}
+              <div style={{ ...formGrid, marginBottom:6 }}>
+                <div><p style={{ ...sml, margin:"0 0 4px" }}>Localisation</p><input style={inp()} value={catForm.search_location||""} onChange={e=>setCatForm(f=>({ ...f, search_location:e.target.value }))}/></div>
+                <div><p style={{ ...sml, margin:"0 0 4px" }}>Score comparabilité</p><input type="number" style={inp()} value={catForm.comparability_score||""} onChange={e=>setCatForm(f=>({ ...f, comparability_score:e.target.value }))}/></div>
+              </div>
+              <p style={{ ...sml, margin:"0 0 4px" }}>Notes</p>
+              <input style={{ ...inp(), marginBottom:8 }} value={catForm.notes||""} onChange={e=>setCatForm(f=>({ ...f, notes:e.target.value }))}/>
+              {catForm.error&&<p style={{ margin:"0 0 6px", fontSize:10, color:C.red }}>✗ {catForm.error}</p>}
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
+                <button onClick={()=>{ setCatForm(null); setCompetitorFormSources([]); }} style={{ ...btn(false,C.grayL,C.text), margin:0 }}>Annuler</button>
+                <button onClick={handleSaveCatalogItem} disabled={catSaving||!catForm.name?.trim()} style={{ ...btn(catSaving||!catForm.name?.trim(),C.blue), margin:0 }}>{catSaving?"…":"Enregistrer"}</button>
+              </div>
+              <p style={{ margin:"6px 0 0", fontSize:8, color:C.gray, fontStyle:"italic" }}>Ajoutez les sources (Booking, TO, OTA…) après l'enregistrement via le bouton « ▼ Sources » du concurrent.</p>
+            </div>
+          )}
+        </div><BNav/>
+      </div>
     );
   };
 
@@ -4948,6 +5006,8 @@ export default function App() {
             {screen === "collect" && Collect()}
             {screen === "benchmark" && BenchmarkDecision()}
             {screen === "promotions" && Promotions()}
+            {screen === "competitors_residence" && CompetitorsSegmentScreen({ segment: "residence" })}
+            {screen === "competitors_private" && CompetitorsSegmentScreen({ segment: "private" })}
             {screen === "track" && TrackPrices()}
             {screen === "import" && ImportScreen()}
             {screen === "diag" && Diagnostic()}
@@ -4963,6 +5023,8 @@ export default function App() {
           {screen === "collect" && Collect()}
             {screen === "benchmark" && BenchmarkDecision()}
             {screen === "promotions" && Promotions()}
+            {screen === "competitors_residence" && CompetitorsSegmentScreen({ segment: "residence" })}
+            {screen === "competitors_private" && CompetitorsSegmentScreen({ segment: "private" })}
             {screen === "track" && TrackPrices()}
           {screen === "import" && ImportScreen()}
           {screen === "diag" && Diagnostic()}
