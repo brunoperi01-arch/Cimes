@@ -1607,8 +1607,8 @@ const CAT_C={ haute:"#D45400", moyenne:C.blueL, basse:C.green };
 const CAT_L={ haute:"Haute saison", moyenne:"Moy. saison", basse:"Basse saison" };
 
 function Badge({ label, color, bg, size=10 }) { return <span style={{ fontSize:size, fontWeight:700, background:bg, color, padding:"2px 6px", borderRadius:4, whiteSpace:"nowrap" }}>{label}</span>; }
-function ReliaBadge({ status }) { const m={ réel:{bg:C.greenL,c:C.green}, "validé":{bg:C.greenL,c:C.green}, "saisi manuellement":{bg:C.bluePale,c:C.blue}, "importé CSV":{bg:C.purpleL,c:C.purple}, "copier-coller":{bg:"#F3E8FF",c:C.purple}, "à vérifier":{bg:C.goldL,c:C.orange}, "rejeté":{bg:C.redL,c:C.red}, estimé:{bg:C.goldL,c:C.gold}, "scraping-auto":{bg:"#F0FDF4",c:"#166534"}, "scraping-batch":{bg:"#F0FDF4",c:"#166534"} }[status]||{bg:C.grayL,c:C.gray}; return <span style={{ fontSize:9, fontWeight:600, background:m.bg, color:m.c, padding:"1px 5px", borderRadius:4 }}>{status}</span>; }
-function PromoBadge({ label }) { if(!label) return null; const m={ "Genius -10%":{bg:"#DBEAFE",c:"#1D40AE"}, "Last minute":{bg:C.redL,c:C.red}, "Early booking":{bg:C.greenL,c:C.green}, "PDJ inclus":{bg:C.purpleL,c:C.purple}, "Annulation gratuite":{bg:C.greenL,c:C.green} }[label]||{bg:C.orangeL,c:C.orange}; const short=label.replace("Genius -10%","GENIUS").replace("Last minute","LAST MIN").replace("Early booking","EARLY").replace("PDJ inclus","PDJ").replace("Annulation gratuite","ANNUL.").slice(0,12); return <span style={{ fontSize:9, fontWeight:700, background:m.bg, color:m.c, padding:"2px 5px", borderRadius:4 }}>{short}</span>; }
+function ReliaBadge({ status }) { const m={ réel:{bg:C.greenL,c:C.green}, "validé":{bg:C.greenL,c:C.green}, "saisi manuellement":{bg:C.bluePale,c:C.blue}, "importé CSV":{bg:C.purpleL,c:C.purple}, "copier-coller":{bg:"#F3E8FF",c:C.purple}, "à vérifier":{bg:C.goldL,c:C.orange}, "rejeté":{bg:C.redL,c:C.red}, estimé:{bg:C.goldL,c:C.gold}, "scraping-auto":{bg:"#F0FDF4",c:"#166534"}, "scraping-batch":{bg:"#F0FDF4",c:"#166534"} }[status]||{bg:C.grayL,c:C.gray}; return <span style={{ fontSize:12, fontWeight:600, background:m.bg, color:m.c, padding:"1px 5px", borderRadius:4 }}>{status}</span>; }
+function PromoBadge({ label }) { if(!label) return null; const m={ "Genius -10%":{bg:"#DBEAFE",c:"#1D40AE"}, "Last minute":{bg:C.redL,c:C.red}, "Early booking":{bg:C.greenL,c:C.green}, "PDJ inclus":{bg:C.purpleL,c:C.purple}, "Annulation gratuite":{bg:C.greenL,c:C.green} }[label]||{bg:C.orangeL,c:C.orange}; const short=label.replace("Genius -10%","GENIUS").replace("Last minute","LAST MIN").replace("Early booking","EARLY").replace("PDJ inclus","PDJ").replace("Annulation gratuite","ANNUL.").slice(0,12); return <span style={{ fontSize:12, fontWeight:700, background:m.bg, color:m.c, padding:"2px 5px", borderRadius:4 }}>{short}</span>; }
 
 // ══ LOGIN SCREEN (hors App pour éviter re-mount) ═════════════════
 function LoginScreen({ loginErr, SB_READY, loginEmail, setLE, loginPwd, setLP, loginLoading, handleLogin }) {
@@ -1627,7 +1627,7 @@ function LoginScreen({ loginErr, SB_READY, loginEmail, setLE, loginPwd, setLP, l
       <p style={sml}>Mot de passe</p>
       <input type="password" style={{ ...inp(), marginBottom:16 }} value={loginPwd} onChange={e=>setLP(e.target.value)} placeholder="••••••••" autoComplete="current-password" onKeyDown={e=>e.key==="Enter"&&handleLogin()}/>
       <button style={btn(loginLoading)} onClick={handleLogin} disabled={loginLoading}>{loginLoading?"Connexion…":"Se connecter →"}</button>
-      <p style={{ fontSize:9, color:C.gray, textAlign:"center", marginTop:12, lineHeight:1.5 }}>Application privée · Données confidentielles<br/>Config : VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY</p>
+      <p style={{ fontSize:12, color:C.gray, textAlign:"center", marginTop:12, lineHeight:1.5 }}>Application privée · Données confidentielles<br/>Config : VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY</p>
     </div>
   );
 }
@@ -2724,22 +2724,22 @@ export default function App() {
   const card = (extra={}) => ({ background:C.white, borderRadius:14, border:`0.5px solid ${C.grayM}`, padding:isMobile?"12px":"14px 16px", boxShadow:"0 1px 3px rgba(16,24,40,0.04)", boxSizing:"border-box", ...extra });
   const sectionTitle = (txt, icon) => (
     <div style={{ display:"flex", alignItems:"center", gap:7, margin:"4px 2px 8px" }}>
-      {icon&&<span style={{ fontSize:15 }}>{icon}</span>}
-      <span style={{ fontSize:14, fontWeight:700, color:C.text }}>{txt}</span>
+      {icon&&<span style={{ fontSize:17 }}>{icon}</span>}
+      <span style={{ fontSize:16, fontWeight:700, color:C.text }}>{txt}</span>
     </div>
   );
   const cd  =(r=14,mb=8)=>({ background:C.white, borderRadius:r, overflow:"hidden", marginBottom:mb });
   const rw  =last=>({ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 13px", borderBottom:last?"none":`0.5px solid ${C.grayL}` });
   const btn =(dis,bg=C.blue,fg=C.white)=>({ width:"100%", padding:"12px", fontSize:14, fontWeight:600, background:dis?"#C7C7CC":bg, color:fg, border:"none", borderRadius:11, cursor:dis?"not-allowed":"pointer", marginBottom:6 });
-  const sml ={ fontSize:10, fontWeight:700, color:C.gray, margin:"12px 2px 5px", letterSpacing:"0.06em", textTransform:"uppercase" };
-  const inp =(extra={})=>({ width:"100%", padding:"8px 10px", fontSize:13, border:`1px solid ${C.grayM}`, borderRadius:9, background:C.white, color:C.text, boxSizing:"border-box", ...extra });
-  const tabB=a=>({ flex:1, padding:"8px 2px", fontSize:11, fontWeight:a?700:400, background:a?C.white:"transparent", color:a?C.blue:C.gray, border:"none", borderRadius:8, cursor:"pointer" });
+  const sml ={ fontSize:12, fontWeight:700, color:C.gray, margin:"12px 2px 5px", letterSpacing:"0.06em", textTransform:"uppercase" };
+  const inp =(extra={})=>({ width:"100%", padding:"9px 11px", fontSize:14, border:`1px solid ${C.grayM}`, borderRadius:9, background:C.white, color:C.text, boxSizing:"border-box", ...extra });
+  const tabB=a=>({ flex:1, padding:"9px 2px", fontSize:13, fontWeight:a?700:400, background:a?C.white:"transparent", color:a?C.blue:C.gray, border:"none", borderRadius:8, cursor:"pointer" });
 
   const SBar=({ title })=>(
     <div style={sbar}>
-      <span style={{ fontSize:13, fontWeight:600, color:C.text }}>{title||"Benchmark"}</span>
+      <span style={{ fontSize:15, fontWeight:700, color:C.text }}>{title||"Benchmark"}</span>
       <div style={{ display:"flex", gap:6, alignItems:"center" }}>
-        {user&&<button onClick={handleLogout} style={{ fontSize:10, color:C.gray, background:"none", border:"none", cursor:"pointer" }}>Déco.</button>}
+        {user&&<button onClick={handleLogout} style={{ fontSize:12, color:C.gray, background:"none", border:"none", cursor:"pointer" }}>Déco.</button>}
         <Badge label={SB_READY?"SUPABASE":"LOCAL"} color={SB_READY?C.green:C.gold} bg={SB_READY?C.greenL:C.goldL} size={9}/>
       </div>
     </div>
@@ -2764,7 +2764,7 @@ export default function App() {
       {NAV.map(n=>(
         <button key={n.id} onClick={()=>goScreen(n.id)} style={{ flex:1, background:"none", border:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:1 }}>
           <span style={{ fontSize:16 }}>{n.icon}</span>
-          <span style={{ fontSize:9, fontWeight:screen===n.id?700:400, color:screen===n.id?C.blue:C.gray }}>{n.l}</span>
+          <span style={{ fontSize:12, fontWeight:screen===n.id?700:400, color:screen===n.id?C.blue:C.gray }}>{n.l}</span>
         </button>
       ))}
     </div>
@@ -2774,19 +2774,19 @@ export default function App() {
       <div style={{ display:"flex", alignItems:"center", gap:9, padding:"0 6px 16px" }}>
         <div style={{ width:34, height:34, background:"rgba(255,255,255,0.14)", borderRadius:10, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}><span style={{ fontSize:18 }}>⛰</span></div>
         <div style={{ minWidth:0 }}>
-          <p style={{ margin:0, fontSize:15, fontWeight:700, color:C.white, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>Les Cimes</p>
-          <p style={{ margin:0, fontSize:9, color:"rgba(255,255,255,0.55)" }}>Benchmark</p>
+          <p style={{ margin:0, fontSize:16, fontWeight:700, color:C.white, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>Les Cimes</p>
+          <p style={{ margin:0, fontSize:10, color:"rgba(255,255,255,0.55)" }}>Benchmark</p>
         </div>
       </div>
       {NAV_GROUPS.map((grp,gi)=>(
         <div key={grp.label} style={{ marginBottom:gi<NAV_GROUPS.length-1?6:0 }}>
-          <p style={{ margin:"6px 8px 4px", fontSize:8, fontWeight:700, color:"rgba(255,255,255,0.4)", letterSpacing:"0.08em", textTransform:"uppercase" }}>{grp.label}</p>
+          <p style={{ margin:"8px 8px 5px", fontSize:11, fontWeight:700, color:"rgba(255,255,255,0.45)", letterSpacing:"0.12em", textTransform:"uppercase" }}>{grp.label}</p>
           {grp.items.map(n=>{
             const active = screen===n.id;
             return (
               <button key={n.id} onClick={()=>goScreen(n.id)} style={{ width:"100%", display:"flex", alignItems:"center", gap:11, padding:"9px 11px", marginBottom:2, background:active?"rgba(255,255,255,0.16)":"transparent", border:"none", borderRadius:10, cursor:"pointer", textAlign:"left" }}>
-                <span style={{ fontSize:14, width:18, textAlign:"center" }}>{n.icon}</span>
-                <span style={{ fontSize:12, fontWeight:active?700:500, color:active?C.white:"rgba(255,255,255,0.78)" }}>{n.l}</span>
+                <span style={{ fontSize:15, width:18, textAlign:"center" }}>{n.icon}</span>
+                <span style={{ fontSize:14, fontWeight:active?700:500, color:active?C.white:"rgba(255,255,255,0.8)" }}>{n.l}</span>
               </button>
             );
           })}
@@ -2797,10 +2797,10 @@ export default function App() {
           <Badge label={SB_READY?"SUPABASE":"LOCAL"} color={SB_READY?C.green:C.gold} bg={SB_READY?C.greenL:C.goldL} size={9}/>
           {user&&<button onClick={handleLogout} style={{ fontSize:10, color:"rgba(255,255,255,0.6)", background:"none", border:"none", cursor:"pointer" }}>Déco.</button>}
         </div>
-        {user&&<p style={{ margin:"6px 6px 0", fontSize:9, color:"rgba(255,255,255,0.5)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{user.email}</p>}
+        {user&&<p style={{ margin:"6px 6px 0", fontSize:12, color:"rgba(255,255,255,0.5)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{user.email}</p>}
         <div style={{ display:"flex", alignItems:"center", gap:7, margin:"10px 6px 0", padding:"7px 9px", background:"rgba(255,255,255,0.08)", borderRadius:9 }}>
           <span style={{ fontSize:14 }}>🖥️</span>
-          <div><p style={{ margin:0, fontSize:10, fontWeight:700, color:C.white }}>Optimisé desktop</p><p style={{ margin:0, fontSize:8, color:"rgba(255,255,255,0.5)" }}>Interface responsive</p></div>
+          <div><p style={{ margin:0, fontSize:10, fontWeight:700, color:C.white }}>Optimisé desktop</p><p style={{ margin:0, fontSize:11, color:"rgba(255,255,255,0.5)" }}>Interface responsive</p></div>
         </div>
       </div>
     </div>
@@ -2820,15 +2820,15 @@ export default function App() {
                 <div style={{ display:"flex", alignItems:"center", gap:5, flexWrap:"wrap" }}>
                   <span style={{ fontSize:12, fontWeight:500, color:C.text }}>{c.name}</span>
                   <Badge label={priv?"Particulier":c.property_type==="hôtel"?"Hôtel":"Pro"} color={priv?"#FF5A5F":c.property_type==="hôtel"?C.purple:C.blue} bg={priv?"#FFE9EA":c.property_type==="hôtel"?C.purpleL:C.bluePale} size={8}/>
-                  {priv&&c.detected_capacity&&<span style={{ fontSize:8, color:C.gray }}>{c.detected_capacity}P{c.detected_rooms?` · ${c.detected_rooms}`:""}</span>}
+                  {priv&&c.detected_capacity&&<span style={{ fontSize:11, color:C.gray }}>{c.detected_capacity}P{c.detected_rooms?` · ${c.detected_rooms}`:""}</span>}
                 </div>
                 <div style={{ display:"flex", gap:5, marginTop:1, alignItems:"center", flexWrap:"wrap" }}>
-                  <span style={{ fontSize:9, color:C.gray }}>score {c.comparability_score||"?"}/100</span>
+                  <span style={{ fontSize:12, color:C.gray }}>score {c.comparability_score||"?"}/100</span>
                   {sourcesForCompetitor(c).length===0
-                    ? <span style={{ fontSize:8, color:C.gray, fontStyle:"italic" }}>Aucune source suivie</span>
+                    ? <span style={{ fontSize:11, color:C.gray, fontStyle:"italic" }}>Aucune source suivie</span>
                     : sourcesForCompetitor(c).map(s=>(()=>{ const m=sourceBadgeMeta(s.source_type); return <Badge key={s.id} label={s.source_name} color={m.c} bg={m.bg} size={8}/>; })())}
                 </div>
-                {c.notes&&<p style={{ margin:"1px 0 0", fontSize:9, color:C.gray, fontStyle:"italic" }}>{c.notes}</p>}
+                {c.notes&&<p style={{ margin:"1px 0 0", fontSize:12, color:C.gray, fontStyle:"italic" }}>{c.notes}</p>}
               </div>
               <div style={{ display:"flex", gap:6, alignItems:"center", flexShrink:0 }}>
                 <button onClick={()=>setSourcesOpenFor(open?null:c.id)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:10, color:C.blue, padding:2 }}>{open?"▲ Sources":"▼ Sources"}</button>
@@ -2839,12 +2839,12 @@ export default function App() {
               {open&&(
                 <div style={{ padding:"0 13px 10px", background:C.grayL }}>
                   <p style={{ ...sml, margin:"6px 0 4px" }}>Sources suivies</p>
-                  {compSources.length===0&&<p style={{ margin:"0 0 6px", fontSize:9, color:C.gray, fontStyle:"italic" }}>Aucune source dédiée. Les URLs Booking/Direct du concurrent sont utilisées par défaut.</p>}
+                  {compSources.length===0&&<p style={{ margin:"0 0 6px", fontSize:12, color:C.gray, fontStyle:"italic" }}>Aucune source dédiée. Les URLs Booking/Direct du concurrent sont utilisées par défaut.</p>}
                   {compSources.map(s=>(
                     <div key={s.id} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:6, padding:"4px 0" }}>
                       <div style={{ minWidth:0, flex:1 }}>
                         <span style={{ fontSize:10, fontWeight:600, color:C.text }}>{s.source_name}</span>
-                        <p style={{ margin:0, fontSize:8, color:C.gray, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{s.source_url}</p>
+                        <p style={{ margin:0, fontSize:11, color:C.gray, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{s.source_url}</p>
                       </div>
                       <button onClick={()=>handleDeleteSource(s.id)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:12, color:C.gray, flexShrink:0 }}>🗑</button>
                     </div>
@@ -2873,7 +2873,7 @@ export default function App() {
                       )}
                       <input style={{ ...inp(), marginBottom:5 }} placeholder="URL de la fiche" value={sourceForm.source_url} onChange={e=>setSourceForm(f=>({ ...f, source_url:e.target.value }))}/>
                       <input style={{ ...inp(), marginBottom:5 }} placeholder="Notes (optionnel)" value={sourceForm.notes||""} onChange={e=>setSourceForm(f=>({ ...f, notes:e.target.value }))}/>
-                      {sourceForm.error&&<p style={{ margin:"0 0 5px", fontSize:9, color:C.red }}>✗ {sourceForm.error}</p>}
+                      {sourceForm.error&&<p style={{ margin:"0 0 5px", fontSize:12, color:C.red }}>✗ {sourceForm.error}</p>}
                       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:5 }}>
                         <button onClick={()=>setSourceForm(null)} style={{ ...btn(false,C.grayL,C.text), margin:0 }}>Annuler</button>
                         <button onClick={handleSaveSource} style={{ ...btn(false,C.blue), margin:0 }}>Enregistrer source</button>
@@ -2885,7 +2885,7 @@ export default function App() {
                         ? [["marketplace","marketplace","Booking particulier","+ Booking part."],["marketplace","marketplace","Airbnb","+ Airbnb"],["marketplace","marketplace","Abritel","+ Abritel"],["marketplace","marketplace","PAP vacances","+ PAP"],["other","other","","+ Autre"]]
                         : [["booking","booking","Booking.com","+ Booking"],["direct","direct","Site direct","+ Direct"],["tour_operator","tour_operator",TOUR_OPERATORS[0],"+ TO"],["marketplace","marketplace",MARKETPLACES[0],"+ OTA"],["other","other","","+ Autre"]]
                       ).map(([fam,st,sn,lbl],bi)=>(
-                        <button key={bi} onClick={()=>setSourceForm({ competitor_id:c.id, family:fam, source_type:st, source_name:sn, source_url:"", notes:"" })} style={{ fontSize:9, fontWeight:600, color:C.blue, background:C.bluePale, border:"none", borderRadius:6, padding:"5px 8px", cursor:"pointer" }}>{lbl}</button>
+                        <button key={bi} onClick={()=>setSourceForm({ competitor_id:c.id, family:fam, source_type:st, source_name:sn, source_url:"", notes:"" })} style={{ fontSize:12, fontWeight:600, color:C.blue, background:C.bluePale, border:"none", borderRadius:6, padding:"5px 8px", cursor:"pointer" }}>{lbl}</button>
                       ))}
                     </div>
                   )}
@@ -2954,26 +2954,26 @@ export default function App() {
             ["Durée","nights",[[2,"2 nuits"],[3,"3 nuits"],[4,"4 nuits"],[7,"7 nuits"]]],
           ].map(([lbl,key,opts])=>(
             <div key={key} style={{ flex:"1 1 150px" }}>
-              <p style={{ margin:"0 0 3px 2px", fontSize:9, fontWeight:600, color:C.gray }}>{lbl}</p>
+              <p style={{ margin:"0 0 3px 2px", fontSize:12, fontWeight:600, color:C.gray }}>{lbl}</p>
               <select value={dashFilters[key]} onChange={e=>setDashFilters(f=>({ ...f, [key]:key==="nights"?Number(e.target.value):e.target.value }))} style={{ ...inp(), fontSize:12, padding:"8px 9px" }}>
                 {opts.map(([v,l])=><option key={v} value={v}>{l}</option>)}
               </select>
             </div>
           ))}
           <div style={{ flex:"1 1 200px" }}>
-            <p style={{ margin:"0 0 3px 2px", fontSize:9, fontWeight:600, color:C.gray }}>Période</p>
+            <p style={{ margin:"0 0 3px 2px", fontSize:12, fontWeight:600, color:C.gray }}>Période</p>
             <select value={dashFilters.periodId} onChange={e=>setDashFilters(f=>({ ...f, periodId:e.target.value }))} style={{ ...inp(), fontSize:12, padding:"8px 9px" }}>
               {ALL_PERIODS.filter(p=>p.season===dashFilters.season&&Number(p.stay_nights||7)===7).map(p=><option key={p.id} value={p.id}>{periodOptionLabel(p)}</option>)}
             </select>
           </div>
           <div style={{ flex:"1 1 110px" }}>
-            <p style={{ margin:"0 0 3px 2px", fontSize:9, fontWeight:600, color:C.gray }}>Capacité</p>
+            <p style={{ margin:"0 0 3px 2px", fontSize:12, fontWeight:600, color:C.gray }}>Capacité</p>
             <select value={dashFilters.capacity} onChange={e=>setDashFilters(f=>({ ...f, capacity:Number(e.target.value) }))} style={{ ...inp(), fontSize:12, padding:"8px 9px" }}>
               {[2,4,6,8].map(n=><option key={n} value={n}>{n}P</option>)}
             </select>
           </div>
           <div style={{ flex:"1 1 130px" }}>
-            <p style={{ margin:"0 0 3px 2px", fontSize:9, fontWeight:600, color:C.gray }}>Typologie</p>
+            <p style={{ margin:"0 0 3px 2px", fontSize:12, fontWeight:600, color:C.gray }}>Typologie</p>
             <select value={dashFilters.accType} onChange={e=>setDashFilters(f=>({ ...f, accType:e.target.value, capacity:ACCOMMODATION_TYPES[e.target.value]?.capacity||f.capacity }))} style={{ ...inp(), fontSize:12, padding:"8px 9px" }}>
               {Object.entries(ACCOMMODATION_TYPES).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
             </select>
@@ -2995,10 +2995,10 @@ export default function App() {
             <button key={i} onClick={()=>setScreen(k.nav)} style={{ ...card({ padding:"12px 13px" }), cursor:"pointer", textAlign:"left", display:"block" }}>
               <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:5 }}>
                 <div style={{ width:30, height:30, borderRadius:9, background:k.bg, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}><span style={{ fontSize:15 }}>{k.ic}</span></div>
-                <span style={{ fontSize:9, fontWeight:600, color:C.gray, lineHeight:1.1 }}>{k.t}</span>
+                <span style={{ fontSize:13, fontWeight:600, color:C.gray, lineHeight:1.2 }}>{k.t}</span>
               </div>
-              <p style={{ margin:0, fontSize:19, fontWeight:700, color:k.c, lineHeight:1.1 }}>{k.v}</p>
-              <p style={{ margin:"2px 0 0", fontSize:8, color:C.gray }}>{k.s}</p>
+              <p style={{ margin:0, fontSize:25, fontWeight:700, color:k.c, lineHeight:1.15 }}>{k.v}</p>
+              <p style={{ margin:"2px 0 0", fontSize:12, color:C.gray }}>{k.s}</p>
             </button>
           ))}
           <button onClick={()=>setScreen("benchmark")} style={{ ...card({ padding:"12px 14px" }), background:C.blue, border:"none", cursor:"pointer", display:"flex", flexDirection:"column", justifyContent:"center", minWidth:130 }}>
@@ -3065,7 +3065,7 @@ export default function App() {
 
       {isMobile&&(
       <div style={{ background:`linear-gradient(135deg,${C.blue},${C.blueL})`, padding:"10px 16px 16px" }}>
-        <p style={{ margin:0, fontSize:9, fontWeight:700, color:"rgba(255,255,255,0.5)", textTransform:"uppercase" }}>Les Cimes du Val d'Allos · Veille tarifaire</p>
+        <p style={{ margin:0, fontSize:12, fontWeight:700, color:"rgba(255,255,255,0.5)", textTransform:"uppercase" }}>Les Cimes du Val d'Allos · Veille tarifaire</p>
         <h1 style={{ margin:"2px 0", fontSize:18, fontWeight:700, color:C.white }}>Benchmark {yr}</h1>
         <p style={{ margin:0, fontSize:11, color:"rgba(255,255,255,0.65)" }}>{user?.email} · {cap} · {STATIC_WEEKS.filter(w=>w.year===yr).length} semaines</p>
       </div>
@@ -3092,7 +3092,7 @@ export default function App() {
             <span style={{ fontSize:10, color:C.orange, fontWeight:600 }}>{decisions.filter(d=>d.decision_status==="à faire").length} à faire</span>
             <span style={{ fontSize:10, color:C.green, fontWeight:600 }}>{decisions.filter(d=>d.decision_status==="appliqué").length} appliquées</span>
           </div>
-          {decisions[0]&&<p style={{ margin:"2px 0 0", fontSize:9, color:C.blueL }}>Dernière : {decisions[0].action_label||decisions[0].action_type} · {decisions[0].period_label||decisions[0].period_id} ({(decisions[0].created_at||"").slice(0,10)})</p>}
+          {decisions[0]&&<p style={{ margin:"2px 0 0", fontSize:12, color:C.blueL }}>Dernière : {decisions[0].action_label||decisions[0].action_type} · {decisions[0].period_label||decisions[0].period_id} ({(decisions[0].created_at||"").slice(0,10)})</p>}
           <button onClick={()=>setScreen("benchmark")} style={{ ...btn(false,C.blue), marginTop:8, marginBottom:0 }}>Ouvrir Benchmark &amp; décisions</button>
         </div>
 
@@ -3103,7 +3103,7 @@ export default function App() {
             <span style={{ fontSize:10, color:C.orange, fontWeight:600 }}>{promoOpps.filter(o=>o.status==="à étudier").length} à étudier</span>
             <span style={{ fontSize:10, color:C.blue, fontWeight:600 }}>{promoOpps.filter(o=>o.status==="à publier").length} à publier</span>
           </div>
-          {(()=>{ const cs=promoOpps.find(o=>o.promo_type==="court_sejour"||o.promo_type==="weekend"); return cs?<p style={{ margin:"2px 0 0", fontSize:9, color:C.purple }}>Prochaine offre : {cs.promo_label} · {cs.period_label||cs.period_id}</p>:null; })()}
+          {(()=>{ const cs=promoOpps.find(o=>o.promo_type==="court_sejour"||o.promo_type==="weekend"); return cs?<p style={{ margin:"2px 0 0", fontSize:12, color:C.purple }}>Prochaine offre : {cs.promo_label} · {cs.period_label||cs.period_id}</p>:null; })()}
           <button onClick={()=>setScreen("promotions")} style={{ ...btn(false,C.purple), marginTop:8, marginBottom:0 }}>Ouvrir Promotions</button>
         </div>
 
@@ -3111,10 +3111,10 @@ export default function App() {
         <div style={{ ...cd(11), padding:"10px 13px", background:C.orangeL, marginTop:8 }}>
           <p style={{ margin:"0 0 3px", fontSize:11, fontWeight:700, color:C.orange }}>🗓️ Courts séjours</p>
           {(()=>{ const we=promoOpps.find(o=>(o.promo_type==="week_end"||o.promo_type==="weekend")); const cs=promoOpps.find(o=>o.promo_type==="court_sejour"); return (<>
-            <p style={{ margin:0, fontSize:9, color:C.text }}>Prochaine offre 2 nuits : {we?`${we.period_label||we.period_id} · ${fmt(Number(we.direct_price||0))}€ direct`:"à étudier"}</p>
-            <p style={{ margin:"1px 0 0", fontSize:9, color:C.text }}>Prochaine offre 3 nuits : {cs?`${cs.period_label||cs.period_id} · ${fmt(Number(cs.direct_price||0))}€ direct`:"à étudier"}</p>
+            <p style={{ margin:0, fontSize:12, color:C.text }}>Prochaine offre 2 nuits : {we?`${we.period_label||we.period_id} · ${fmt(Number(we.direct_price||0))}€ direct`:"à étudier"}</p>
+            <p style={{ margin:"1px 0 0", fontSize:12, color:C.text }}>Prochaine offre 3 nuits : {cs?`${cs.period_label||cs.period_id} · ${fmt(Number(cs.direct_price||0))}€ direct`:"à étudier"}</p>
           </>); })()}
-          {(()=>{ const shortRates=(histAll||[]).filter(r=>[2,3,4].includes(Number(r.stay_nights))); return <p style={{ margin:"2px 0 0", fontSize:8, color:C.gray }}>{shortRates.length===0?"Aucun relevé court séjour pour l'instant — lancez un relevé 2/3/4 nuits.":`${shortRates.length} relevés courts séjours en base.`}</p>; })()}
+          {(()=>{ const shortRates=(histAll||[]).filter(r=>[2,3,4].includes(Number(r.stay_nights))); return <p style={{ margin:"2px 0 0", fontSize:11, color:C.gray }}>{shortRates.length===0?"Aucun relevé court séjour pour l'instant — lancez un relevé 2/3/4 nuits.":`${shortRates.length} relevés courts séjours en base.`}</p>; })()}
           <button onClick={()=>{ setPromoStayNights(3); setScreen("promotions"); }} style={{ ...btn(false,C.orange), marginTop:8, marginBottom:0 }}>Ouvrir Promotions courts séjours</button>
         </div>
 
@@ -3175,7 +3175,7 @@ export default function App() {
           <summary style={{ fontSize:11, fontWeight:700, color:C.blue, cursor:"pointer" }}>Import CSV concurrents & sources</summary>
           <div style={{ marginTop:8 }}>
           <p style={{ margin:"0 0 4px", fontSize:11, fontWeight:700, color:C.blue }}>Importer concurrents suivis (CSV)</p>
-          <p style={{ margin:"0 0 6px", fontSize:9, color:C.gray, fontFamily:"monospace", lineHeight:1.5 }}>name;market_segment;property_type;source_type;source_name;source_url;search_location;comparability_score;notes</p>
+          <p style={{ margin:"0 0 6px", fontSize:12, color:C.gray, fontFamily:"monospace", lineHeight:1.5 }}>name;market_segment;property_type;source_type;source_name;source_url;search_location;comparability_score;notes</p>
           {catCsvResult&&(
             <div style={{ ...cd(8), padding:"8px 10px", background:catCsvResult.errors.length===0?C.greenL:C.goldL, marginBottom:6 }}>
               <p style={{ margin:"0 0 1px", fontSize:11, color:C.green }}>✓ Importés : {catCsvResult.ok}</p>
@@ -3188,7 +3188,7 @@ export default function App() {
             <button onClick={()=>{ const tpl=["name;market_segment;property_type;source_type;source_name;source_url;search_location;comparability_score;notes","Résidence Labellemontagne;residence;résidence;booking;Booking.com;https://www.booking.com/...;La Foux d'Allos;80;Concurrent pro","Appartement Central Park particulier;private;particulier;marketplace;Booking particulier;https://www.booking.com/...;La Foux d'Allos;60;Particulier agressif","Studio La Foux Airbnb;private;particulier;marketplace;Airbnb;https://www.airbnb.fr/...;La Foux d'Allos;55;Particulier"].join("\n"); const b=new Blob([tpl],{ type:"text/csv;charset=utf-8" }); const u=URL.createObjectURL(b); const a=document.createElement("a"); a.href=u; a.download="modele_concurrents_suivis.csv"; a.click(); }} style={{ ...btn(false,C.grayL,C.blueL), margin:0, border:`1px solid ${C.blueL}` }}>⬇ Modèle CSV</button>
             <button onClick={handleImportCatalogCsv} disabled={!catCsvText.trim()} style={{ ...btn(!catCsvText.trim(),C.blue), margin:0 }}>Importer concurrents suivis</button>
           </div>
-          <p style={{ margin:"6px 0", fontSize:9, color:C.gray }}>Sources : competitor_name;source_type;source_name;source_url;notes</p>
+          <p style={{ margin:"6px 0", fontSize:12, color:C.gray }}>Sources : competitor_name;source_type;source_name;source_url;notes</p>
           {srcCsvResult&&(
             <div style={{ ...cd(8), padding:"7px 10px", background:C.grayL, marginBottom:6 }}>
               <p style={{ margin:"0 0 1px", fontSize:11, color:C.green }}>✓ Ajoutées : {srcCsvResult.added}</p>
@@ -3229,7 +3229,7 @@ export default function App() {
           return (
             <details style={{ ...cd(11), padding:"10px 13px", marginTop:8 }}>
               <summary style={{ fontSize:11, fontWeight:700, color:C.blue, cursor:"pointer" }}>🔍 Relevé concurrents suivis (saisie rapide)</summary>
-              <p style={{ margin:"6px 0 8px", fontSize:8, color:C.gray, fontStyle:"italic" }}>Corriger modifie le relevé existant. Nouveau relevé ajoute une nouvelle ligne dans l'historique.</p>
+              <p style={{ margin:"6px 0 8px", fontSize:11, color:C.gray, fontStyle:"italic" }}>Corriger modifie le relevé existant. Nouveau relevé ajoute une nouvelle ligne dans l'historique.</p>
 
               {/* Sélection de la période du relevé */}
               <div style={{ ...cd(11,4), padding:"10px 12px" }}>
@@ -3288,30 +3288,30 @@ export default function App() {
               <div style={{ ...cd(11,4), padding:"9px 12px", background:ctxValid?C.bluePale:C.redL }}>
                 {ctxValid ? (<>
                   <p style={{ margin:0, fontSize:11, color:C.blue, fontWeight:700 }}>Période : {fmtDateShort(ctx.checkin)} → {fmtDateShort(ctx.checkout)} · {ctx.stayNights} nuits</p>
-                  <p style={{ margin:"1px 0 0", fontSize:9, color:C.blueL }}>Capacité : {ctx.capacity}P · Mode : {trackSegment==="private"?"Particuliers suivis":"Résidences suivies"}</p>
-                  {(()=>{ const fams=Array.from(new Set((catalog||[]).filter(c=>competitorSegment(c)===trackSegment).flatMap(c=>sourcesForCompetitor(c).map(s=>sourceBadgeMeta(s.source_type).l)))); return fams.length>0?<p style={{ margin:"1px 0 0", fontSize:9, color:C.blueL }}>Sources : {fams.join(" · ")}</p>:null; })()}
+                  <p style={{ margin:"1px 0 0", fontSize:12, color:C.blueL }}>Capacité : {ctx.capacity}P · Mode : {trackSegment==="private"?"Particuliers suivis":"Résidences suivies"}</p>
+                  {(()=>{ const fams=Array.from(new Set((catalog||[]).filter(c=>competitorSegment(c)===trackSegment).flatMap(c=>sourcesForCompetitor(c).map(s=>sourceBadgeMeta(s.source_type).l)))); return fams.length>0?<p style={{ margin:"1px 0 0", fontSize:12, color:C.blueL }}>Sources : {fams.join(" · ")}</p>:null; })()}
                 </>) : (
                   <p style={{ margin:0, fontSize:11, color:C.red, fontWeight:600 }}>Dates invalides : vérifiez arrivée et départ.</p>
                 )}
-                <p style={{ margin:"4px 0 0", fontSize:9, color:C.gray, fontStyle:"italic" }}>Les prix saisis ici sont considérés comme vérifiés manuellement.</p>
+                <p style={{ margin:"4px 0 0", fontSize:12, color:C.gray, fontStyle:"italic" }}>Les prix saisis ici sont considérés comme vérifiés manuellement.</p>
                 {/* Liste de liens cliquables (évite le blocage multi-onglets) */}
                 {trackedLinksVisible&&!datesInvalid&&(
                   <div style={{ marginTop:8, borderTop:`0.5px solid ${C.grayM}`, paddingTop:8 }}>
                     {allBookingUrls.length>0&&(<>
-                      <p style={{ margin:"0 0 4px", fontSize:9, fontWeight:700, color:C.blue, textTransform:"uppercase" }}>Liens Booking à ouvrir</p>
+                      <p style={{ margin:"0 0 4px", fontSize:12, fontWeight:700, color:C.blue, textTransform:"uppercase" }}>Liens Booking à ouvrir</p>
                       {catalog.filter(c=>c.booking_url).map((c,idx)=>(
                         <div key={c.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, padding:"4px 0" }}>
                           <span style={{ fontSize:10, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{idx+1}. {c.name}</span>
-                          <a href={buildTrackedBookingUrl(c, ctx)} target="_blank" rel="noreferrer" style={{ fontSize:9, fontWeight:600, color:C.blue, background:C.bluePale, padding:"3px 9px", borderRadius:6, textDecoration:"none", flexShrink:0 }}>Ouvrir ↗</a>
+                          <a href={buildTrackedBookingUrl(c, ctx)} target="_blank" rel="noreferrer" style={{ fontSize:12, fontWeight:600, color:C.blue, background:C.bluePale, padding:"3px 9px", borderRadius:6, textDecoration:"none", flexShrink:0 }}>Ouvrir ↗</a>
                         </div>
                       ))}
                     </>)}
                     {allDirectUrls.length>0&&(<>
-                      <p style={{ margin:"8px 0 4px", fontSize:9, fontWeight:700, color:C.green, textTransform:"uppercase" }}>Liens site direct à ouvrir</p>
+                      <p style={{ margin:"8px 0 4px", fontSize:12, fontWeight:700, color:C.green, textTransform:"uppercase" }}>Liens site direct à ouvrir</p>
                       {catalog.filter(c=>buildTrackedDirectUrl(c)).map((c,idx)=>(
                         <div key={c.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, padding:"4px 0" }}>
                           <span style={{ fontSize:10, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{idx+1}. {c.name}</span>
-                          <a href={buildTrackedDirectUrl(c)} target="_blank" rel="noreferrer" style={{ fontSize:9, fontWeight:600, color:C.green, background:C.greenL, padding:"3px 9px", borderRadius:6, textDecoration:"none", flexShrink:0 }}>Ouvrir ↗</a>
+                          <a href={buildTrackedDirectUrl(c)} target="_blank" rel="noreferrer" style={{ fontSize:12, fontWeight:600, color:C.green, background:C.greenL, padding:"3px 9px", borderRadius:6, textDecoration:"none", flexShrink:0 }}>Ouvrir ↗</a>
                         </div>
                       ))}
                     </>)}
@@ -3332,7 +3332,7 @@ export default function App() {
                 {allBookingUrls.length>0&&<button onClick={()=>setTrackedLinksVisible(v=>!v)} disabled={datesInvalid} style={{ fontSize:10, fontWeight:600, color:datesInvalid?C.gray:C.blue, background:C.white, border:`1px solid ${C.blueL}`, borderRadius:8, padding:"7px 11px", cursor:datesInvalid?"default":"pointer" }}>{trackedLinksVisible?"▲ Masquer":`Ouvrir tous les Booking (${allBookingUrls.length})`}</button>}
                 {allBookingUrls.length>1&&!datesInvalid&&<button onClick={()=>openAllLinks(allBookingUrls.slice(0,2))} style={{ fontSize:10, fontWeight:600, color:C.blue, background:C.white, border:`1px solid ${C.blueL}`, borderRadius:8, padding:"7px 11px", cursor:"pointer" }}>Ouvrir les 2 premiers</button>}
               </div>
-              <p style={{ margin:"0 0 8px", fontSize:8, color:C.gray, fontStyle:"italic" }}>Le scraping préremplit uniquement les prix détectables. Les prix validés manuellement restent prioritaires.</p>
+              <p style={{ margin:"0 0 8px", fontSize:11, color:C.gray, fontStyle:"italic" }}>Le scraping préremplit uniquement les prix détectables. Les prix validés manuellement restent prioritaires.</p>
               {trackedScrapeError&&<div style={{ ...cd(9), padding:"8px 11px", background:C.goldL, marginBottom:8 }}><p style={{ margin:0, fontSize:10, color:C.orange }}>{trackedScrapeError}</p></div>}
               {trackedScrapeResults.length>0&&(()=>{ const n=trackedScrapeResults.filter(r=>r.price_total&&r.confidence!=="low"&&!r.warning&&r.channel!=="direct"&&!isSuspiciousDetectedPrice(r.price_total,ctx,{source_type:r.channel})).length; return <div style={{ ...cd(9), padding:"8px 11px", background:C.bluePale, marginBottom:8 }}><p style={{ margin:0, fontSize:10, color:C.blue, fontWeight:600 }}>{n} prix détecté(s) automatiquement. Vérifiez avant validation.</p></div>; })()}
 
@@ -3345,18 +3345,18 @@ export default function App() {
                     <div key={c.id} style={{ padding:"10px 12px", borderBottom:i<segList.length-1?`0.5px solid ${C.grayL}`:"none" }}>
                       {/* En-tête concurrent */}
                       <div style={{ marginBottom:6 }}>
-                        <span style={{ fontSize:12, fontWeight:700, color:C.text }}>{c.name}</span>
+                        <span style={{ fontSize:16, fontWeight:700, color:C.text }}>{c.name}</span>
                         <div style={{ display:"flex", gap:4, marginTop:2, alignItems:"center", flexWrap:"wrap" }}>
-                          <span style={{ fontSize:9, color:C.gray }}>{c.property_type} · score {c.comparability_score||"?"}</span>
+                          <span style={{ fontSize:12, color:C.gray }}>{c.property_type} · score {c.comparability_score||"?"}</span>
                           {compSources.map(s=>(()=>{ const m=sourceBadgeMeta(s.source_type); return <Badge key={s.id} label={s.source_name} color={m.c} bg={m.bg} size={8}/>; })())}
                         </div>
                       </div>
-                      {compSources.length===0&&<p style={{ margin:"2px 0 0", fontSize:9, color:C.gray, fontStyle:"italic" }}>Aucune source. Ajoutez-en dans « Concurrents suivis ».</p>}
+                      {compSources.length===0&&<p style={{ margin:"2px 0 0", fontSize:12, color:C.gray, fontStyle:"italic" }}>Aucune source. Ajoutez-en dans « Concurrents suivis ».</p>}
 
                       {/* En-tête colonnes (desktop) */}
                       {!isMobile&&compSources.length>0&&(
                         <div style={{ display:"grid", gridTemplateColumns:"1.6fr 1.3fr 1.1fr 1fr 1.4fr", gap:6, padding:"0 4px 4px", borderBottom:`0.5px solid ${C.grayL}` }}>
-                          {["Source","Dernier prix","Auto détecté","Prix vérifié","Actions"].map(h=><span key={h} style={{ fontSize:8, fontWeight:700, color:C.gray, textTransform:"uppercase" }}>{h}</span>)}
+                          {["Source","Dernier prix","Auto détecté","Prix vérifié","Actions"].map(h=><span key={h} style={{ fontSize:11, fontWeight:700, color:C.gray, textTransform:"uppercase" }}>{h}</span>)}
                         </div>
                       )}
 
@@ -3376,56 +3376,56 @@ export default function App() {
                         const cellSource = (
                           <div style={{ minWidth:0 }}>
                             <div style={{ display:"flex", alignItems:"center", gap:4, flexWrap:"wrap" }}>
-                              <span style={{ fontSize:10, fontWeight:600, color:C.text }}>{s.source_name}</span>
-                              <Badge label={m.l} color={m.c} bg={m.bg} size={7}/>
+                              <span style={{ fontSize:14, fontWeight:600, color:C.text }}>{s.source_name}</span>
+                              <Badge label={m.l} color={m.c} bg={m.bg} size={9}/>
                             </div>
                             {(injectsDates&&datesInvalid)
-                              ? <span style={{ fontSize:8, fontWeight:600, color:C.gray }}>↗ Ouvrir</span>
-                              : <a href={url} target="_blank" rel="noreferrer" style={{ fontSize:8, fontWeight:600, color:C.blue, textDecoration:"none" }}>↗ Ouvrir</a>}
-                            {isLfdnasSource(s)&&<span style={{ fontSize:7, color:C.purple, fontStyle:"italic", display:"block" }}>Dates ajoutées auto</span>}
-                            {s.source_type==="direct"&&<span style={{ fontSize:7, color:C.gray, fontStyle:"italic", display:"block" }}>Dates à vérifier sur le site</span>}
+                              ? <span style={{ fontSize:11, fontWeight:600, color:C.gray }}>↗ Ouvrir</span>
+                              : <a href={url} target="_blank" rel="noreferrer" style={{ fontSize:11, fontWeight:600, color:C.blue, textDecoration:"none" }}>↗ Ouvrir</a>}
+                            {isLfdnasSource(s)&&<span style={{ fontSize:10, color:C.purple, fontStyle:"italic", display:"block" }}>Dates ajoutées auto</span>}
+                            {s.source_type==="direct"&&<span style={{ fontSize:10, color:C.gray, fontStyle:"italic", display:"block" }}>Dates à vérifier sur le site</span>}
                           </div>
                         );
                         const cellLast = last
-                          ? <div><span style={{ fontSize:11, fontWeight:700, color:C.text }}>{fmt(Number(last.price_total||last.price_week))}€</span><span style={{ fontSize:8, color:C.gray, display:"block" }}>{last.reliability_status} · {fmtDateShort(last.period_start)||last.collected_at}{last.edited_at?" · modifié":""}</span></div>
-                          : <span style={{ fontSize:9, color:C.gray }}>Aucun prix</span>;
+                          ? <div><span style={{ fontSize:14, fontWeight:700, color:C.text }}>{fmt(Number(last.price_total||last.price_week))}€</span><span style={{ fontSize:11, color:C.gray, display:"block" }}>{last.reliability_status} · {fmtDateShort(last.period_start)||last.collected_at}{last.edited_at?" · modifié":""}</span></div>
+                          : <span style={{ fontSize:12, color:C.gray }}>Aucun prix</span>;
                         const candidates = Array.isArray(scrape?.price_candidates) ? scrape.price_candidates : [];
                         const cellAuto = scrape
                           ? (<div>
                               {s.source_type==="direct"
-                                ? <span style={{ fontSize:8, color:C.gray }}>Vérification manuelle</span>
+                                ? <span style={{ fontSize:11, color:C.gray }}>Vérification manuelle</span>
                                 : candidates.length>1
                                   ? (<div>
-                                      <span style={{ fontSize:8, color:C.orange, fontWeight:600 }}>Plusieurs prix détectés</span>
+                                      <span style={{ fontSize:11, color:C.orange, fontWeight:600 }}>Plusieurs prix détectés</span>
                                       <div style={{ display:"flex", gap:3, marginTop:2, flexWrap:"wrap" }}>
                                         {candidates.map((cd,ci)=>(
-                                          <button key={ci} onClick={()=>setTrackPrices(p=>({ ...p, [key]:String(cd.price_total) }))} style={{ fontSize:8, fontWeight:700, color:C.blue, background:C.bluePale, border:`1px solid ${C.blueL}`, borderRadius:5, padding:"3px 7px", cursor:"pointer" }}>{fmt(cd.price_total)}€</button>
+                                          <button key={ci} onClick={()=>setTrackPrices(p=>({ ...p, [key]:String(cd.price_total) }))} style={{ fontSize:11, fontWeight:700, color:C.blue, background:C.bluePale, border:`1px solid ${C.blueL}`, borderRadius:5, padding:"3px 7px", cursor:"pointer" }}>{fmt(cd.price_total)}€</button>
                                         ))}
                                       </div>
                                     </div>)
                                   : candidates.length===1
                                     ? (<div>
-                                        <span style={{ fontSize:9, color:C.orange, fontWeight:600 }}>{fmt(candidates[0].price_total)}€ à vérifier</span>
-                                        <button onClick={()=>setTrackPrices(p=>({ ...p, [key]:String(candidates[0].price_total) }))} style={{ display:"block", marginTop:2, fontSize:8, fontWeight:700, color:C.green, background:C.greenL, border:"none", borderRadius:5, padding:"3px 7px", cursor:"pointer" }}>Utiliser</button>
+                                        <span style={{ fontSize:12, color:C.orange, fontWeight:600 }}>{fmt(candidates[0].price_total)}€ à vérifier</span>
+                                        <button onClick={()=>setTrackPrices(p=>({ ...p, [key]:String(candidates[0].price_total) }))} style={{ display:"block", marginTop:2, fontSize:11, fontWeight:700, color:C.green, background:C.greenL, border:"none", borderRadius:5, padding:"3px 7px", cursor:"pointer" }}>Utiliser</button>
                                       </div>)
                                     : scrapeUsable
-                                      ? <span style={{ fontSize:9, color:C.orange, fontWeight:600 }}>{fmt(scrape.price_total)}€ à vérifier</span>
-                                      : <span style={{ fontSize:8, color:C.gray }}>Non détecté</span>}
-                              {scrape.debug&&<button onClick={()=>setScrapeDetailsKey(d=>d===key?null:key)} style={{ display:"block", marginTop:2, fontSize:7, fontWeight:600, color:C.blue, background:"none", border:"none", padding:0, cursor:"pointer", textDecoration:"underline" }}>Détails scraping</button>}
+                                      ? <span style={{ fontSize:12, color:C.orange, fontWeight:600 }}>{fmt(scrape.price_total)}€ à vérifier</span>
+                                      : <span style={{ fontSize:11, color:C.gray }}>Non détecté</span>}
+                              {scrape.debug&&<button onClick={()=>setScrapeDetailsKey(d=>d===key?null:key)} style={{ display:"block", marginTop:2, fontSize:10, fontWeight:600, color:C.blue, background:"none", border:"none", padding:0, cursor:"pointer", textDecoration:"underline" }}>Détails scraping</button>}
                             </div>)
-                          : <span style={{ fontSize:9, color:C.grayM }}>—</span>;
+                          : <span style={{ fontSize:12, color:C.grayM }}>—</span>;
                         const cellVerif = (
-                          <input type="number" placeholder="Prix vérifié" value={vp} onChange={e=>setTrackPrices(p=>({ ...p, [key]:e.target.value }))} style={{ width:"100%", padding:"5px 7px", fontSize:10, border:`1px solid ${C.grayM}`, borderRadius:6, boxSizing:"border-box" }}/>
+                          <input type="number" placeholder="Prix vérifié" value={vp} onChange={e=>setTrackPrices(p=>({ ...p, [key]:e.target.value }))} style={{ width:"100%", padding:"7px 8px", fontSize:14, border:`1px solid ${C.grayM}`, borderRadius:6, boxSizing:"border-box" }}/>
                         );
                         const cellActions = (
                           <div style={{ display:"flex", gap:3, flexWrap:"wrap" }}>
                             {last ? (<>
-                              <button onClick={()=>openRateEdit(key,"new",null)} style={{ fontSize:8, fontWeight:600, color:C.green, background:C.greenL, border:"none", borderRadius:5, padding:"4px 6px", cursor:"pointer" }}>Nouveau</button>
-                              <button onClick={()=>openRateEdit(key,"modify",Number(last.price_total||last.price_week))} style={{ fontSize:8, fontWeight:600, color:C.orange, background:C.orangeL, border:"none", borderRadius:5, padding:"4px 6px", cursor:"pointer" }}>Modifier</button>
-                              <button onClick={()=>{ openRateEdit(key,"history",null); loadRateHistory(c.name, s.source_name, ctx, "period"); }} style={{ fontSize:8, fontWeight:600, color:C.blue, background:C.bluePale, border:"none", borderRadius:5, padding:"4px 6px", cursor:"pointer" }}>Histo.</button>
+                              <button onClick={()=>openRateEdit(key,"new",null)} style={{ fontSize:12, fontWeight:600, color:C.green, background:C.greenL, border:"none", borderRadius:5, padding:"5px 8px", cursor:"pointer" }}>Nouveau</button>
+                              <button onClick={()=>openRateEdit(key,"modify",Number(last.price_total||last.price_week))} style={{ fontSize:12, fontWeight:600, color:C.orange, background:C.orangeL, border:"none", borderRadius:5, padding:"5px 8px", cursor:"pointer" }}>Modifier</button>
+                              <button onClick={()=>{ openRateEdit(key,"history",null); loadRateHistory(c.name, s.source_name, ctx, "period"); }} style={{ fontSize:12, fontWeight:600, color:C.blue, background:C.bluePale, border:"none", borderRadius:5, padding:"5px 8px", cursor:"pointer" }}>Histo.</button>
                             </>):(<>
-                              <button onClick={()=>saveSourceRate(c, s, vp, key)} disabled={!vp||datesInvalid} style={{ fontSize:8, fontWeight:700, background:(vp&&!datesInvalid)?C.green:C.grayL, color:(vp&&!datesInvalid)?C.white:C.gray, border:"none", borderRadius:5, padding:"4px 8px", cursor:(vp&&!datesInvalid)?"pointer":"default" }}>Enregistrer</button>
-                              <button onClick={()=>{ openRateEdit(key,"history",null); loadRateHistory(c.name, s.source_name, ctx, "all"); }} style={{ fontSize:8, fontWeight:600, color:C.blue, background:C.bluePale, border:"none", borderRadius:5, padding:"4px 6px", cursor:"pointer" }}>Histo.</button>
+                              <button onClick={()=>saveSourceRate(c, s, vp, key)} disabled={!vp||datesInvalid} style={{ fontSize:12, fontWeight:700, background:(vp&&!datesInvalid)?C.green:C.grayL, color:(vp&&!datesInvalid)?C.white:C.gray, border:"none", borderRadius:5, padding:"5px 10px", cursor:(vp&&!datesInvalid)?"pointer":"default" }}>Enregistrer</button>
+                              <button onClick={()=>{ openRateEdit(key,"history",null); loadRateHistory(c.name, s.source_name, ctx, "all"); }} style={{ fontSize:12, fontWeight:600, color:C.blue, background:C.bluePale, border:"none", borderRadius:5, padding:"5px 8px", cursor:"pointer" }}>Histo.</button>
                             </>)}
                           </div>
                         );
@@ -3435,7 +3435,7 @@ export default function App() {
                             {!isMobile ? (
                               <div style={{ display:"grid", gridTemplateColumns:"1.6fr 1.3fr 1.1fr 1fr 1.4fr", gap:6, alignItems:"center", padding:"7px 4px", borderBottom:`0.5px solid ${C.grayL}` }}>
                                 {cellSource}{cellLast}{cellAuto}
-                                {last?<span style={{ fontSize:8, color:C.grayM }}>—</span>:cellVerif}
+                                {last?<span style={{ fontSize:11, color:C.grayM }}>—</span>:cellVerif}
                                 {cellActions}
                               </div>
                             ) : (
@@ -3449,22 +3449,22 @@ export default function App() {
                             {/* Panneaux d'édition (sous la ligne) */}
                             {rateEditKey===key&&rateEditMode==="modify"&&last&&(
                               <div style={{ ...cd(8), padding:"8px 10px", margin:"4px 0", background:C.orangeL }}>
-                                <p style={{ margin:"0 0 4px", fontSize:8, color:C.gray, fontStyle:"italic" }}>Corriger modifie le relevé existant.</p>
+                                <p style={{ margin:"0 0 4px", fontSize:11, color:C.gray, fontStyle:"italic" }}>Corriger modifie le relevé existant.</p>
                                 <input type="number" placeholder="Prix corrigé" value={rateEditPrice} onChange={e=>setRateEditPrice(e.target.value)} style={{ ...inp(), marginBottom:4 }}/>
                                 <input placeholder="Raison de la correction" value={rateEditReason} onChange={e=>setRateEditReason(e.target.value)} style={{ ...inp(), marginBottom:4 }}/>
                                 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:4 }}>
-                                  <button onClick={closeRateEdit} style={{ ...btn(false,C.white,C.text), margin:0, fontSize:9, padding:"5px", border:`1px solid ${C.grayM}` }}>Annuler</button>
-                                  <button onClick={()=>submitRateCorrection(last)} disabled={!rateEditPrice} style={{ ...btn(!rateEditPrice,C.orange), margin:0, fontSize:9, padding:"5px" }}>Enregistrer correction</button>
+                                  <button onClick={closeRateEdit} style={{ ...btn(false,C.white,C.text), margin:0, fontSize:12, padding:"5px", border:`1px solid ${C.grayM}` }}>Annuler</button>
+                                  <button onClick={()=>submitRateCorrection(last)} disabled={!rateEditPrice} style={{ ...btn(!rateEditPrice,C.orange), margin:0, fontSize:12, padding:"5px" }}>Enregistrer correction</button>
                                 </div>
                               </div>
                             )}
                             {rateEditKey===key&&rateEditMode==="new"&&(
                               <div style={{ ...cd(8), padding:"8px 10px", margin:"4px 0", background:C.greenL }}>
-                                <p style={{ margin:"0 0 4px", fontSize:8, color:C.gray, fontStyle:"italic" }}>Nouveau relevé : ajoute une ligne dans l'historique.</p>
+                                <p style={{ margin:"0 0 4px", fontSize:11, color:C.gray, fontStyle:"italic" }}>Nouveau relevé : ajoute une ligne dans l'historique.</p>
                                 <input type="number" placeholder="Prix du nouveau relevé" value={rateEditPrice} onChange={e=>setRateEditPrice(e.target.value)} style={{ ...inp(), marginBottom:4 }}/>
                                 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:4 }}>
-                                  <button onClick={closeRateEdit} style={{ ...btn(false,C.white,C.text), margin:0, fontSize:9, padding:"5px", border:`1px solid ${C.grayM}` }}>Annuler</button>
-                                  <button onClick={async()=>{ await saveSourceRate(c, s, rateEditPrice, key); closeRateEdit(); }} disabled={!rateEditPrice||datesInvalid} style={{ ...btn(!rateEditPrice||datesInvalid,C.green), margin:0, fontSize:9, padding:"5px" }}>Enregistrer</button>
+                                  <button onClick={closeRateEdit} style={{ ...btn(false,C.white,C.text), margin:0, fontSize:12, padding:"5px", border:`1px solid ${C.grayM}` }}>Annuler</button>
+                                  <button onClick={async()=>{ await saveSourceRate(c, s, rateEditPrice, key); closeRateEdit(); }} disabled={!rateEditPrice||datesInvalid} style={{ ...btn(!rateEditPrice||datesInvalid,C.green), margin:0, fontSize:12, padding:"5px" }}>Enregistrer</button>
                                 </div>
                               </div>
                             )}
@@ -3472,20 +3472,20 @@ export default function App() {
                               <div style={{ ...cd(8), padding:"8px 10px", margin:"4px 0", background:C.bluePale }}>
                                 <div style={{ display:"flex", gap:4, marginBottom:5 }}>
                                   {[["period","Cette période"],["all","Toutes périodes"]].map(([v,l])=>(
-                                    <button key={v} onClick={()=>loadRateHistory(c.name, s.source_name, ctx, v)} style={{ fontSize:8, fontWeight:rateHistoryScope===v?700:400, color:rateHistoryScope===v?C.white:C.gray, background:rateHistoryScope===v?C.blue:C.white, border:`1px solid ${rateHistoryScope===v?C.blue:C.grayM}`, borderRadius:5, padding:"3px 7px", cursor:"pointer" }}>{l}</button>
+                                    <button key={v} onClick={()=>loadRateHistory(c.name, s.source_name, ctx, v)} style={{ fontSize:11, fontWeight:rateHistoryScope===v?700:400, color:rateHistoryScope===v?C.white:C.gray, background:rateHistoryScope===v?C.blue:C.white, border:`1px solid ${rateHistoryScope===v?C.blue:C.grayM}`, borderRadius:5, padding:"3px 7px", cursor:"pointer" }}>{l}</button>
                                   ))}
                                 </div>
-                                {rateHistoryRows.length===0?<p style={{ margin:0, fontSize:9, color:C.gray }}>Aucun historique.</p>:rateHistoryRows.map((h,hi)=>{
+                                {rateHistoryRows.length===0?<p style={{ margin:0, fontSize:12, color:C.gray }}>Aucun historique.</p>:rateHistoryRows.map((h,hi)=>{
                                   const pt=Number(h.price_total||h.price_week||0); const prev=hi>0?Number(rateHistoryRows[hi-1].price_total||rateHistoryRows[hi-1].price_week||0):null; const ev=prev!=null?pt-prev:null;
-                                  return <p key={h.id||hi} style={{ margin:"2px 0 0", fontSize:9, color:C.text }}>{h.collected_at}{rateHistoryScope==="all"?` · ${fmtDateShort(h.period_start)}→${fmtDateShort(h.period_end)}`:""} · <strong>{fmt(pt)}€</strong> · {fmt(Math.round(pt/(h.stay_nights||7)))}€/n · {h.reliability_status}{h.edited_at?" · modifié":""}{ev!=null?<span style={{ color:ev>0?C.green:ev<0?C.red:C.gray, fontWeight:700 }}> · {ev>0?"+":""}{fmt(ev)}€</span>:""}</p>;
+                                  return <p key={h.id||hi} style={{ margin:"2px 0 0", fontSize:12, color:C.text }}>{h.collected_at}{rateHistoryScope==="all"?` · ${fmtDateShort(h.period_start)}→${fmtDateShort(h.period_end)}`:""} · <strong>{fmt(pt)}€</strong> · {fmt(Math.round(pt/(h.stay_nights||7)))}€/n · {h.reliability_status}{h.edited_at?" · modifié":""}{ev!=null?<span style={{ color:ev>0?C.green:ev<0?C.red:C.gray, fontWeight:700 }}> · {ev>0?"+":""}{fmt(ev)}€</span>:""}</p>;
                                 })}
-                                <button onClick={closeRateEdit} style={{ ...btn(false,C.white,C.text), margin:"5px 0 0", fontSize:9, padding:"5px", border:`1px solid ${C.grayM}` }}>Fermer</button>
+                                <button onClick={closeRateEdit} style={{ ...btn(false,C.white,C.text), margin:"5px 0 0", fontSize:12, padding:"5px", border:`1px solid ${C.grayM}` }}>Fermer</button>
                               </div>
                             )}
                             {/* Détails scraping (debug) */}
                             {scrapeDetailsKey===key&&scrape?.debug&&(
-                              <div style={{ ...cd(8), padding:"8px 10px", margin:"4px 0", background:C.grayL, fontSize:8, color:C.text }}>
-                                <p style={{ margin:"0 0 3px", fontSize:9, fontWeight:700, color:C.blue }}>Diagnostic scraping</p>
+                              <div style={{ ...cd(8), padding:"8px 10px", margin:"4px 0", background:C.grayL, fontSize:11, color:C.text }}>
+                                <p style={{ margin:"0 0 3px", fontSize:12, fontWeight:700, color:C.blue }}>Diagnostic scraping</p>
                                 <p style={{ margin:"1px 0" }}>Type source : {scrape.debug.source_kind||scrape.debug.detection_method||"—"}</p>
                                 <p style={{ margin:"1px 0", wordBreak:"break-all" }}>URL : {scrape.debug.final_url||scrape.url}</p>
                                 <p style={{ margin:"1px 0" }}>Statut HTTP : {scrape.debug.http_status??"—"} · HTML : {scrape.debug.html_length??0} car.</p>
@@ -3494,23 +3494,23 @@ export default function App() {
                                 {(scrape.debug.price_candidates||[]).length>0&&<p style={{ margin:"1px 0" }}>Candidats : {scrape.debug.price_candidates.map(p=>fmt(p)+"€").join(", ")}</p>}
                                 {scrape.debug.failure_reason&&<p style={{ margin:"1px 0", color:C.orange }}>Raison : {scrape.debug.failure_reason}</p>}
                                 {scrape.debug.mode&&<p style={{ margin:"1px 0", color:C.gray, fontStyle:"italic" }}>{scrape.debug.mode}</p>}
-                                <button onClick={()=>setScrapeDetailsKey(null)} style={{ marginTop:4, fontSize:8, fontWeight:600, color:C.gray, background:C.white, border:`1px solid ${C.grayM}`, borderRadius:5, padding:"3px 8px", cursor:"pointer" }}>Fermer</button>
+                                <button onClick={()=>setScrapeDetailsKey(null)} style={{ marginTop:4, fontSize:11, fontWeight:600, color:C.gray, background:C.white, border:`1px solid ${C.grayM}`, borderRadius:5, padding:"3px 8px", cursor:"pointer" }}>Fermer</button>
                               </div>
                             )}
                             {/* Choix en cas de doublon du jour */}
                             {duplicateRatePrompt&&duplicateRatePrompt.key===key&&(
                               <div style={{ ...cd(8), padding:"8px 10px", margin:"4px 0", background:C.goldL, border:`1px solid ${C.gold}` }}>
-                                <p style={{ margin:"0 0 5px", fontSize:9, color:C.text, fontWeight:600 }}>Un relevé existe déjà aujourd'hui : {fmt(Number(duplicateRatePrompt.existingRate.price_total||duplicateRatePrompt.existingRate.price_week||0))}€. Que faire ?</p>
+                                <p style={{ margin:"0 0 5px", fontSize:12, color:C.text, fontWeight:600 }}>Un relevé existe déjà aujourd'hui : {fmt(Number(duplicateRatePrompt.existingRate.price_total||duplicateRatePrompt.existingRate.price_week||0))}€. Que faire ?</p>
                                 <div style={{ display:"flex", gap:4, flexWrap:"wrap" }}>
-                                  <button onClick={()=>resolveDuplicateRate("update")} style={{ fontSize:9, fontWeight:700, color:C.white, background:C.orange, border:"none", borderRadius:6, padding:"5px 9px", cursor:"pointer" }}>Mettre à jour le relevé du jour</button>
-                                  <button onClick={()=>resolveDuplicateRate("new")} style={{ fontSize:9, fontWeight:700, color:C.white, background:C.green, border:"none", borderRadius:6, padding:"5px 9px", cursor:"pointer" }}>Créer un nouveau relevé</button>
-                                  <button onClick={()=>resolveDuplicateRate("cancel")} style={{ fontSize:9, fontWeight:600, color:C.gray, background:C.white, border:`1px solid ${C.grayM}`, borderRadius:6, padding:"5px 9px", cursor:"pointer" }}>Annuler</button>
+                                  <button onClick={()=>resolveDuplicateRate("update")} style={{ fontSize:12, fontWeight:700, color:C.white, background:C.orange, border:"none", borderRadius:6, padding:"5px 9px", cursor:"pointer" }}>Mettre à jour le relevé du jour</button>
+                                  <button onClick={()=>resolveDuplicateRate("new")} style={{ fontSize:12, fontWeight:700, color:C.white, background:C.green, border:"none", borderRadius:6, padding:"5px 9px", cursor:"pointer" }}>Créer un nouveau relevé</button>
+                                  <button onClick={()=>resolveDuplicateRate("cancel")} style={{ fontSize:12, fontWeight:600, color:C.gray, background:C.white, border:`1px solid ${C.grayM}`, borderRadius:6, padding:"5px 9px", cursor:"pointer" }}>Annuler</button>
                                 </div>
                               </div>
                             )}
-                            {st==="ok"&&<p style={{ margin:"3px 0 0", fontSize:8, color:C.green, fontWeight:600 }}>✓ Prix {s.source_name} enregistré</p>}
-                            {st==="noprice"&&<p style={{ margin:"3px 0 0", fontSize:8, color:C.orange, fontWeight:600 }}>Prix manquant : saisissez un prix vérifié.</p>}
-                            {st==="err"&&<p style={{ margin:"3px 0 0", fontSize:8, color:C.red }}>✗ Erreur d'enregistrement</p>}
+                            {st==="ok"&&<p style={{ margin:"3px 0 0", fontSize:11, color:C.green, fontWeight:600 }}>✓ Prix {s.source_name} enregistré</p>}
+                            {st==="noprice"&&<p style={{ margin:"3px 0 0", fontSize:11, color:C.orange, fontWeight:600 }}>Prix manquant : saisissez un prix vérifié.</p>}
+                            {st==="err"&&<p style={{ margin:"3px 0 0", fontSize:11, color:C.red }}>✗ Erreur d'enregistrement</p>}
                           </div>
                         );
                       })}
@@ -3530,21 +3530,21 @@ export default function App() {
               <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom:6 }}><span style={{ fontSize:15 }}>🏢</span><span style={{ fontSize:13, fontWeight:700, color:C.blue }}>Marché professionnel</span></div>
               <p style={{ margin:0, fontSize:20, fontWeight:700, color:C.text }}>{dfProMedian?`${fmt(dfProMedian)}€`:"—"}<span style={{ fontSize:10, color:C.gray, fontWeight:400 }}> médiane {dfNights}n</span></p>
               <div style={{ display:"flex", gap:14, marginTop:6, flexWrap:"wrap" }}>
-                <span style={{ fontSize:9, color:C.gray }}>Relevés : <strong>{dfProRates.length}</strong></span>
-                <span style={{ fontSize:9, color:C.gray }}>Sources actives : <strong>{proSourcesCount}</strong></span>
-                <span style={{ fontSize:9, color:C.gray }}>Écart Les Cimes : <strong style={{ color:dfProGap>0?C.red:C.green }}>{dfProGap!=null?`${dfProGap>0?"+":""}${dfProGap}%`:"—"}</strong></span>
+                <span style={{ fontSize:12, color:C.gray }}>Relevés : <strong>{dfProRates.length}</strong></span>
+                <span style={{ fontSize:12, color:C.gray }}>Sources actives : <strong>{proSourcesCount}</strong></span>
+                <span style={{ fontSize:12, color:C.gray }}>Écart Les Cimes : <strong style={{ color:dfProGap>0?C.red:C.green }}>{dfProGap!=null?`${dfProGap>0?"+":""}${dfProGap}%`:"—"}</strong></span>
               </div>
-              <p style={{ margin:"6px 0 0", fontSize:8, color:C.gray, fontStyle:"italic" }}>Référence principale pour la grille tarifaire.</p>
+              <p style={{ margin:"6px 0 0", fontSize:11, color:C.gray, fontStyle:"italic" }}>Référence principale pour la grille tarifaire.</p>
             </div>
             <div style={card({ background:"#FFF7F7" })}>
               <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom:6 }}><span style={{ fontSize:15 }}>🏠</span><span style={{ fontSize:13, fontWeight:700, color:"#FF5A5F" }}>Loueurs particuliers</span></div>
               <p style={{ margin:0, fontSize:20, fontWeight:700, color:C.text }}>{dfPrivMedian?`${fmt(dfPrivMedian)}€`:"—"}<span style={{ fontSize:10, color:C.gray, fontWeight:400 }}> médiane {dfNights}n</span></p>
               <div style={{ display:"flex", gap:14, marginTop:6, flexWrap:"wrap" }}>
-                <span style={{ fontSize:9, color:C.gray }}>Relevés : <strong>{dfPrivRates.length}</strong></span>
-                <span style={{ fontSize:9, color:C.gray }}>Pression : <strong style={{ color:dfPrivGap!=null&&dfPrivGap>30?C.red:dfPrivGap!=null&&dfPrivGap>=15?C.orange:C.green }}>{dfPrivGap==null?"—":dfPrivGap>30?"forte":dfPrivGap>=15?"moyenne":"faible"}</strong></span>
-                <span style={{ fontSize:9, color:C.gray }}>Écart : <strong>{dfPrivGap!=null?`${dfPrivGap>0?"+":""}${dfPrivGap}%`:"—"}</strong></span>
+                <span style={{ fontSize:12, color:C.gray }}>Relevés : <strong>{dfPrivRates.length}</strong></span>
+                <span style={{ fontSize:12, color:C.gray }}>Pression : <strong style={{ color:dfPrivGap!=null&&dfPrivGap>30?C.red:dfPrivGap!=null&&dfPrivGap>=15?C.orange:C.green }}>{dfPrivGap==null?"—":dfPrivGap>30?"forte":dfPrivGap>=15?"moyenne":"faible"}</strong></span>
+                <span style={{ fontSize:12, color:C.gray }}>Écart : <strong>{dfPrivGap!=null?`${dfPrivGap>0?"+":""}${dfPrivGap}%`:"—"}</strong></span>
               </div>
-              <p style={{ margin:"6px 0 0", fontSize:8, color:"#C2185B", fontStyle:"italic" }}>Les particuliers servent d'alerte prix, pas de référence principale.</p>
+              <p style={{ margin:"6px 0 0", fontSize:11, color:"#C2185B", fontStyle:"italic" }}>Les particuliers servent d'alerte prix, pas de référence principale.</p>
             </div>
           </div>
         </>)}
@@ -3612,7 +3612,7 @@ export default function App() {
           {anomalies.length>0&&(
             <div style={{ ...cd(11), padding:"9px 12px", background:C.goldL, marginBottom:8, borderLeft:`3px solid ${C.gold}` }}>
               <p style={{ margin:"0 0 3px", fontSize:11, fontWeight:700, color:C.gold }}>🔍 Contrôle grille — {anomalies.length} alerte(s)</p>
-              {anomalies.map((m,i)=><p key={i} style={{ margin:"1px 0 0", fontSize:9, color:C.text }}>• {m}</p>)}
+              {anomalies.map((m,i)=><p key={i} style={{ margin:"1px 0 0", fontSize:12, color:C.text }}>• {m}</p>)}
             </div>
           )}
 
@@ -3638,19 +3638,19 @@ export default function App() {
             {/* Desktop : tableau */}
             {!isMobile&&gridPeriods.length>0&&(
               <div style={{ ...card({ padding:0 }), overflow:"auto" }}>
-                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:11 }}>
+                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
                   <thead>
                     <tr style={{ background:C.grayL }}>
-                      <th style={{ textAlign:"left", padding:"9px 11px", fontSize:9, fontWeight:700, color:C.gray, textTransform:"uppercase", position:"sticky", left:0, background:C.grayL }}>Période</th>
-                      {gridCols.map(a=><th key={a} style={{ textAlign:"center", padding:"9px 8px", fontSize:9, fontWeight:700, color:C.blue, minWidth:90 }}>{ACCOMMODATION_SHORT[a]}</th>)}
+                      <th style={{ textAlign:"left", padding:"9px 11px", fontSize:11, fontWeight:700, color:C.gray, textTransform:"uppercase", position:"sticky", left:0, background:C.grayL }}>Période</th>
+                      {gridCols.map(a=><th key={a} style={{ textAlign:"center", padding:"9px 8px", fontSize:11, fontWeight:700, color:C.blue, minWidth:90 }}>{ACCOMMODATION_SHORT[a]}</th>)}
                     </tr>
                   </thead>
                   <tbody>
                     {gridPeriods.map((p,ri)=>(
                       <tr key={p.id} style={{ borderTop:`0.5px solid ${C.grayL}` }}>
                         <td style={{ padding:"8px 11px", verticalAlign:"top" }}>
-                          <p style={{ margin:0, fontSize:11, fontWeight:600, color:C.text }}>{periodOptionLabel(p)}</p>
-                          <p style={{ margin:0, fontSize:8, color:C.gray }}>{p.season==="hiver"?"Hiver":"Été"}</p>
+                          <p style={{ margin:0, fontSize:13, fontWeight:600, color:C.text }}>{periodOptionLabel(p)}</p>
+                          <p style={{ margin:0, fontSize:11, color:C.gray }}>{p.season==="hiver"?"Hiver":"Été"}</p>
                         </td>
                         {gridCols.map(a=>{
                           const r=rateFor(p,a);
@@ -3658,11 +3658,11 @@ export default function App() {
                           return (
                             <td key={a} onClick={()=>openTarifCell(p.id,a,gridNights,r||null)} style={{ padding:"8px", textAlign:"center", cursor:"pointer", background:tarifCell&&tarifCell.periodId===p.id&&tarifCell.accType===a?C.bluePale:"transparent" }}>
                               {r?(<>
-                                <p style={{ margin:0, fontSize:13, fontWeight:700, color:C.blue }}>{fmt(Number(r.price_total))}€</p>
-                                <p style={{ margin:0, fontSize:8, color:C.gray }}>{fmt(night)}€/nuit</p>
-                                {(r.source||r.notes)&&<p style={{ margin:0, fontSize:7, color:C.gray, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:84 }}>{r.notes||r.source}</p>}
+                                <p style={{ margin:0, fontSize:15, fontWeight:700, color:C.blue }}>{fmt(Number(r.price_total))}€</p>
+                                <p style={{ margin:0, fontSize:11, color:C.gray }}>{fmt(night)}€/nuit</p>
+                                {(r.source||r.notes)&&<p style={{ margin:0, fontSize:10, color:C.gray, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:90 }}>{r.notes||r.source}</p>}
                               </>):(
-                                <span style={{ fontSize:12, color:C.grayM }}>— <span style={{ color:C.blue, fontWeight:700 }}>+</span></span>
+                                <span style={{ fontSize:14, color:C.grayM }}>— <span style={{ color:C.blue, fontWeight:700 }}>+</span></span>
                               )}
                             </td>
                           );
@@ -3683,7 +3683,7 @@ export default function App() {
                   return (
                     <div key={a} onClick={()=>openTarifCell(p.id,a,gridNights,r||null)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"6px 0", borderTop:`0.5px solid ${C.grayL}`, cursor:"pointer" }}>
                       <span style={{ fontSize:11, fontWeight:600, color:C.blue }}>{ACCOMMODATION_SHORT[a]}</span>
-                      {r?<span style={{ fontSize:12, fontWeight:700, color:C.text }}>{fmt(Number(r.price_total))}€ <span style={{ fontSize:8, color:C.gray, fontWeight:400 }}>· {fmt(Math.round(Number(r.price_total)/(r.stay_nights||gridNights)))}€/n</span></span>:<span style={{ fontSize:12, color:C.grayM }}>— <span style={{ color:C.blue, fontWeight:700 }}>+</span></span>}
+                      {r?<span style={{ fontSize:12, fontWeight:700, color:C.text }}>{fmt(Number(r.price_total))}€ <span style={{ fontSize:11, color:C.gray, fontWeight:400 }}>· {fmt(Math.round(Number(r.price_total)/(r.stay_nights||gridNights)))}€/n</span></span>:<span style={{ fontSize:12, color:C.grayM }}>— <span style={{ color:C.blue, fontWeight:700 }}>+</span></span>}
                     </div>
                   );
                 })}
@@ -3696,8 +3696,8 @@ export default function App() {
                 <p style={{ margin:"0 0 6px", fontSize:12, fontWeight:700, color:C.blue }}>{tarifCell.existing?"Modifier":"Ajouter"} — {ACCOMMODATION_SHORT[tarifCell.accType]} · {per?periodOptionLabel(per):""}</p>
                 <p style={{ ...sml, margin:"0 0 4px" }}>Prix total séjour € *</p>
                 <input type="number" autoFocus style={{ ...inp(), marginBottom:6 }} placeholder="655" value={tarifCellPrice} onChange={e=>setTarifCellPrice(e.target.value)}/>
-                {tarifCellPrice&&<p style={{ margin:"0 0 6px", fontSize:9, color:C.gray }}>{fmt(Math.round((parseFloat(tarifCellPrice)||0)/(tarifCell.nights||7)))}€/nuit · {tarifCell.nights} nuits</p>}
-                {tarifCell.existing&&<p style={{ margin:"0 0 6px", fontSize:9, color:C.green, fontWeight:600 }}>Tarif existant : {fmt(Number(tarifCell.existing.price_total))}€ — sera mis à jour</p>}
+                {tarifCellPrice&&<p style={{ margin:"0 0 6px", fontSize:12, color:C.gray }}>{fmt(Math.round((parseFloat(tarifCellPrice)||0)/(tarifCell.nights||7)))}€/nuit · {tarifCell.nights} nuits</p>}
+                {tarifCell.existing&&<p style={{ margin:"0 0 6px", fontSize:12, color:C.green, fontWeight:600 }}>Tarif existant : {fmt(Number(tarifCell.existing.price_total))}€ — sera mis à jour</p>}
                 <p style={{ ...sml, margin:"0 0 4px" }}>Notes (optionnel)</p>
                 <input style={{ ...inp(), marginBottom:8 }} placeholder="ex : grille été 2026" value={tarifCellNotes} onChange={e=>setTarifCellNotes(e.target.value)}/>
                 {tarifCellMsg==="ok"&&<p style={{ margin:"0 0 6px", fontSize:11, color:C.green, fontWeight:600 }}>✓ Tarif enregistré</p>}
@@ -3728,10 +3728,10 @@ export default function App() {
                 </div>
               </div>
               <div style={{ display:"flex", gap:5, marginBottom:6, flexWrap:"wrap" }}>
-                <span style={{ fontSize:9, background:C.grayL, color:C.gray, padding:"3px 7px", borderRadius:6 }}>Durée : {dashNights} nuits</span>
-                <span style={{ fontSize:9, background:C.grayL, color:C.gray, padding:"3px 7px", borderRadius:6 }}>{dashPeriod?.season==="hiver"?"Hiver":"Été"}</span>
-                <span style={{ fontSize:9, background:C.grayL, color:C.gray, padding:"3px 7px", borderRadius:6 }}>Capacité : {ACCOMMODATION_TYPES[saisieAcc]?.capacity||"?"}P</span>
-                {saisieExisting&&<span style={{ fontSize:9, background:C.greenL, color:C.green, padding:"3px 7px", borderRadius:6, fontWeight:700 }}>existant · sera mis à jour</span>}
+                <span style={{ fontSize:12, background:C.grayL, color:C.gray, padding:"3px 7px", borderRadius:6 }}>Durée : {dashNights} nuits</span>
+                <span style={{ fontSize:12, background:C.grayL, color:C.gray, padding:"3px 7px", borderRadius:6 }}>{dashPeriod?.season==="hiver"?"Hiver":"Été"}</span>
+                <span style={{ fontSize:12, background:C.grayL, color:C.gray, padding:"3px 7px", borderRadius:6 }}>Capacité : {ACCOMMODATION_TYPES[saisieAcc]?.capacity||"?"}P</span>
+                {saisieExisting&&<span style={{ fontSize:12, background:C.greenL, color:C.green, padding:"3px 7px", borderRadius:6, fontWeight:700 }}>existant · sera mis à jour</span>}
               </div>
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:6 }}>
                 <div>
@@ -3754,7 +3754,7 @@ export default function App() {
           {dashTarifTab==="import"&&(
             <div style={{ ...cd(11), padding:"11px 13px" }}>
               <p style={{ margin:"0 0 4px", fontSize:11, fontWeight:700, color:C.blue }}>Importer grille tarifaire Les Cimes</p>
-              <p style={{ margin:"0 0 6px", fontSize:9, color:C.gray, fontFamily:"monospace", lineHeight:1.5 }}>period_id;period_start;period_end;period_label;season;stay_nights;capacity;accommodation_type;price_total;notes</p>
+              <p style={{ margin:"0 0 6px", fontSize:12, color:C.gray, fontFamily:"monospace", lineHeight:1.5 }}>period_id;period_start;period_end;period_label;season;stay_nights;capacity;accommodation_type;price_total;notes</p>
               {ourCsvResult&&(
                 <div style={{ ...cd(8), padding:"8px 10px", background:ourCsvResult.errors.length===0?C.greenL:C.goldL, marginBottom:6 }}>
                   <p style={{ margin:"0 0 1px", fontSize:11, color:C.green }}>✓ Importés : {ourCsvResult.ok}</p>
@@ -3791,17 +3791,17 @@ export default function App() {
                     <div style={{ flex:1, minWidth:0 }}>
                       <p style={{ margin:0, fontSize:12, fontWeight:500, color:C.text }}>{r.period_start?`${fmtDateShort(r.period_start)} → ${fmtDateShort(r.period_end||addDaysStr(r.period_start,r.stay_nights||7))}`:(r.period_label||r.period_id)}</p>
                       <div style={{ display:"flex", gap:4, marginTop:1, flexWrap:"wrap" }}>
-                        {(()=>{ const t=inferAccommodationType(r); return t?<span style={{ fontSize:8, fontWeight:700, color:C.blue, background:C.bluePale, padding:"1px 5px", borderRadius:3 }}>{ACCOMMODATION_SHORT[t]}{!r.accommodation_type?" (déduit)":""}</span>:<span style={{ fontSize:8, fontWeight:700, color:C.red, background:C.redL, padding:"1px 5px", borderRadius:3 }}>sans typologie</span>; })()}
-                        <span style={{ fontSize:9, color:C.gray }}>{r.capacity}P · {r.stay_nights||7} nuits</span>
-                        <span style={{ fontSize:9, color:r.season==="hiver"?"#0EA5E9":C.orange }}>{r.season==="hiver"?"Hiver":"Été"}</span>
-                        <span style={{ fontSize:8, background:C.grayL, color:C.gray, padding:"1px 5px", borderRadius:3 }}>{r.source||"saisie"}</span>
+                        {(()=>{ const t=inferAccommodationType(r); return t?<span style={{ fontSize:11, fontWeight:700, color:C.blue, background:C.bluePale, padding:"1px 5px", borderRadius:3 }}>{ACCOMMODATION_SHORT[t]}{!r.accommodation_type?" (déduit)":""}</span>:<span style={{ fontSize:11, fontWeight:700, color:C.red, background:C.redL, padding:"1px 5px", borderRadius:3 }}>sans typologie</span>; })()}
+                        <span style={{ fontSize:12, color:C.gray }}>{r.capacity}P · {r.stay_nights||7} nuits</span>
+                        <span style={{ fontSize:12, color:r.season==="hiver"?"#0EA5E9":C.orange }}>{r.season==="hiver"?"Hiver":"Été"}</span>
+                        <span style={{ fontSize:11, background:C.grayL, color:C.gray, padding:"1px 5px", borderRadius:3 }}>{r.source||"saisie"}</span>
                       </div>
-                      {r.notes&&<p style={{ margin:"1px 0 0", fontSize:9, color:C.gray, fontStyle:"italic" }}>{r.notes}</p>}
+                      {r.notes&&<p style={{ margin:"1px 0 0", fontSize:12, color:C.gray, fontStyle:"italic" }}>{r.notes}</p>}
                     </div>
                     <div style={{ textAlign:"right", flexShrink:0, display:"flex", alignItems:"center", gap:8 }}>
                       <div>
                         <p style={{ margin:0, fontSize:12, fontWeight:700, color:C.blue }}>{fmt(Number(r.price_total))}€/séjour</p>
-                        <p style={{ margin:0, fontSize:9, color:C.gray }}>{fmt(Number(r.price_night||Math.round(Number(r.price_total)/(r.stay_nights||7))))}€/nuit</p>
+                        <p style={{ margin:0, fontSize:12, color:C.gray }}>{fmt(Number(r.price_night||Math.round(Number(r.price_total)/(r.stay_nights||7))))}€/nuit</p>
                       </div>
                       <button onClick={()=>handleDeleteOurRate(r.id)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:14, color:C.gray, padding:2 }}>🗑</button>
                     </div>
@@ -3859,15 +3859,15 @@ export default function App() {
                       <div style={{ display:"flex", alignItems:"center", gap:5, flexWrap:"wrap" }}>
                         <span style={{ fontSize:12, fontWeight:600, color:C.text }}>{c.name}</span>
                         <Badge label={isPrivate?"Particulier":c.property_type==="hôtel"?"Hôtel":"Pro"} color={isPrivate?"#FF5A5F":c.property_type==="hôtel"?C.purple:C.blue} bg={isPrivate?"#FFE9EA":c.property_type==="hôtel"?C.purpleL:C.bluePale} size={8}/>
-                        {isPrivate&&c.detected_capacity&&<span style={{ fontSize:8, color:C.gray }}>{c.detected_capacity}P{c.detected_rooms?` · ${c.detected_rooms}`:""}</span>}
+                        {isPrivate&&c.detected_capacity&&<span style={{ fontSize:11, color:C.gray }}>{c.detected_capacity}P{c.detected_rooms?` · ${c.detected_rooms}`:""}</span>}
                       </div>
                       <div style={{ display:"flex", gap:4, marginTop:2, alignItems:"center", flexWrap:"wrap" }}>
-                        <span style={{ fontSize:9, color:C.gray }}>score {c.comparability_score||"?"}/100</span>
+                        <span style={{ fontSize:12, color:C.gray }}>score {c.comparability_score||"?"}/100</span>
                         {compSources.length===0
-                          ? <span style={{ fontSize:8, color:C.gray, fontStyle:"italic" }}>Aucune source suivie</span>
+                          ? <span style={{ fontSize:11, color:C.gray, fontStyle:"italic" }}>Aucune source suivie</span>
                           : compSources.map(s=>(()=>{ const m=sourceBadgeMeta(s.source_type); return <Badge key={s.id} label={s.source_name} color={m.c} bg={m.bg} size={8}/>; })())}
                       </div>
-                      {c.notes&&<p style={{ margin:"2px 0 0", fontSize:9, color:C.gray, fontStyle:"italic" }}>{c.notes}</p>}
+                      {c.notes&&<p style={{ margin:"2px 0 0", fontSize:12, color:C.gray, fontStyle:"italic" }}>{c.notes}</p>}
                     </div>
                     <div style={{ display:"flex", gap:6, alignItems:"center", flexShrink:0 }}>
                       <button onClick={()=>setSourcesOpenFor(open?null:c.id)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:10, color:C.blue, padding:2 }}>{open?"▲ Sources":"▼ Sources"}</button>
@@ -3878,12 +3878,12 @@ export default function App() {
                   {open&&(
                     <div style={{ padding:"0 13px 10px", background:C.grayL }}>
                       <p style={{ ...sml, margin:"6px 0 4px" }}>Sources suivies</p>
-                      {(sources||[]).filter(s=>s.competitor_id===c.id).length===0&&<p style={{ margin:"0 0 6px", fontSize:9, color:C.gray, fontStyle:"italic" }}>Aucune source dédiée.</p>}
+                      {(sources||[]).filter(s=>s.competitor_id===c.id).length===0&&<p style={{ margin:"0 0 6px", fontSize:12, color:C.gray, fontStyle:"italic" }}>Aucune source dédiée.</p>}
                       {(sources||[]).filter(s=>s.competitor_id===c.id).map(s=>(
                         <div key={s.id} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:6, padding:"4px 0" }}>
                           <div style={{ minWidth:0, flex:1 }}>
                             <span style={{ fontSize:10, fontWeight:600, color:C.text }}>{s.source_name}</span>
-                            <p style={{ margin:0, fontSize:8, color:C.gray, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{s.source_url}</p>
+                            <p style={{ margin:0, fontSize:11, color:C.gray, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{s.source_url}</p>
                           </div>
                           <button onClick={()=>handleDeleteSource(s.id)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:12, color:C.gray, flexShrink:0 }}>🗑</button>
                         </div>
@@ -3912,7 +3912,7 @@ export default function App() {
                           )}
                           <input style={{ ...inp(), marginBottom:5 }} placeholder="URL de la fiche" value={sourceForm.source_url} onChange={e=>setSourceForm(f=>({ ...f, source_url:e.target.value }))}/>
                           <input style={{ ...inp(), marginBottom:5 }} placeholder="Notes (optionnel)" value={sourceForm.notes||""} onChange={e=>setSourceForm(f=>({ ...f, notes:e.target.value }))}/>
-                          {sourceForm.error&&<p style={{ margin:"0 0 5px", fontSize:9, color:C.red }}>✗ {sourceForm.error}</p>}
+                          {sourceForm.error&&<p style={{ margin:"0 0 5px", fontSize:12, color:C.red }}>✗ {sourceForm.error}</p>}
                           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:5 }}>
                             <button onClick={()=>setSourceForm(null)} style={{ ...btn(false,C.grayL,C.text), margin:0 }}>Annuler</button>
                             <button onClick={handleSaveSource} style={{ ...btn(false,C.blue), margin:0 }}>Enregistrer source</button>
@@ -3921,7 +3921,7 @@ export default function App() {
                       ) : (
                         <div style={{ display:"flex", gap:4, flexWrap:"wrap", marginTop:4 }}>
                           {quickAdds.map(([fam,st,sn,lbl],bi)=>(
-                            <button key={bi} onClick={()=>setSourceForm({ competitor_id:c.id, family:fam, source_type:st, source_name:sn, source_url:"", notes:"" })} style={{ fontSize:9, fontWeight:600, color:C.blue, background:C.bluePale, border:"none", borderRadius:6, padding:"5px 8px", cursor:"pointer" }}>{lbl}</button>
+                            <button key={bi} onClick={()=>setSourceForm({ competitor_id:c.id, family:fam, source_type:st, source_name:sn, source_url:"", notes:"" })} style={{ fontSize:12, fontWeight:600, color:C.blue, background:C.bluePale, border:"none", borderRadius:6, padding:"5px 8px", cursor:"pointer" }}>{lbl}</button>
                           ))}
                         </div>
                       )}
@@ -3961,7 +3961,7 @@ export default function App() {
                 <button onClick={()=>{ setCatForm(null); setCompetitorFormSources([]); }} style={{ ...btn(false,C.grayL,C.text), margin:0 }}>Annuler</button>
                 <button onClick={handleSaveCatalogItem} disabled={catSaving||!catForm.name?.trim()} style={{ ...btn(catSaving||!catForm.name?.trim(),C.blue), margin:0 }}>{catSaving?"…":"Enregistrer"}</button>
               </div>
-              <p style={{ margin:"6px 0 0", fontSize:8, color:C.gray, fontStyle:"italic" }}>Ajoutez les sources (Booking, TO, OTA…) après l'enregistrement via le bouton « ▼ Sources » du concurrent.</p>
+              <p style={{ margin:"6px 0 0", fontSize:11, color:C.gray, fontStyle:"italic" }}>Ajoutez les sources (Booking, TO, OTA…) après l'enregistrement via le bouton « ▼ Sources » du concurrent.</p>
             </div>
           )}
         </div><BNav/>
@@ -3991,7 +3991,7 @@ export default function App() {
         <div style={{ padding:"6px 14px 4px" }}>
           <div style={{ ...cd(10), padding:"8px 11px", background:C.goldL, marginBottom:8 }}>
             <p style={{ margin:"0 0 1px", fontSize:11, fontWeight:700, color:C.orange }}>📡 Radar marché — découverte de concurrents</p>
-            <p style={{ margin:0, fontSize:9, color:C.orange }}>Les résultats Radar sont indicatifs. Ajoutez les concurrents utiles dans le catalogue avant de les suivre.</p>
+            <p style={{ margin:0, fontSize:12, color:C.orange }}>Les résultats Radar sont indicatifs. Ajoutez les concurrents utiles dans le catalogue avant de les suivre.</p>
           </div>
           {/* Sélecteur de mode */}
           <div style={{ display:"flex", gap:4, marginBottom:8 }}>
@@ -4025,26 +4025,26 @@ export default function App() {
                         <div style={{ display:"flex", alignItems:"center", gap:5, marginBottom:2, flexWrap:"wrap" }}>
                           <div style={{ width:5, height:5, borderRadius:"50%", flexShrink:0, background:CAT_C[p.season_type] }}/>
                           <span style={{ fontSize:12, fontWeight:500, color:C.text }}>{p.label}</span>
-                          {p.event_label&&<span style={{ fontSize:8, background:C.purpleL, color:C.purple, padding:"1px 4px", borderRadius:3, fontWeight:600 }}>{p.event_label.slice(0,14)}</span>}
+                          {p.event_label&&<span style={{ fontSize:11, background:C.purpleL, color:C.purple, padding:"1px 4px", borderRadius:3, fontWeight:600 }}>{p.event_label.slice(0,14)}</span>}
                         </div>
                         <div style={{ marginLeft:10, display:"flex", gap:4, alignItems:"center", flexWrap:"wrap" }}>
                           <Badge label={CAT_L[p.season_type]} color={CAT_C[p.season_type]} bg={p.season_type==="haute"?"#FFF0E6":p.season_type==="moyenne"?C.bluePale:C.greenL} size={9}/>
                           {p.season==="hiver"&&<Badge label="Hiver" color="#0EA5E9" bg="#E0F2FE" size={9}/>}
                           <Badge label={pIs2n?"2 nuits":"7 nuits"} color={pIs2n?C.purple:C.gray} bg={pIs2n?C.purpleL:C.grayL} size={9}/>
                         </div>
-                        {p.subtitle&&<p style={{ margin:"2px 0 0 10px", fontSize:9, color:C.gray }}>{p.subtitle}</p>}
+                        {p.subtitle&&<p style={{ margin:"2px 0 0 10px", fontSize:12, color:C.gray }}>{p.subtitle}</p>}
                       </div>
                       <div style={{ textAlign:"right", flexShrink:0 }}>
                         {op>0 ? (
                           <>
                             <p style={{ margin:0, fontSize:12, fontWeight:600, color:C.blue }}>{fmt(op)}€/séjour</p>
-                            <p style={{ margin:0, fontSize:9, color:C.gray }}>{fmt(opNight)}€/nuit</p>
-                            <span style={{ fontSize:8, fontWeight:700, padding:"1px 4px", borderRadius:3, background:isSb?C.greenL:C.grayL, color:isSb?C.green:C.gray }}>{isSb?"saisi":"fallback"}</span>
+                            <p style={{ margin:0, fontSize:12, color:C.gray }}>{fmt(opNight)}€/nuit</p>
+                            <span style={{ fontSize:11, fontWeight:700, padding:"1px 4px", borderRadius:3, background:isSb?C.greenL:C.grayL, color:isSb?C.green:C.gray }}>{isSb?"saisi":"fallback"}</span>
                           </>
                         ) : (
                           <>
                             <p style={{ margin:0, fontSize:11, color:C.gray, fontStyle:"italic" }}>—€/séjour</p>
-                            <p style={{ margin:0, fontSize:8, color:C.gray }}>{pIs2n?"2 nuits":"7 nuits"}</p>
+                            <p style={{ margin:0, fontSize:11, color:C.gray }}>{pIs2n?"2 nuits":"7 nuits"}</p>
                           </>
                         )}
                       </div>
@@ -4098,9 +4098,9 @@ export default function App() {
       <div><SBar title={w?.label}/>
         <div style={{ background:`linear-gradient(135deg,${wColor}CC,${wColor})`, padding:"8px 14px 12px" }}>
           <button onClick={()=>setScreen("weeks")} style={{ background:"none", border:"none", cursor:"pointer", color:"rgba(255,255,255,0.8)", fontSize:12, padding:"0 0 4px", display:"flex", alignItems:"center", gap:3 }}>← Semaines</button>
-          <p style={{ margin:"0 0 1px", fontSize:9, fontWeight:700, color:"rgba(255,255,255,0.65)", textTransform:"uppercase" }}>{CAT_L[w?.season_type]} · {cap} · {nightsLabel}</p>
+          <p style={{ margin:"0 0 1px", fontSize:12, fontWeight:700, color:"rgba(255,255,255,0.65)", textTransform:"uppercase" }}>{CAT_L[w?.season_type]} · {cap} · {nightsLabel}</p>
           <p style={{ margin:"0 0 2px", fontSize:15, fontWeight:700, color:C.white }}>{w?.label} {w?.year}</p>
-          {w?.event_label&&<span style={{ fontSize:9, background:"rgba(255,255,255,0.2)", color:"#fff", padding:"2px 7px", borderRadius:10 }}>{w.event_label}</span>}
+          {w?.event_label&&<span style={{ fontSize:12, background:"rgba(255,255,255,0.2)", color:"#fff", padding:"2px 7px", borderRadius:10 }}>{w.event_label}</span>}
         </div>
         <div style={{ display:"flex", background:C.grayM, margin:"8px 14px", padding:2, borderRadius:9 }}>
           {[{id:"detail",l:"Résumé"},{id:"table",l:"Concurrents"},{id:"history",l:"Historique"},{id:"reco",l:"Analyse IA"}].map(t=>(
@@ -4119,7 +4119,7 @@ export default function App() {
             )}
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:8 }}>
               <div style={{ ...cd(11,0), padding:"10px 11px", background:C.bluePale }}>
-                <p style={{ margin:"0 0 1px", fontSize:8, color:C.blueL, fontWeight:700, textTransform:"uppercase" }}>Nos tarifs · {cap}</p>
+                <p style={{ margin:"0 0 1px", fontSize:11, color:C.blueL, fontWeight:700, textTransform:"uppercase" }}>Nos tarifs · {cap}</p>
                 {ourPrice>0 ? (
                   <>
                     <p style={{ margin:0, fontSize:18, fontWeight:700, color:C.blue }}>{fmt(ourNight)}€/n</p>
@@ -4133,7 +4133,7 @@ export default function App() {
                 )}
               </div>
               <div style={{ ...cd(11,0), padding:"10px 11px", background:C.grayL }}>
-                <p style={{ margin:"0 0 1px", fontSize:8, color:C.gray, fontWeight:700, textTransform:"uppercase" }}>Médiane marché ({reco.ratesCount})</p>
+                <p style={{ margin:"0 0 1px", fontSize:11, color:C.gray, fontWeight:700, textTransform:"uppercase" }}>Médiane marché ({reco.ratesCount})</p>
                 <p style={{ margin:0, fontSize:18, fontWeight:700, color:C.text }}>{reco.ref?fmt(Math.round(reco.ref/(w?.stay_nights||7)))+"€/n":"—"}</p>
                 <p style={{ margin:0, fontSize:10, color:C.gray }}>{reco.ref?fmt(reco.ref)+priceLabel:"Insuffisant"}</p>
               </div>
@@ -4141,7 +4141,7 @@ export default function App() {
             {pct!==null&&reco.ref&&(
               <div style={{ ...cd(10), padding:"8px 11px", background:pct<-settings.thresholdLow?C.redL:pct>settings.thresholdHigh?C.goldL:C.greenL, marginBottom:8, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                 <span style={{ fontSize:12, fontWeight:700, color:pct<-settings.thresholdLow?C.red:pct>settings.thresholdHigh?C.gold:C.green }}>{pct<-settings.thresholdLow?"↓ Trop bas":pct>settings.thresholdHigh?"↑ Trop haut":"✓ Bien placé"} · {fmtPct(pct)}</span>
-                <span style={{ fontSize:9, fontWeight:600, background:C.white, padding:"2px 7px", borderRadius:10, color:{fort:C.green,moyen:C.orange,faible:C.red}[reco.confidence] }}>{reco.confidence} ({reco.confScore}/100)</span>
+                <span style={{ fontSize:12, fontWeight:600, background:C.white, padding:"2px 7px", borderRadius:10, color:{fort:C.green,moyen:C.orange,faible:C.red}[reco.confidence] }}>{reco.confidence} ({reco.confScore}/100)</span>
               </div>
             )}
             {allMax>allMin&&ourPrice>0&&(
@@ -4151,15 +4151,15 @@ export default function App() {
                   <div style={{ position:"absolute", top:-2, left:`calc(${mPct}% - 1px)`, width:2, height:10, background:C.gray, borderRadius:1 }}/>
                   <div style={{ position:"absolute", top:-4, left:`calc(${oPct}% - 7px)`, width:14, height:14, borderRadius:"50%", background:pct<0?C.red:pct>settings.thresholdHigh?C.gold:C.green, border:`2px solid ${C.white}` }}/>
                 </div>
-                <div style={{ display:"flex", justifyContent:"space-between", fontSize:9, color:C.gray, marginTop:3 }}><span>{fmt(allMin)}€</span><span style={{ fontWeight:600 }}>{fmt(reco.ref||0)}€ méd.</span><span>{fmt(allMax)}€</span></div>
+                <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:C.gray, marginTop:3 }}><span>{fmt(allMin)}€</span><span style={{ fontWeight:600 }}>{fmt(reco.ref||0)}€ méd.</span><span>{fmt(allMax)}€</span></div>
               </div>
             )}
             <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:5 }}>
               {[{l:"Résidences",v:reco.medRes,c:C.blue},{l:"Particuliers",v:reco.medPart,c:"#FF5A5F"},{l:"Hôtels",v:reco.medHot,c:C.purple}].map((s,i)=>(
                 <div key={i} style={{ ...cd(10,0), padding:"8px", textAlign:"center" }}>
-                  <p style={{ margin:"0 0 1px", fontSize:8, color:C.gray, fontWeight:700, textTransform:"uppercase" }}>{s.l}</p>
+                  <p style={{ margin:"0 0 1px", fontSize:11, color:C.gray, fontWeight:700, textTransform:"uppercase" }}>{s.l}</p>
                   <p style={{ margin:0, fontSize:13, fontWeight:700, color:s.c }}>{s.v?fmt(s.v)+"€":"—"}</p>
-                  {ourPrice&&s.v?<p style={{ margin:0, fontSize:9, fontWeight:700, color:(ourPrice-s.v)>0?C.green:C.red }}>{(ourPrice-s.v)>0?"+":""}{fmt(ourPrice-s.v)}€</p>:null}
+                  {ourPrice&&s.v?<p style={{ margin:0, fontSize:12, fontWeight:700, color:(ourPrice-s.v)>0?C.green:C.red }}>{(ourPrice-s.v)>0?"+":""}{fmt(ourPrice-s.v)}€</p>:null}
                 </div>
               ))}
             </div>
@@ -4174,11 +4174,11 @@ export default function App() {
             </div>
             <div style={cd()}>
               <div style={{ ...rw(false), background:C.bluePale }}>
-                <div><div style={{ display:"flex", alignItems:"center", gap:5 }}><span style={{ fontSize:11, fontWeight:700, color:C.blue }}>Les Cimes (nous)</span><ReliaBadge status="réel"/></div><p style={{ margin:0, fontSize:9, color:C.blueL }}>{currentOurRate?`Tarif saisi · Supabase`:`Grille interne fallback · ${OUR_TARIFS_META.verified_at}`}</p></div>
+                <div><div style={{ display:"flex", alignItems:"center", gap:5 }}><span style={{ fontSize:11, fontWeight:700, color:C.blue }}>Les Cimes (nous)</span><ReliaBadge status="réel"/></div><p style={{ margin:0, fontSize:12, color:C.blueL }}>{currentOurRate?`Tarif saisi · Supabase`:`Grille interne fallback · ${OUR_TARIFS_META.verified_at}`}</p></div>
                 <div style={{ textAlign:"right" }}>
                   {ourPrice>0?(<>
                     <p style={{ margin:0, fontSize:12, fontWeight:700, color:C.blue }}>{fmt(ourPrice)}€/séjour</p>
-                    <p style={{ margin:0, fontSize:9, color:C.blueL }}>{fmt(ourNight)}€/nuit · {_nights} nuits</p>
+                    <p style={{ margin:0, fontSize:12, color:C.blueL }}>{fmt(ourNight)}€/nuit · {_nights} nuits</p>
                   </>):(
                     <p style={{ margin:0, fontSize:11, color:C.gray, fontStyle:"italic" }}>Tarif à saisir</p>
                   )}
@@ -4206,11 +4206,11 @@ export default function App() {
                         <span style={{ fontSize:11, fontWeight:500, color:C.text, textDecoration:isRejected?"line-through":"none" }}>{r.competitor_name||r.source}</span>
                         {r.promo_label&&<PromoBadge label={r.promo_label}/>}
                         <ReliaBadge status={st}/>
-                        <span style={{ fontSize:9, color:C.gray }}>score {r.comparability_score||"?"}/100</span>
+                        <span style={{ fontSize:12, color:C.gray }}>score {r.comparability_score||"?"}/100</span>
                       </div>
                       <div style={{ display:"flex", gap:5 }}>
-                        <span style={{ fontSize:9, color:C.gray }}>{r.collection_type}</span>
-                        <span style={{ fontSize:9, color:age>settings.obsoleteDays?C.orange:C.gray }}>il y a {age}j</span>
+                        <span style={{ fontSize:12, color:C.gray }}>{r.collection_type}</span>
+                        <span style={{ fontSize:12, color:age>settings.obsoleteDays?C.orange:C.gray }}>il y a {age}j</span>
                         {r.stay_nights===2&&<Badge label="2 NUITS" color={C.purple} bg={C.purpleL} size={8}/>}
                         {r.season==="hiver"&&<Badge label="HIVER" color="#0EA5E9" bg="#E0F2FE" size={8}/>}
                       </div>
@@ -4218,8 +4218,8 @@ export default function App() {
                     <div style={{ textAlign:"right", flexShrink:0, display:"flex", alignItems:"center", gap:8 }}>
                       <div>
                         <p style={{ margin:0, fontSize:11, fontWeight:600, color:C.text }}>{fmt(Number(r.price_night||Math.round((r.price_week||0)/7)))}€/n</p>
-                        {r.stay_nights===2&&r.price_week_equiv&&<p style={{ margin:0, fontSize:9, color:C.gray }}>≈{fmt(r.price_week_equiv)}€/sem</p>}
-                        {diff!==null&&<p style={{ margin:0, fontSize:9, fontWeight:700, color:diff>0?C.green:C.red }}>{diff>0?"+":""}{fmt(diff)}€</p>}
+                        {r.stay_nights===2&&r.price_week_equiv&&<p style={{ margin:0, fontSize:12, color:C.gray }}>≈{fmt(r.price_week_equiv)}€/sem</p>}
+                        {diff!==null&&<p style={{ margin:0, fontSize:12, fontWeight:700, color:diff>0?C.green:C.red }}>{diff>0?"+":""}{fmt(diff)}€</p>}
                       </div>
                       <button onClick={()=>setDC(r.id)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:14, color:C.gray, padding:2 }}>🗑</button>
                     </div>
@@ -4233,12 +4233,12 @@ export default function App() {
                     )}
                     {isValidated&&(
                       <div style={{ marginTop:5 }}>
-                        <button onClick={()=>updateRateStatus(r,"à vérifier")} style={{ fontSize:9, color:C.gray, background:"none", border:"none", cursor:"pointer", textDecoration:"underline", padding:0 }}>repasser à vérifier</button>
+                        <button onClick={()=>updateRateStatus(r,"à vérifier")} style={{ fontSize:12, color:C.gray, background:"none", border:"none", cursor:"pointer", textDecoration:"underline", padding:0 }}>repasser à vérifier</button>
                       </div>
                     )}
                     {isRejected&&(
                       <div style={{ marginTop:5 }}>
-                        <button onClick={()=>updateRateStatus(r,"à vérifier")} style={{ fontSize:9, color:C.gray, background:"none", border:"none", cursor:"pointer", textDecoration:"underline", padding:0 }}>réactiver</button>
+                        <button onClick={()=>updateRateStatus(r,"à vérifier")} style={{ fontSize:12, color:C.gray, background:"none", border:"none", cursor:"pointer", textDecoration:"underline", padding:0 }}>réactiver</button>
                       </div>
                     )}
                   </div>
@@ -4269,7 +4269,7 @@ export default function App() {
 
                     {/* Avertissement usage Claude */}
                     <div style={{ background:C.goldL, borderRadius:8, padding:"7px 10px", marginBottom:10 }}>
-                      <p style={{ margin:0, fontSize:9, color:C.orange, fontWeight:600, lineHeight:1.4 }}>Claude sert à repérer des annonces, pas à garantir les prix. Vérifiez chaque tarif sur Booking avant de valider.</p>
+                      <p style={{ margin:0, fontSize:12, color:C.orange, fontWeight:600, lineHeight:1.4 }}>Claude sert à repérer des annonces, pas à garantir les prix. Vérifiez chaque tarif sur Booking avant de valider.</p>
                     </div>
 
                     {/* Mode */}
@@ -4314,11 +4314,11 @@ export default function App() {
                               <div style={{ flex:1, minWidth:0 }}>
                                 <div style={{ display:"flex", alignItems:"center", gap:5, flexWrap:"wrap" }}>
                                   <span style={{ fontSize:12, fontWeight:sel?600:400, color:sel?C.blue:C.text }}>{p.label}</span>
-                                  {p.isCurrent&&<span style={{ fontSize:8, fontWeight:700, background:C.greenL, color:C.green, padding:"1px 5px", borderRadius:4 }}>Période courante</span>}
+                                  {p.isCurrent&&<span style={{ fontSize:11, fontWeight:700, background:C.greenL, color:C.green, padding:"1px 5px", borderRadius:4 }}>Période courante</span>}
                                 </div>
-                                <span style={{ fontSize:9, color:C.gray }}>{fmtDateShort(p.period_start)} → {fmtDateShort(endDate)} · {p.season==="hiver"?"Hiver":"Été"} · {p.stay_nights} nuits</span>
+                                <span style={{ fontSize:12, color:C.gray }}>{fmtDateShort(p.period_start)} → {fmtDateShort(endDate)} · {p.season==="hiver"?"Hiver":"Été"} · {p.stay_nights} nuits</span>
                               </div>
-                              <span style={{ fontSize:9, fontWeight:600, color:p.season==="hiver"?"#0EA5E9":C.orange, flexShrink:0 }}>{p.season==="hiver"?"Hiver":"Été"}</span>
+                              <span style={{ fontSize:12, fontWeight:600, color:p.season==="hiver"?"#0EA5E9":C.orange, flexShrink:0 }}>{p.season==="hiver"?"Hiver":"Été"}</span>
                             </label>
                           );
                         })}
@@ -4342,15 +4342,15 @@ export default function App() {
                     <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:4, marginBottom:4 }}>
                       {["Booking.com","Airbnb","Abritel"].map(pf=>{ const sel=planPlatforms.includes(pf); return (<button key={pf} onClick={()=>setPlanPlatforms(prev=>sel?prev.filter(x=>x!==pf):[...prev,pf])} style={{ padding:"6px 4px", background:sel?C.green:C.grayL, border:"none", borderRadius:8, cursor:"pointer", fontSize:10, fontWeight:sel?700:400, color:sel?C.white:C.text }}>{pf.replace(".com","")}</button>); })}
                     </div>
-                    {planPlatforms.length===0&&<p style={{ margin:"0 0 8px", fontSize:9, color:C.red }}>Sélectionnez au moins une plateforme.</p>}
-                    {planPlatforms.length>1&&<p style={{ margin:"0 0 8px", fontSize:9, color:C.orange }}>⚠ Plusieurs plateformes = plus de consommation IA.</p>}
+                    {planPlatforms.length===0&&<p style={{ margin:"0 0 8px", fontSize:12, color:C.red }}>Sélectionnez au moins une plateforme.</p>}
+                    {planPlatforms.length>1&&<p style={{ margin:"0 0 8px", fontSize:12, color:C.orange }}>⚠ Plusieurs plateformes = plus de consommation IA.</p>}
                     {planPlatforms.length===1&&<div style={{ marginBottom:8 }}/>}
 
                     {/* Cache toggle */}
                     <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"7px 10px", background:C.grayL, borderRadius:8, marginBottom:10 }}>
                       <div>
                         <p style={{ margin:0, fontSize:11, fontWeight:600, color:C.text }}>{planForceRefresh?"Forcer nouvelle recherche":"Utiliser cache (7j)"}</p>
-                        <p style={{ margin:0, fontSize:9, color:C.gray }}>{planForceRefresh?"Claude sera appelé même si cache existant":"Retourne le cache si disponible"}</p>
+                        <p style={{ margin:0, fontSize:12, color:C.gray }}>{planForceRefresh?"Claude sera appelé même si cache existant":"Retourne le cache si disponible"}</p>
                       </div>
                       <button onClick={()=>setPlanForce(p=>!p)} style={{ width:44, height:26, borderRadius:13, background:planForceRefresh?C.orange:C.green, border:"none", cursor:"pointer", position:"relative", flexShrink:0 }}>
                         <div style={{ position:"absolute", top:3, left:planForceRefresh?21:3, width:20, height:20, borderRadius:"50%", background:C.white, transition:"left 0.15s" }}/>
@@ -4366,7 +4366,7 @@ export default function App() {
                           ? `⚠ Trop large : ${selectedPlanPeriods.length} période(s) × ${planCaps.length} capacité(s) = ${planCombos} — max 1. Lance 1 période × 1 capacité.`
                           : `✓ ${selectedPlanPeriods.length} période${selectedPlanPeriods.length>1?"s":""} × ${planCaps.length} capacité${planCaps.length>1?"s":""} = ${planCombos} recherche${planCombos>1?"s":""}`}
                       </p>
-                      {planCombos>0&&!planTooMany&&<p style={{ margin:"1px 0 0", fontSize:9, color:C.green }}>Durée estimée : ~{planCombos*30}s</p>}
+                      {planCombos>0&&!planTooMany&&<p style={{ margin:"1px 0 0", fontSize:12, color:C.green }}>Durée estimée : ~{planCombos*30}s</p>}
                     </div>
 
                     <button onClick={launchPlan} disabled={!planCanLaunch} style={{ ...btn(!planCanLaunch,C.blue), margin:0 }}>
@@ -4377,7 +4377,7 @@ export default function App() {
                       const start=sp.period_start||sp.week_start;
                       const nights=sp.stay_nights||planNights||7;
                       const checkout=sp.period_end||addDaysStr(start,nights);
-                      return <p style={{ margin:"5px 0 0", fontSize:9, color:C.gray, textAlign:"center" }}>Booking : arrivée {fmtDateShort(start)} · départ {fmtDateShort(checkout)} · {nights} nuits</p>;
+                      return <p style={{ margin:"5px 0 0", fontSize:12, color:C.gray, textAlign:"center" }}>Booking : arrivée {fmtDateShort(start)} · départ {fmtDateShort(checkout)} · {nights} nuits</p>;
                     })()}
 
                     {planError&&<div style={{ ...cd(9), padding:"8px 12px", background:C.redL, marginTop:6, marginBottom:0 }}><p style={{ margin:0, fontSize:11, color:C.red }}>{planError}</p></div>}
@@ -4401,23 +4401,23 @@ export default function App() {
                                 <div>
                                   <div style={{ display:"flex", alignItems:"center", gap:6 }}>
                                     <p style={{ margin:0, fontSize:11, fontWeight:700, color:result.from_cache?C.green:C.blue }}>{result.week_label}</p>
-                                    <span style={{ fontSize:9, fontWeight:700, padding:"1px 5px", borderRadius:4, background:result.from_cache?"#D1FAE5":"#DBEAFE", color:result.from_cache?C.green:C.blueL }}>{result.from_cache?"Cache":"Pré-recherche"}</span>
+                                    <span style={{ fontSize:12, fontWeight:700, padding:"1px 5px", borderRadius:4, background:result.from_cache?"#D1FAE5":"#DBEAFE", color:result.from_cache?C.green:C.blueL }}>{result.from_cache?"Cache":"Pré-recherche"}</span>
                                   </div>
-                                  <p style={{ margin:0, fontSize:9, color:result.from_cache?C.green:C.blueL }}>
+                                  <p style={{ margin:0, fontSize:12, color:result.from_cache?C.green:C.blueL }}>
                                     {fmtDateShort(result.period_start)} → {fmtDateShort(addDaysStr(result.period_start,(result.stay_nights||7)-1))} · {result.stay_nights}n · {result.capacity}P · {result.listings.length} logements
                                   </p>
-                                  <p style={{ margin:"1px 0 0", fontSize:8, color:C.gray }}>Booking : arrivée {fmtDateShort(bkCheckin)} · départ {fmtDateShort(bkCheckout)}</p>
+                                  <p style={{ margin:"1px 0 0", fontSize:11, color:C.gray }}>Booking : arrivée {fmtDateShort(bkCheckin)} · départ {fmtDateShort(bkCheckout)}</p>
                                   {result.platforms&&result.platforms.length>0&&(
-                                    <p style={{ margin:"1px 0 0", fontSize:8, color:C.gray }}>📍 {result.platforms.join(" · ")}</p>
+                                    <p style={{ margin:"1px 0 0", fontSize:11, color:C.gray }}>📍 {result.platforms.join(" · ")}</p>
                                   )}
-                                  {ownCount>0&&<p style={{ margin:"1px 0 0", fontSize:8, color:C.orange }}>{ownCount} résultat{ownCount>1?"s":""} ignoré{ownCount>1?"s":""} : Les Cimes</p>}
+                                  {ownCount>0&&<p style={{ margin:"1px 0 0", fontSize:11, color:C.orange }}>{ownCount} résultat{ownCount>1?"s":""} ignoré{ownCount>1?"s":""} : Les Cimes</p>}
                                 </div>
                                 {!result.error&&result.listings.length>0&&(
                                   <div style={{ display:"flex", flexDirection:"column", gap:4, alignItems:"flex-end" }}>
                                     <button onClick={()=>savePlanGroup(result)} disabled={allDone} style={{ padding:"4px 9px", background:allDone?C.greenL:C.blue, color:allDone?C.green:C.white, border:"none", borderRadius:6, fontSize:10, fontWeight:600, cursor:allDone?"default":"pointer" }}>
                                       {allDone?"✓ Enregistré":"Tout enregistrer"}
                                     </button>
-                                    {allDone&&(<button onClick={()=>{ setShowPlan(false); setTab("table"); loadRates(); }} style={{ padding:"3px 8px", background:C.white, color:C.blue, border:`1px solid ${C.blueL}`, borderRadius:6, fontSize:9, fontWeight:700, cursor:"pointer" }}>
+                                    {allDone&&(<button onClick={()=>{ setShowPlan(false); setTab("table"); loadRates(); }} style={{ padding:"3px 8px", background:C.white, color:C.blue, border:`1px solid ${C.blueL}`, borderRadius:6, fontSize:12, fontWeight:700, cursor:"pointer" }}>
                                       Valider →
                                     </button>)}
                                   </div>
@@ -4425,10 +4425,10 @@ export default function App() {
                               </div>
                               {/* Avertissement fiabilité + liens Booking corrigés */}
                               <div style={{ padding:"7px 12px", background:C.goldL, borderBottom:`0.5px solid ${C.grayM}` }}>
-                                <p style={{ margin:"0 0 5px", fontSize:9, color:C.orange, fontWeight:600 }}>⚠ Prix issus de Claude Web Search : à vérifier sur Booking avant validation.</p>
+                                <p style={{ margin:"0 0 5px", fontSize:12, color:C.orange, fontWeight:600 }}>⚠ Prix issus de Claude Web Search : à vérifier sur Booking avant validation.</p>
                                 <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
-                                  <a href={bookingSearchUrl({ location:"La Foux d'Allos", periodStart:bkCheckin, periodEnd:bkCheckout, capacity:result.capacity })} target="_blank" rel="noreferrer" style={{ fontSize:9, fontWeight:600, color:C.blue, background:C.white, padding:"3px 8px", borderRadius:6, textDecoration:"none", border:`1px solid ${C.grayM}` }}>↗ Ouvrir Booking La Foux</a>
-                                  <a href={bookingSearchUrl({ location:"Val d'Allos", periodStart:bkCheckin, periodEnd:bkCheckout, capacity:result.capacity })} target="_blank" rel="noreferrer" style={{ fontSize:9, fontWeight:600, color:C.blue, background:C.white, padding:"3px 8px", borderRadius:6, textDecoration:"none", border:`1px solid ${C.grayM}` }}>↗ Ouvrir Booking Val d'Allos</a>
+                                  <a href={bookingSearchUrl({ location:"La Foux d'Allos", periodStart:bkCheckin, periodEnd:bkCheckout, capacity:result.capacity })} target="_blank" rel="noreferrer" style={{ fontSize:12, fontWeight:600, color:C.blue, background:C.white, padding:"3px 8px", borderRadius:6, textDecoration:"none", border:`1px solid ${C.grayM}` }}>↗ Ouvrir Booking La Foux</a>
+                                  <a href={bookingSearchUrl({ location:"Val d'Allos", periodStart:bkCheckin, periodEnd:bkCheckout, capacity:result.capacity })} target="_blank" rel="noreferrer" style={{ fontSize:12, fontWeight:600, color:C.blue, background:C.white, padding:"3px 8px", borderRadius:6, textDecoration:"none", border:`1px solid ${C.grayM}` }}>↗ Ouvrir Booking Val d'Allos</a>
                                 </div>
                               </div>
                               {result.error&&<div style={{ padding:"8px 12px" }}><p style={{ margin:0, fontSize:11, color:C.red }}>✗ {result.error}</p></div>}
@@ -4437,7 +4437,7 @@ export default function App() {
                                 const items=result.listings.filter(l=>l.property_type===cat); if(!items.length) return null;
                                 const catLabel={résidence:"Résidences",particulier:"Particuliers",hôtel:"Hôtels"}[cat];
                                 return (<div key={cat}>
-                                  <div style={{ padding:"3px 12px", background:C.grayL, borderBottom:`0.5px solid ${C.grayM}` }}><span style={{ fontSize:9, fontWeight:700, textTransform:"uppercase", letterSpacing:".05em", color:C.gray }}>{catLabel} ({items.length})</span></div>
+                                  <div style={{ padding:"3px 12px", background:C.grayL, borderBottom:`0.5px solid ${C.grayM}` }}><span style={{ fontSize:12, fontWeight:700, textTransform:"uppercase", letterSpacing:".05em", color:C.gray }}>{catLabel} ({items.length})</span></div>
                                   {items.map((item,i)=>{
                                     const globalIdx=result.listings.indexOf(item);
                                     const key=`${result.week_id}_${result.capacity}_${globalIdx}`;
@@ -4456,12 +4456,12 @@ export default function App() {
                                             <p style={{ margin:0, fontSize:11, fontWeight:500, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
                                               <a href={safeListingUrl(item, result)} target="_blank" rel="noreferrer" style={{ color:C.text, textDecoration:"none" }}>{item.name}</a>
                                             </p>
-                                            <p style={{ margin:0, fontSize:9, color:C.gray }}>{item.platform}{item.rating?` · ${item.rating}★`:""} · <span style={{ color:C.blueL }}>{(item.url&&item.url.startsWith("https://")&&!item.url.includes("..."))?"Lien source ↗":"Recherche Booking ↗"}</span></p>
-                                            {is2n&&equiv&&<p style={{ margin:0, fontSize:8, color:C.purple, fontStyle:"italic" }}>≈{fmt(equiv)}€/sem indicatif</p>}
+                                            <p style={{ margin:0, fontSize:12, color:C.gray }}>{item.platform}{item.rating?` · ${item.rating}★`:""} · <span style={{ color:C.blueL }}>{(item.url&&item.url.startsWith("https://")&&!item.url.includes("..."))?"Lien source ↗":"Recherche Booking ↗"}</span></p>
+                                            {is2n&&equiv&&<p style={{ margin:0, fontSize:11, color:C.purple, fontStyle:"italic" }}>≈{fmt(equiv)}€/sem indicatif</p>}
                                           </div>
                                           <div style={{ textAlign:"right", flexShrink:0 }}>
-                                            <p style={{ margin:0, fontSize:12, fontWeight:700, color:C.text }}>{fmt(pt)}€<span style={{ fontSize:9, fontWeight:400, color:C.gray }}>/{is2n?"2n":"sem"}</span></p>
-                                            <p style={{ margin:0, fontSize:8, color:C.orange }}>proposé Claude</p>
+                                            <p style={{ margin:0, fontSize:12, fontWeight:700, color:C.text }}>{fmt(pt)}€<span style={{ fontSize:12, fontWeight:400, color:C.gray }}>/{is2n?"2n":"sem"}</span></p>
+                                            <p style={{ margin:0, fontSize:11, color:C.orange }}>proposé Claude</p>
                                           </div>
                                           <button onClick={()=>savePlanRate(item,result,key)} disabled={locked} style={{ width:26, height:26, borderRadius:7, border:"none", flexShrink:0, background:state==="dup"?C.goldL:(state==="ok"||state==="valid")?C.greenL:state==="err"?C.redL:C.bluePale, color:state==="dup"?C.gold:(state==="ok"||state==="valid")?C.green:state==="err"?C.red:C.blue, fontWeight:700, fontSize:14, cursor:locked?"default":"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>
                                             {state==="dup"?"=":state==="valid"?"✓✓":state==="ok"?"✓":state==="err"?"!":"+"}
@@ -4470,11 +4470,11 @@ export default function App() {
                                         {!locked&&(
                                           <div style={{ display:"flex", alignItems:"center", gap:6, marginTop:5 }}>
                                             <input type="number" placeholder="Prix vérifié Booking" value={vp} onChange={e=>setPlanVerifyPrice(p=>({ ...p, [key]:e.target.value }))} style={{ flex:1, padding:"5px 8px", fontSize:10, border:`1px solid ${C.grayM}`, borderRadius:6, boxSizing:"border-box" }}/>
-                                            {vp&&<span style={{ fontSize:9, color:C.gray, whiteSpace:"nowrap" }}>{vpNight}€/n</span>}
-                                            <button onClick={()=>savePlanRate(item,result,key,{ verifiedPrice:vp })} disabled={!vp} style={{ padding:"5px 8px", fontSize:9, fontWeight:700, background:vp?C.green:C.grayL, color:vp?C.white:C.gray, border:"none", borderRadius:6, cursor:vp?"pointer":"default", whiteSpace:"nowrap" }}>✓ Valider avec ce prix</button>
+                                            {vp&&<span style={{ fontSize:12, color:C.gray, whiteSpace:"nowrap" }}>{vpNight}€/n</span>}
+                                            <button onClick={()=>savePlanRate(item,result,key,{ verifiedPrice:vp })} disabled={!vp} style={{ padding:"5px 8px", fontSize:12, fontWeight:700, background:vp?C.green:C.grayL, color:vp?C.white:C.gray, border:"none", borderRadius:6, cursor:vp?"pointer":"default", whiteSpace:"nowrap" }}>✓ Valider avec ce prix</button>
                                           </div>
                                         )}
-                                        {state==="valid"&&<p style={{ margin:"4px 0 0", fontSize:8, color:C.green }}>✓ Validé — prix vérifié manuellement</p>}
+                                        {state==="valid"&&<p style={{ margin:"4px 0 0", fontSize:11, color:C.green }}>✓ Validé — prix vérifié manuellement</p>}
                                       </div>
                                     );
                                   })}
@@ -4555,13 +4555,13 @@ export default function App() {
               {reco.trustedCount<3&&<p style={{ margin:"4px 0 0", fontSize:10, color:C.orange, fontWeight:600 }}>⚠ Il faut au moins 3 relevés validés pour lancer une analyse IA fiable (actuellement {reco.trustedCount}).{reco.pendingCount>0?` ${reco.pendingCount} à vérifier dans l'onglet Concurrents.`:""}</p>}
             </div>
             <div style={{ ...cd(13), padding:"12px" }}>
-              <p style={{ margin:"0 0 6px", fontSize:9, fontWeight:700, color:C.gray, textTransform:"uppercase" }}>Recommandation · médiane statistique</p>
+              <p style={{ margin:"0 0 6px", fontSize:12, fontWeight:700, color:C.gray, textTransform:"uppercase" }}>Recommandation · médiane statistique</p>
               <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:5, marginBottom:8 }}>
                 {[{l:"Bas",v:reco.low,c:C.green},{l:"Cible",v:reco.target,c:C.blue},{l:"Haut",v:reco.high,c:C.gold}].map((r,i)=>(
                   <div key={i} style={{ background:i===1?C.bluePale:C.grayL, borderRadius:9, padding:"8px", textAlign:"center" }}>
-                    <p style={{ margin:"0 0 1px", fontSize:8, color:C.gray, fontWeight:700 }}>{r.l}</p>
+                    <p style={{ margin:"0 0 1px", fontSize:11, color:C.gray, fontWeight:700 }}>{r.l}</p>
                     <p style={{ margin:0, fontSize:14, fontWeight:700, color:r.c }}>{fmt(r.v)}€</p>
-                    <p style={{ margin:0, fontSize:8, color:C.gray }}>sem.</p>
+                    <p style={{ margin:0, fontSize:11, color:C.gray }}>sem.</p>
                   </div>
                 ))}
               </div>
@@ -4579,7 +4579,7 @@ export default function App() {
             {iaError&&<div style={{ ...cd(10), padding:"9px 12px", background:C.redL, marginBottom:6 }}><p style={{ margin:0, fontSize:11, color:C.red }}>✗ {iaError}</p></div>}
             {!iaText&&<button style={btn(iaLoading||reco.trustedCount<3,C.blue)} onClick={runIA} disabled={iaLoading||reco.trustedCount<3}>{iaLoading?"Analyse…":reco.trustedCount<3?`Validez ${3-reco.trustedCount} relevé(s) de plus`:"Analyse IA →"}</button>}
             {iaLoading&&<div style={{ height:3, background:C.grayM, borderRadius:3, overflow:"hidden", marginBottom:8 }}><div style={{ height:"100%", background:C.blue, borderRadius:3, animation:"prog 4s linear forwards" }}/><style>{`@keyframes prog{from{width:0}to{width:100%}}`}</style></div>}
-            {iaText&&<div>{[{t:"Positionnement",i:"📊"},{t:"Risques",i:"⚠"},{t:"Recommandation",i:"💡"},{t:"Action",i:"📱"}].map((s,idx)=>iaText[idx]&&<div key={idx} style={{ ...cd(11), padding:"10px 12px" }}><p style={{ margin:"0 0 3px", fontSize:9, fontWeight:700, color:C.gray, textTransform:"uppercase" }}>{s.i} {s.t}</p><p style={{ margin:0, fontSize:12, lineHeight:1.6, color:C.text }}>{iaText[idx]}</p></div>)}<button style={btn(false,C.grayL,C.blue)} onClick={()=>setIaText(null)}>Relancer</button></div>}
+            {iaText&&<div>{[{t:"Positionnement",i:"📊"},{t:"Risques",i:"⚠"},{t:"Recommandation",i:"💡"},{t:"Action",i:"📱"}].map((s,idx)=>iaText[idx]&&<div key={idx} style={{ ...cd(11), padding:"10px 12px" }}><p style={{ margin:"0 0 3px", fontSize:12, fontWeight:700, color:C.gray, textTransform:"uppercase" }}>{s.i} {s.t}</p><p style={{ margin:0, fontSize:12, lineHeight:1.6, color:C.text }}>{iaText[idx]}</p></div>)}<button style={btn(false,C.grayL,C.blue)} onClick={()=>setIaText(null)}>Relancer</button></div>}
           </>)}
 
         </div><BNav/>
@@ -4668,7 +4668,7 @@ export default function App() {
           </div>
           <div><p style={sml}>URL annonce</p><input style={{ ...inp(), marginBottom:6 }} placeholder="https://…" value={form.url} onChange={e=>setForm({ ...form, url:e.target.value })}/></div>
           <button style={btn(!form.priceWeek)} onClick={handleSaveForm} disabled={!form.priceWeek}>Enregistrer ✓</button>
-          <p style={{ fontSize:9, color:C.gray, textAlign:"center" }}>Les anciens relevés ne sont jamais écrasés</p>
+          <p style={{ fontSize:12, color:C.gray, textAlign:"center" }}>Les anciens relevés ne sont jamais écrasés</p>
         </div><BNav/>
       </div>
     );
@@ -4679,7 +4679,7 @@ export default function App() {
       <div style={cnt}>
         <div style={{ ...cd(11), padding:"10px 13px", background:C.bluePale, marginBottom:8 }}>
           <p style={{ margin:"0 0 2px", fontSize:11, fontWeight:700, color:C.blueL }}>Colonnes CSV (séparateur ; ou ,)</p>
-          <p style={{ margin:0, fontSize:9, color:C.blueL, fontFamily:"monospace", lineHeight:1.6 }}>week_start · source · property_name · property_type · capacity · price_week · price_night · original_price · promo_label · cleaning_fee · url · collected_at</p>
+          <p style={{ margin:0, fontSize:12, color:C.blueL, fontFamily:"monospace", lineHeight:1.6 }}>week_start · source · property_name · property_type · capacity · price_week · price_night · original_price · promo_label · cleaning_fee · url · collected_at</p>
         </div>
         {csvResult&&(
           <div style={{ ...cd(10), padding:"10px 12px", background:csvResult.errors.length===0?C.greenL:C.goldL, marginBottom:8 }}>
@@ -4704,7 +4704,7 @@ export default function App() {
         <div style={{ height:1, background:C.grayM, margin:"16px 0 4px" }}/>
         <div style={{ ...cd(11), padding:"10px 13px", background:C.bluePale, marginBottom:8 }}>
           <p style={{ margin:"0 0 2px", fontSize:11, fontWeight:700, color:C.blue }}>💰 Importer tarifs Les Cimes</p>
-          <p style={{ margin:0, fontSize:9, color:C.blueL, fontFamily:"monospace", lineHeight:1.6 }}>period_id · period_start · period_end · period_label · season · stay_nights · capacity · price_total · notes</p>
+          <p style={{ margin:0, fontSize:12, color:C.blueL, fontFamily:"monospace", lineHeight:1.6 }}>period_id · period_start · period_end · period_label · season · stay_nights · capacity · price_total · notes</p>
         </div>
         {ourCsvResult&&(
           <div style={{ ...cd(10), padding:"10px 12px", background:ourCsvResult.errors.length===0?C.greenL:C.goldL, marginBottom:8 }}>
@@ -4770,7 +4770,7 @@ export default function App() {
           <p style={sml}>Checklist production</p>
           <div style={cd()}>
             {[{ l:"VITE_SUPABASE_URL configuré", ok:SB_READY },{ l:"Mode Supabase actif", ok:SB_READY },{ l:"Session persistante", ok:!!sessionStorage.getItem("sb_token") },{ l:"Données exemple désactivées", ok:!showExamples },{ l:"≥3 relevés qualifiés", ok:qualified.length>=3 },{ l:"/api/analyse-reco déployée", ok:false, note:"Déployer avec ANTHROPIC_API_KEY." },{ l:"/api/scrape-market déployée", ok:false, note:"Voir api/scrape-market.js" },{ l:"/api/scrape-market-batch déployée", ok:false, note:"Voir api/scrape-market-batch.js" }].map((c,i,arr)=>(
-              <div key={c.l} style={rw(i===arr.length-1)}><div><span style={{ fontSize:11, color:C.text }}>{c.l}</span>{c.note&&<p style={{ margin:"1px 0 0", fontSize:9, color:C.gray }}>{c.note}</p>}</div><Badge label={c.ok?"✓ OK":"✗ NON"} color={c.ok?C.green:C.red} bg={c.ok?C.greenL:C.redL}/></div>
+              <div key={c.l} style={rw(i===arr.length-1)}><div><span style={{ fontSize:11, color:C.text }}>{c.l}</span>{c.note&&<p style={{ margin:"1px 0 0", fontSize:12, color:C.gray }}>{c.note}</p>}</div><Badge label={c.ok?"✓ OK":"✗ NON"} color={c.ok?C.green:C.red} bg={c.ok?C.greenL:C.redL}/></div>
             ))}
           </div>
         </div><BNav/>
@@ -4844,22 +4844,22 @@ export default function App() {
               return (
                 <div key={r.id||idx} style={rw(idx===Math.min(arr.length,200)-1)}>
                   <div style={{ flex:1, minWidth:0 }}>
-                    <span style={{ fontSize:11, fontWeight:600, color:C.text }}>{r.competitor||r.property_name}</span>
-                    <div style={{ display:"flex", gap:4, marginTop:1, alignItems:"center", flexWrap:"wrap" }}>
-                      {(()=>{ const priv=r.market_segment==="private"||r.is_private_rental===true; const hotel=String(r.property_type||"").toLowerCase().includes("hôtel")||String(r.property_type||"").toLowerCase().includes("hotel"); return <Badge label={priv?"Particulier":hotel?"Hôtel":"Pro"} color={priv?"#FF5A5F":hotel?C.purple:C.blue} bg={priv?"#FFE9EA":hotel?C.purpleL:C.bluePale} size={8}/>; })()}
-                      <Badge label={r.source_label||r.source||"?"} color={C.blue} bg={C.bluePale} size={8}/>
-                      {r.source_channel&&<span style={{ fontSize:8, color:C.gray }}>({r.source_channel})</span>}
-                      <span style={{ fontSize:8, color:C.gray }}>{r.collected_at} · {r.capacity}P · {nights}n</span>
+                    <span style={{ fontSize:14, fontWeight:600, color:C.text }}>{r.competitor||r.property_name}</span>
+                    <div style={{ display:"flex", gap:4, marginTop:2, alignItems:"center", flexWrap:"wrap" }}>
+                      {(()=>{ const priv=r.market_segment==="private"||r.is_private_rental===true; const hotel=String(r.property_type||"").toLowerCase().includes("hôtel")||String(r.property_type||"").toLowerCase().includes("hotel"); return <Badge label={priv?"Particulier":hotel?"Hôtel":"Pro"} color={priv?"#FF5A5F":hotel?C.purple:C.blue} bg={priv?"#FFE9EA":hotel?C.purpleL:C.bluePale} size={10}/>; })()}
+                      <Badge label={r.source_label||r.source||"?"} color={C.blue} bg={C.bluePale} size={10}/>
+                      {r.source_channel&&<span style={{ fontSize:11, color:C.gray }}>({r.source_channel})</span>}
+                      <span style={{ fontSize:11, color:C.gray }}>{r.collected_at} · {r.capacity}P · {nights}n</span>
                       <ReliaBadge status={r.reliability_status||"à vérifier"}/>
-                      {r.edited_at&&<span style={{ fontSize:8, color:C.gold, fontWeight:600 }}>modifié</span>}
+                      {r.edited_at&&<span style={{ fontSize:11, color:C.gold, fontWeight:600 }}>modifié</span>}
                     </div>
-                    <p style={{ margin:"1px 0 0", fontSize:8, color:C.gray }}>{r.period_start} → {r.period_end}</p>
-                    {(r.source_url||r.source_search_url)&&<a href={r.source_url||r.source_search_url} target="_blank" rel="noreferrer" style={{ fontSize:8, color:C.blue, textDecoration:"none" }}>↗ source</a>}
+                    <p style={{ margin:"1px 0 0", fontSize:11, color:C.gray }}>{r.period_start} → {r.period_end}</p>
+                    {(r.source_url||r.source_search_url)&&<a href={r.source_url||r.source_search_url} target="_blank" rel="noreferrer" style={{ fontSize:11, color:C.blue, textDecoration:"none" }}>↗ source</a>}
                   </div>
                   <div style={{ textAlign:"right", flexShrink:0 }}>
-                    <p style={{ margin:0, fontSize:12, fontWeight:700, color:C.text }}>{fmt(Number(r.price_total||r.price_week))}€</p>
-                    <p style={{ margin:0, fontSize:8, color:C.gray }}>{fmt(Number(r.price_night||Math.round(Number(r.price_total||r.price_week||0)/nights)))}€/n</p>
-                    {evo!==null&&<p style={{ margin:0, fontSize:9, fontWeight:700, color:evo>0?C.red:evo<0?C.green:C.gray }}>{evo>0?"+":""}{evo===0?"stable":fmt(evo)+"€"}</p>}
+                    <p style={{ margin:0, fontSize:15, fontWeight:700, color:C.text }}>{fmt(Number(r.price_total||r.price_week))}€</p>
+                    <p style={{ margin:0, fontSize:11, color:C.gray }}>{fmt(Number(r.price_night||Math.round(Number(r.price_total||r.price_week||0)/nights)))}€/n</p>
+                    {evo!==null&&<p style={{ margin:0, fontSize:12, fontWeight:700, color:evo>0?C.red:evo<0?C.green:C.gray }}>{evo>0?"+":""}{evo===0?"stable":fmt(evo)+"€"}</p>}
                   </div>
                 </div>
               );
@@ -4984,9 +4984,9 @@ export default function App() {
               </div>
             )}
             <div style={{ ...cd(9), padding:"7px 10px", background:C.bluePale, marginTop:8 }}>
-              <p style={{ margin:0, fontSize:9, color:C.blue, fontWeight:600 }}>Capacité liée à la typologie : {acc.capacity}P ({acc.label})</p>
+              <p style={{ margin:0, fontSize:12, color:C.blue, fontWeight:600 }}>Capacité liée à la typologie : {acc.capacity}P ({acc.label})</p>
             </div>
-            <p style={{ margin:"6px 0 0", fontSize:9, color:datesInvalid?C.red:C.gray }}>{datesInvalid?"Dates invalides : vérifiez arrivée et départ.":`${trackedMode==="custom"?"Dates personnalisées":ctx.label} · ${acc.capacity}P · ${ctx.stayNights} nuits`}</p>
+            <p style={{ margin:"6px 0 0", fontSize:12, color:datesInvalid?C.red:C.gray }}>{datesInvalid?"Dates invalides : vérifiez arrivée et départ.":`${trackedMode==="custom"?"Dates personnalisées":ctx.label} · ${acc.capacity}P · ${ctx.stayNights} nuits`}</p>
           </div>
 
           {/* Filtre sources incluses */}
@@ -5015,14 +5015,14 @@ export default function App() {
                 </select>
               </div>
             </div>
-            <p style={{ margin:"6px 0 0", fontSize:8, color:C.gray }}>{ACCOMMODATION_TYPES[benchAccType]?.surfaceMin}–{ACCOMMODATION_TYPES[benchAccType]?.surfaceMax} m² · cible {ACCOMMODATION_TYPES[benchAccType]?.targetMin}–{ACCOMMODATION_TYPES[benchAccType]?.targetMax} pers. · segment {ACCOMMODATION_TYPES[benchAccType]?.segment}</p>
+            <p style={{ margin:"6px 0 0", fontSize:11, color:C.gray }}>{ACCOMMODATION_TYPES[benchAccType]?.surfaceMin}–{ACCOMMODATION_TYPES[benchAccType]?.surfaceMax} m² · cible {ACCOMMODATION_TYPES[benchAccType]?.targetMin}–{ACCOMMODATION_TYPES[benchAccType]?.targetMax} pers. · segment {ACCOMMODATION_TYPES[benchAccType]?.segment}</p>
           </div>
 
           {/* B + C : cartes */}
           <div style={responsiveGrid(2)}>
             <div style={{ ...cd(11,0), padding:"10px 12px", background:C.bluePale }}>
-              <p style={{ margin:"0 0 1px", fontSize:8, color:C.blueL, fontWeight:700, textTransform:"uppercase" }}>Nos tarifs Les Cimes</p>
-              <p style={{ margin:"0 0 2px", fontSize:9, color:C.blueL }}>Typologie : <strong>{acc.label}</strong> · Capacité : <strong>{acc.capacity}P</strong></p>
+              <p style={{ margin:"0 0 1px", fontSize:11, color:C.blueL, fontWeight:700, textTransform:"uppercase" }}>Nos tarifs Les Cimes</p>
+              <p style={{ margin:"0 0 2px", fontSize:12, color:C.blueL }}>Typologie : <strong>{acc.label}</strong> · Capacité : <strong>{acc.capacity}P</strong></p>
               {benchOurPrice>0?(<>
                 <p style={{ margin:0, fontSize:18, fontWeight:700, color:C.blue }}>{fmt(benchOurPrice)}€<span style={{ fontSize:10 }}>/séjour</span></p>
                 <p style={{ margin:0, fontSize:10, color:C.blueL }}>{fmt(benchOurNight)}€/nuit · {benchOurSource}</p>
@@ -5031,11 +5031,11 @@ export default function App() {
               <button onClick={()=>{ setScreen("dashboard"); setDashTarifTab("saisie"); setDashOurPeriodId(selWeekId); setDashOurCap(acc.capacity); }} style={{ ...btn(false,C.white,C.blue), margin:"7px 0 0", border:`1px solid ${C.blueL}`, padding:"6px" }}>Modifier tarif</button>
             </div>
             <div style={{ ...cd(11,0), padding:"10px 12px", background:dec.validatedCount>=3?C.greenL:C.goldL }}>
-              <p style={{ margin:"0 0 1px", fontSize:8, color:dec.validatedCount>=3?C.green:C.gold, fontWeight:700, textTransform:"uppercase" }}>Marché vérifié ({dec.validatedCount})</p>
+              <p style={{ margin:"0 0 1px", fontSize:11, color:dec.validatedCount>=3?C.green:C.gold, fontWeight:700, textTransform:"uppercase" }}>Marché vérifié ({dec.validatedCount})</p>
               {dec.marketMedian?(<>
                 <p style={{ margin:0, fontSize:18, fontWeight:700, color:C.text }}>{fmt(dec.marketMedian)}€<span style={{ fontSize:10 }}>médiane</span></p>
                 <p style={{ margin:0, fontSize:10, color:C.gray }}>min {fmt(dec.marketMin)}€ · max {fmt(dec.marketMax)}€</p>
-                {usedSources.length>0&&<p style={{ margin:"2px 0 0", fontSize:8, color:C.gray }}>Sources : {usedSources.join(", ")}</p>}
+                {usedSources.length>0&&<p style={{ margin:"2px 0 0", fontSize:11, color:C.gray }}>Sources : {usedSources.join(", ")}</p>}
               </>):(<p style={{ margin:0, fontSize:11, color:C.gold }}>Pas assez de relevés validés.</p>)}
             </div>
           </div>
@@ -5043,14 +5043,14 @@ export default function App() {
           {/* Marché pro vs particuliers */}
           <div style={responsiveGrid(2)}>
             <div style={{ ...cd(11,0), padding:"9px 11px", background:C.bluePale }}>
-              <p style={{ margin:"0 0 2px", fontSize:8, color:C.blueL, fontWeight:700, textTransform:"uppercase" }}>🏢 Marché pro (médiane principale)</p>
+              <p style={{ margin:"0 0 2px", fontSize:11, color:C.blueL, fontWeight:700, textTransform:"uppercase" }}>🏢 Marché pro (médiane principale)</p>
               <p style={{ margin:0, fontSize:10, color:C.blue }}>{dec.validatedCount} relevés{dec.marketMedian?` · médiane ${fmt(dec.marketMedian)}€`:""}</p>
-              {dec.marketMedian&&<p style={{ margin:0, fontSize:9, color:C.blueL }}>min {fmt(dec.marketMin)}€ · max {fmt(dec.marketMax)}€</p>}
+              {dec.marketMedian&&<p style={{ margin:0, fontSize:12, color:C.blueL }}>min {fmt(dec.marketMin)}€ · max {fmt(dec.marketMax)}€</p>}
             </div>
             <div style={{ ...cd(11,0), padding:"9px 11px", background:"#FFE9EA" }}>
-              <p style={{ margin:"0 0 2px", fontSize:8, color:"#C2185B", fontWeight:700, textTransform:"uppercase" }}>🏠 Marché particuliers (pression)</p>
+              <p style={{ margin:"0 0 2px", fontSize:11, color:"#C2185B", fontWeight:700, textTransform:"uppercase" }}>🏠 Marché particuliers (pression)</p>
               <p style={{ margin:0, fontSize:10, color:"#FF5A5F" }}>{privateRates.length} relevés{privMedian?` · médiane ${fmt(privMedian)}€`:""}</p>
-              {privMedian&&<p style={{ margin:0, fontSize:9, color:"#C2185B" }}>min {fmt(privMin)}€</p>}
+              {privMedian&&<p style={{ margin:0, fontSize:12, color:"#C2185B" }}>min {fmt(privMin)}€</p>}
             </div>
           </div>
 
@@ -5059,13 +5059,13 @@ export default function App() {
             <div style={{ ...cd(11), padding:"10px 12px", borderLeft:`3px solid ${privPressure==="forte"?C.red:privPressure==="moyenne"?C.orange:C.green}` }}>
               <p style={{ margin:"0 0 4px", fontSize:11, fontWeight:700, color:C.text }}>⚠ Pression des particuliers : <span style={{ color:privPressure==="forte"?C.red:privPressure==="moyenne"?C.orange:C.green }}>{privPressure}</span></p>
               <div style={{ display:"flex", gap:12, flexWrap:"wrap", marginBottom:5 }}>
-                <span style={{ fontSize:9, color:C.gray }}>Annonces suivies : <strong>{(catalog||[]).filter(isPrivateCompetitor).length}</strong></span>
-                <span style={{ fontSize:9, color:C.gray }}>Prix validés : <strong>{privPrices.length}</strong></span>
-                {privMin&&<span style={{ fontSize:9, color:C.gray }}>Mini particulier : <strong>{fmt(privMin)}€</strong></span>}
-                {privMedian&&<span style={{ fontSize:9, color:C.gray }}>Médiane : <strong>{fmt(privMedian)}€</strong></span>}
-                {privGapPct!=null&&<span style={{ fontSize:9, color:C.gray }}>Écart Les Cimes : <strong style={{ color:privGapPct>0?C.red:C.green }}>{privGapPct>0?"+":""}{privGapPct}%</strong></span>}
+                <span style={{ fontSize:12, color:C.gray }}>Annonces suivies : <strong>{(catalog||[]).filter(isPrivateCompetitor).length}</strong></span>
+                <span style={{ fontSize:12, color:C.gray }}>Prix validés : <strong>{privPrices.length}</strong></span>
+                {privMin&&<span style={{ fontSize:12, color:C.gray }}>Mini particulier : <strong>{fmt(privMin)}€</strong></span>}
+                {privMedian&&<span style={{ fontSize:12, color:C.gray }}>Médiane : <strong>{fmt(privMedian)}€</strong></span>}
+                {privGapPct!=null&&<span style={{ fontSize:12, color:C.gray }}>Écart Les Cimes : <strong style={{ color:privGapPct>0?C.red:C.green }}>{privGapPct>0?"+":""}{privGapPct}%</strong></span>}
               </div>
-              <p style={{ margin:0, fontSize:8, color:C.gray, fontStyle:"italic" }}>Les particuliers servent d'alerte prix, mais ne doivent pas piloter seuls la grille tarifaire.</p>
+              <p style={{ margin:0, fontSize:11, color:C.gray, fontStyle:"italic" }}>Les particuliers servent d'alerte prix, mais ne doivent pas piloter seuls la grille tarifaire.</p>
             </div>
           )}
           <p style={sml}>Concurrents validés</p>
@@ -5090,13 +5090,13 @@ export default function App() {
                       <div style={{ display:"flex", gap:4, marginTop:1, alignItems:"center", flexWrap:"wrap" }}>
                         <Badge label={r.source||"?"} color={C.blue} bg={C.bluePale} size={8}/>
                         <Badge label={sc.segment} color={segColor} bg={segBg} size={8}/>
-                        <span style={{ fontSize:8, color:C.gray }}>{r.property_type} · score {sc.score}</span>
+                        <span style={{ fontSize:11, color:C.gray }}>{r.property_type} · score {sc.score}</span>
                       </div>
                     </div>
                     <div style={{ textAlign:"right", flexShrink:0 }}>
                       <p style={{ margin:0, fontSize:12, fontWeight:700, color:C.text }}>{fmt(pt)}€</p>
-                      <p style={{ margin:0, fontSize:8, color:C.gray }}>{fmt(Math.round(pt/(r.stay_nights||7)))}€/n{ppn?` · ${fmt(ppn)}€/p/n`:""}</p>
-                      {gap!==null&&<p style={{ margin:0, fontSize:9, fontWeight:700, color:gap>0?C.green:C.red }}>{gap>0?"+":""}{fmt(gap)}€</p>}
+                      <p style={{ margin:0, fontSize:11, color:C.gray }}>{fmt(Math.round(pt/(r.stay_nights||7)))}€/n{ppn?` · ${fmt(ppn)}€/p/n`:""}</p>
+                      {gap!==null&&<p style={{ margin:0, fontSize:12, fontWeight:700, color:gap>0?C.green:C.red }}>{gap>0?"+":""}{fmt(gap)}€</p>}
                     </div>
                   </div>
                 );
@@ -5114,9 +5114,9 @@ export default function App() {
               <p style={{ margin:0, fontSize:10, color:C.gold }}>Validez au moins 3 relevés pour une recommandation fiable.</p>
             ):(<>
               <p style={{ margin:0, fontSize:11, color:C.text }}>Prix public conseillé : <strong>{fmt(dec.recommendedPrice)}€</strong> · Prix direct : <strong>{fmt(dec.directPrice)}€</strong></p>
-              {dec.gapPct!==null&&<p style={{ margin:"2px 0 0", fontSize:9, color:C.gray }}>Écart actuel vs médiane : {dec.gapPct>0?"+":""}{dec.gapPct}%{dec.potentialGain?` · gain potentiel ${dec.potentialGain>0?"+":""}${fmt(dec.potentialGain)}€`:""}</p>}
+              {dec.gapPct!==null&&<p style={{ margin:"2px 0 0", fontSize:12, color:C.gray }}>Écart actuel vs médiane : {dec.gapPct>0?"+":""}{dec.gapPct}%{dec.potentialGain?` · gain potentiel ${dec.potentialGain>0?"+":""}${fmt(dec.potentialGain)}€`:""}</p>}
             </>)}
-            {accommodationAdvice(benchAccType)&&<p style={{ margin:"6px 0 0", paddingTop:6, borderTop:`0.5px solid ${C.grayM}`, fontSize:9, color:C.text, fontStyle:"italic" }}>💡 {accommodationAdvice(benchAccType)}</p>}
+            {accommodationAdvice(benchAccType)&&<p style={{ margin:"6px 0 0", paddingTop:6, borderTop:`0.5px solid ${C.grayM}`, fontSize:12, color:C.text, fontStyle:"italic" }}>💡 {accommodationAdvice(benchAccType)}</p>}
           </div>
 
           {/* F. Enregistrer décision */}
@@ -5157,15 +5157,15 @@ export default function App() {
                   <div style={{ flex:1, minWidth:0 }}>
                     <span style={{ fontSize:11, fontWeight:600, color:C.text }}>{d.action_label||d.action_type}</span>
                     <div style={{ display:"flex", gap:4, marginTop:1, alignItems:"center", flexWrap:"wrap" }}>
-                      <span style={{ fontSize:8, color:C.gray }}>{(d.created_at||"").slice(0,10)} · {d.period_label||d.period_id} · {d.capacity}P</span>
+                      <span style={{ fontSize:11, color:C.gray }}>{(d.created_at||"").slice(0,10)} · {d.period_label||d.period_id} · {d.capacity}P</span>
                       <Badge label={d.decision_status} color={d.decision_status==="appliqué"?C.green:d.decision_status==="annulé"?C.red:C.orange} bg={d.decision_status==="appliqué"?C.greenL:d.decision_status==="annulé"?C.redL:C.goldL} size={8}/>
                     </div>
-                    <p style={{ margin:"2px 0 0", fontSize:9, color:C.gray }}>{d.our_price_before?`${fmt(Number(d.our_price_before))}€`:"—"} → {d.our_price_after?`${fmt(Number(d.our_price_after))}€`:"—"}{d.direct_price?` · direct ${fmt(Number(d.direct_price))}€`:""}</p>
-                    {d.notes&&<p style={{ margin:"1px 0 0", fontSize:8, color:C.gray, fontStyle:"italic" }}>{d.notes}</p>}
+                    <p style={{ margin:"2px 0 0", fontSize:12, color:C.gray }}>{d.our_price_before?`${fmt(Number(d.our_price_before))}€`:"—"} → {d.our_price_after?`${fmt(Number(d.our_price_after))}€`:"—"}{d.direct_price?` · direct ${fmt(Number(d.direct_price))}€`:""}</p>
+                    {d.notes&&<p style={{ margin:"1px 0 0", fontSize:11, color:C.gray, fontStyle:"italic" }}>{d.notes}</p>}
                   </div>
                   <div style={{ display:"flex", flexDirection:"column", gap:3, flexShrink:0 }}>
-                    {d.decision_status!=="appliqué"&&<button onClick={async()=>{ await updateCommercialDecision(d.id,{ decision_status:"appliqué", applied_at:new Date().toISOString() }); reloadDecisions(); }} style={{ fontSize:8, fontWeight:700, color:C.green, background:C.greenL, border:"none", borderRadius:5, padding:"3px 6px", cursor:"pointer" }}>✓ Appliqué</button>}
-                    <button onClick={async()=>{ await deleteCommercialDecision(d.id); reloadDecisions(); }} style={{ fontSize:8, color:C.gray, background:C.grayL, border:"none", borderRadius:5, padding:"3px 6px", cursor:"pointer" }}>🗑</button>
+                    {d.decision_status!=="appliqué"&&<button onClick={async()=>{ await updateCommercialDecision(d.id,{ decision_status:"appliqué", applied_at:new Date().toISOString() }); reloadDecisions(); }} style={{ fontSize:11, fontWeight:700, color:C.green, background:C.greenL, border:"none", borderRadius:5, padding:"3px 6px", cursor:"pointer" }}>✓ Appliqué</button>}
+                    <button onClick={async()=>{ await deleteCommercialDecision(d.id); reloadDecisions(); }} style={{ fontSize:11, color:C.gray, background:C.grayL, border:"none", borderRadius:5, padding:"3px 6px", cursor:"pointer" }}>🗑</button>
                   </div>
                 </div>
               </div>
@@ -5303,8 +5303,8 @@ export default function App() {
                 <div><p style={{ ...sml, margin:"0 0 4px" }}>Départ</p><input type="date" value={promoCheckout} onChange={e=>setPromoCheckout(e.target.value)} style={inp()}/></div>
               </div>
             )}
-            <p style={{ margin:"6px 0 0", fontSize:9, color:datesInvalid?C.red:C.gray }}>{datesInvalid?"Choisissez des dates valides.":`${label} · ${capacity}P · ${stayNights} nuits${daysToArrival!=null?` · J-${daysToArrival}`:""}`}</p>
-            {distinctSources.length>0&&<p style={{ margin:"4px 0 0", fontSize:8, color:C.gray }}>Sources marché suivies : {distinctSources.slice(0,8).join(", ")}</p>}
+            <p style={{ margin:"6px 0 0", fontSize:12, color:datesInvalid?C.red:C.gray }}>{datesInvalid?"Choisissez des dates valides.":`${label} · ${capacity}P · ${stayNights} nuits${daysToArrival!=null?` · J-${daysToArrival}`:""}`}</p>
+            {distinctSources.length>0&&<p style={{ margin:"4px 0 0", fontSize:11, color:C.gray }}>Sources marché suivies : {distinctSources.slice(0,8).join(", ")}</p>}
           </div>
 
           {/* Filtre sources incluses */}
@@ -5321,7 +5321,7 @@ export default function App() {
           {privPressure==="forte"&&(
             <div style={{ ...cd(11), padding:"10px 12px", borderLeft:`3px solid ${C.red}`, background:"#FFE9EA" }}>
               <p style={{ margin:"0 0 3px", fontSize:11, fontWeight:700, color:C.red }}>⚠ Pression particuliers forte ({privGap>0?"+":""}{privGap}% vs médiane particuliers)</p>
-              <p style={{ margin:0, fontSize:9, color:"#C2185B" }}>Les particuliers sont agressifs sur cette période. Réponse conseillée : créer une offre directe courte durée (2-3 nuits) ou dernière minute plutôt que baisser toute la grille semaine. Mettez en avant les services inclus (piscine, sauna, résidence, accueil, wifi).</p>
+              <p style={{ margin:0, fontSize:12, color:"#C2185B" }}>Les particuliers sont agressifs sur cette période. Réponse conseillée : créer une offre directe courte durée (2-3 nuits) ou dernière minute plutôt que baisser toute la grille semaine. Mettez en avant les services inclus (piscine, sauna, résidence, accueil, wifi).</p>
             </div>
           )}
 
@@ -5341,18 +5341,18 @@ export default function App() {
               {/* Référence semaine → court séjour Les Cimes */}
               <div style={{ ...cd(8), padding:"7px 10px", background:C.bluePale, margin:"6px 0" }}>
                 {weeklyPrice>0?(<>
-                  <p style={{ margin:0, fontSize:9, color:C.blueL }}>Prix semaine référence : <strong>{fmt(weeklyPrice)}€</strong> · {fmt(weeklyNight)}€/nuit</p>
+                  <p style={{ margin:0, fontSize:12, color:C.blueL }}>Prix semaine référence : <strong>{fmt(weeklyPrice)}€</strong> · {fmt(weeklyNight)}€/nuit</p>
                   {stayNights!==7&&<p style={{ margin:"1px 0 0", fontSize:10, color:C.blue, fontWeight:700 }}>{stayNights} nuits court séjour calculé : {fmt(ourShortPrice)}€{ssRule?` (×${ssRule.multiplier})`:""}</p>}
-                  {ssRule&&<p style={{ margin:"1px 0 0", fontSize:8, color:C.gray }}>Règle : {ssRule.stay_label} · multiplicateur {ssRule.multiplier}{ssRule.min_price?` · plancher ${fmt(ssRule.min_price)}€`:""}</p>}
-                </>):(<p style={{ margin:0, fontSize:9, color:C.gray, fontStyle:"italic" }}>Aucun tarif semaine {acc.label} pour ces dates — définissez-le dans Gestion tarifs.</p>)}
+                  {ssRule&&<p style={{ margin:"1px 0 0", fontSize:11, color:C.gray }}>Règle : {ssRule.stay_label} · multiplicateur {ssRule.multiplier}{ssRule.min_price?` · plancher ${fmt(ssRule.min_price)}€`:""}</p>}
+                </>):(<p style={{ margin:0, fontSize:12, color:C.gray, fontStyle:"italic" }}>Aucun tarif semaine {acc.label} pour ces dates — définissez-le dans Gestion tarifs.</p>)}
               </div>
               <div style={{ margin:"6px 0", display:"flex", gap:14, flexWrap:"wrap" }}>
-                <div><p style={{ margin:0, fontSize:8, color:C.gray }}>Marché pro</p><p style={{ margin:0, fontSize:14, fontWeight:700, color:C.text }}>{fmt(opp.marketMedian)}€</p></div>
-                <div><p style={{ margin:0, fontSize:8, color:C.gray }}>Conseillé</p><p style={{ margin:0, fontSize:14, fontWeight:700, color:C.blue }}>{fmt(opp.recommendedPrice)}€</p></div>
-                <div><p style={{ margin:0, fontSize:8, color:C.gray }}>Direct</p><p style={{ margin:0, fontSize:14, fontWeight:700, color:C.green }}>{fmt(opp.directPrice)}€</p></div>
-                {ourShortPrice>0&&<div><p style={{ margin:0, fontSize:8, color:C.gray }}>Notre court séjour</p><p style={{ margin:0, fontSize:14, fontWeight:700, color:C.gray }}>{fmt(ourShortPrice)}€</p></div>}
+                <div><p style={{ margin:0, fontSize:11, color:C.gray }}>Marché pro</p><p style={{ margin:0, fontSize:14, fontWeight:700, color:C.text }}>{fmt(opp.marketMedian)}€</p></div>
+                <div><p style={{ margin:0, fontSize:11, color:C.gray }}>Conseillé</p><p style={{ margin:0, fontSize:14, fontWeight:700, color:C.blue }}>{fmt(opp.recommendedPrice)}€</p></div>
+                <div><p style={{ margin:0, fontSize:11, color:C.gray }}>Direct</p><p style={{ margin:0, fontSize:14, fontWeight:700, color:C.green }}>{fmt(opp.directPrice)}€</p></div>
+                {ourShortPrice>0&&<div><p style={{ margin:0, fontSize:11, color:C.gray }}>Notre court séjour</p><p style={{ margin:0, fontSize:14, fontWeight:700, color:C.gray }}>{fmt(ourShortPrice)}€</p></div>}
               </div>
-              {opp.explanation&&<p style={{ margin:"0 0 6px", fontSize:8, color:C.gray, fontStyle:"italic" }}>{opp.explanation}</p>}
+              {opp.explanation&&<p style={{ margin:"0 0 6px", fontSize:11, color:C.gray, fontStyle:"italic" }}>{opp.explanation}</p>}
               <div style={{ ...cd(8), padding:"7px 10px", background:C.grayL, marginBottom:8 }}>
                 <p style={{ margin:0, fontSize:10, color:C.text, fontStyle:"italic" }}>"{buildPromoMessage({ promo_type:opp.promoType, stay_nights:stayNights, pressure:opp.pressure })}"</p>
               </div>
@@ -5366,7 +5366,7 @@ export default function App() {
               </div>
               {promoMsgPreview&&(
                 <div style={{ ...cd(8), padding:"9px 11px", marginTop:8, background:C.bluePale }}>
-                  <p style={{ margin:"0 0 4px", fontSize:9, fontWeight:700, color:C.blue, textTransform:"uppercase" }}>{promoMsgPreview.kind==="email"?"Email promo":"Post Facebook"}</p>
+                  <p style={{ margin:"0 0 4px", fontSize:12, fontWeight:700, color:C.blue, textTransform:"uppercase" }}>{promoMsgPreview.kind==="email"?"Email promo":"Post Facebook"}</p>
                   {promoMsgPreview.kind==="email"&&<p style={{ margin:"0 0 4px", fontSize:10, color:C.text }}><strong>Objet :</strong> {opp.promoLabel} aux Cimes du Val d'Allos — {fmt(opp.directPrice)}€</p>}
                   <p style={{ margin:0, fontSize:10, color:C.text, whiteSpace:"pre-wrap" }}>{promoMsgPreview.text}{"\n\n"}📅 {label} · {capacity} personnes{"\n"}💶 À partir de {fmt(opp.directPrice)}€ en réservation directe{"\n"}📞 Réservez dès maintenant !</p>
                 </div>
@@ -5384,15 +5384,15 @@ export default function App() {
                   <div style={{ flex:1, minWidth:0 }}>
                     <span style={{ fontSize:11, fontWeight:600, color:C.text }}>{o.promo_label||o.promo_type}</span>
                     <div style={{ display:"flex", gap:4, marginTop:1, alignItems:"center", flexWrap:"wrap" }}>
-                      <span style={{ fontSize:8, color:C.gray }}>{(o.created_at||"").slice(0,10)} · {o.accommodation_type} · {o.capacity}P · {o.stay_nights}n</span>
+                      <span style={{ fontSize:11, color:C.gray }}>{(o.created_at||"").slice(0,10)} · {o.accommodation_type} · {o.capacity}P · {o.stay_nights}n</span>
                     </div>
-                    <p style={{ margin:"1px 0 0", fontSize:9, color:C.gray }}>{o.period_label||o.period_id} · conseillé {fmt(Number(o.recommended_price||0))}€ · direct {fmt(Number(o.direct_price||0))}€</p>
+                    <p style={{ margin:"1px 0 0", fontSize:12, color:C.gray }}>{o.period_label||o.period_id} · conseillé {fmt(Number(o.recommended_price||0))}€ · direct {fmt(Number(o.direct_price||0))}€</p>
                   </div>
                   <div style={{ flexShrink:0 }}>
-                    <select value={o.status||"à étudier"} onChange={async e=>{ await updatePromoOpportunity(o.id,{ status:e.target.value }); reloadPromoOpps(); }} style={{ ...inp(), fontSize:9, padding:"4px 6px" }}>
+                    <select value={o.status||"à étudier"} onChange={async e=>{ await updatePromoOpportunity(o.id,{ status:e.target.value }); reloadPromoOpps(); }} style={{ ...inp(), fontSize:12, padding:"4px 6px" }}>
                       {["à étudier","à publier","publié","ignoré"].map(s=><option key={s} value={s}>{s}</option>)}
                     </select>
-                    <button onClick={async()=>{ await deletePromoOpportunity(o.id); reloadPromoOpps(); }} style={{ marginTop:4, width:"100%", fontSize:8, color:C.gray, background:C.grayL, border:"none", borderRadius:5, padding:"3px 6px", cursor:"pointer" }}>🗑</button>
+                    <button onClick={async()=>{ await deletePromoOpportunity(o.id); reloadPromoOpps(); }} style={{ marginTop:4, width:"100%", fontSize:11, color:C.gray, background:C.grayL, border:"none", borderRadius:5, padding:"3px 6px", cursor:"pointer" }}>🗑</button>
                   </div>
                 </div>
               </div>
