@@ -2093,6 +2093,7 @@ export default function App() {
   const [rateEditPrice, setRateEditPrice] = useState("");
   const [rateEditReason, setRateEditReason] = useState("");
   const [rateHistoryRows, setRateHistoryRows] = useState([]);
+  const [rateHistoryScope, setRateHistoryScope] = useState("period");
   function openRateEdit(key, mode, currentPrice) {
     setRateEditKey(key); setRateEditMode(mode);
     setRateEditPrice(mode==="modify"&&currentPrice?String(currentPrice):"");
@@ -2103,18 +2104,23 @@ export default function App() {
     try { await correctCompetitorRate(rate, rateEditPrice, rateEditReason); await loadRates(); await loadHistAll(); closeRateEdit(); }
     catch(e){ alert(e.message); }
   }
-  function loadRateHistory(name, sourceLabel, ctx) {
+  function loadRateHistory(name, sourceLabel, ctx, scope="period") {
+    setRateHistoryScope(scope);
     const rows = (rates||[]).filter(r=>
       !r.is_example &&
       (r.competitor===name||r.property_name===name||r.competitor_name===name) &&
       (r.source===sourceLabel || r.source_label===sourceLabel) &&
-      String(r.period_start||"")===String(ctx.checkin||"") &&
-      String(r.period_end||"")===String(ctx.checkout||"") &&
-      Number(r.stay_nights||7)===Number(ctx.stayNights) &&
-      Number(r.capacity)===Number(ctx.capacity)
+      (scope==="all" || (
+        String(r.period_start||"")===String(ctx.checkin||"") &&
+        String(r.period_end||"")===String(ctx.checkout||"") &&
+        Number(r.stay_nights||7)===Number(ctx.stayNights) &&
+        Number(r.capacity)===Number(ctx.capacity)
+      ))
     ).slice().sort((a,b)=>String(a.collected_at).localeCompare(String(b.collected_at)));
     setRateHistoryRows(rows);
   }
+  // Réinitialise les messages de sauvegarde + scraping quand le contexte de relevé change
+  useEffect(()=>{ setTrackSaved({}); setTrackedScrapeResults([]); setRateEditKey(null); setRateEditMode(null); /* eslint-disable-next-line */ },[trackedPeriodId,trackedCheckin,trackedCheckout,trackedCapacity,trackedStayNights,trackedMode]);
 
   function exportHistoryCsv(rows) {
     const cols = ["collected_at","week_id","period_start","period_end","competitor","source","source_channel","capacity","stay_nights","price_total","price_night","reliability_status"];
@@ -2979,9 +2985,9 @@ export default function App() {
               {/* Récapitulatif contexte */}
               <div style={{ ...cd(11,4), padding:"9px 12px", background:ctxValid?C.bluePale:C.redL }}>
                 {ctxValid ? (<>
-                  <p style={{ margin:0, fontSize:11, color:C.blue, fontWeight:700 }}>{trackedMode==="custom"?"Dates personnalisées":`Période : ${ctx.label}`}</p>
+                  <p style={{ margin:0, fontSize:11, color:C.blue, fontWeight:700 }}>Période : {fmtDateShort(ctx.checkin)} → {fmtDateShort(ctx.checkout)} · {ctx.stayNights} nuits</p>
                   <p style={{ margin:"1px 0 0", fontSize:9, color:C.blueL }}>Booking : arrivée {ctx.checkin} · départ {ctx.checkout}</p>
-                  <p style={{ margin:"1px 0 0", fontSize:9, color:C.blueL }}>Capacité : {ctx.capacity}P · {ctx.stayNights} nuits</p>
+                  <p style={{ margin:"1px 0 0", fontSize:9, color:C.blueL }}>Capacité : {ctx.capacity}P</p>
                 </>) : (
                   <p style={{ margin:0, fontSize:11, color:C.red, fontWeight:600 }}>Dates invalides : vérifiez arrivée et départ.</p>
                 )}
@@ -3066,55 +3072,60 @@ export default function App() {
                                   ? <p style={{ margin:"3px 0 0", fontSize:8, color:C.gold }}>Prix détecté automatiquement : {fmt(scrape.price_total)}€ — ignoré car suspect.</p>
                                   : <p style={{ margin:"3px 0 0", fontSize:8, color:C.gray }}>{scrape.warning||(s.source_type==="direct"?"Site direct : vérification manuelle nécessaire.":"Prix non détecté automatiquement.")}</p>
                             )}
-                            {last ? (<>
-                              <div style={{ ...cd(8), padding:"6px 9px", marginTop:5, background:C.grayL }}>
-                                <p style={{ margin:0, fontSize:9, color:C.text }}>Dernier prix : <strong>{fmt(Number(last.price_total||last.price_week))}€</strong> · {last.reliability_status} · {last.collected_at}{last.edited_at?" · modifié":""}</p>
-                                <div style={{ display:"flex", gap:4, marginTop:5, flexWrap:"wrap" }}>
-                                  <button onClick={()=>openRateEdit(key,"modify",Number(last.price_total||last.price_week))} style={{ fontSize:8, fontWeight:600, color:C.orange, background:C.orangeL, border:"none", borderRadius:5, padding:"4px 8px", cursor:"pointer" }}>Modifier</button>
-                                  <button onClick={()=>openRateEdit(key,"new",null)} style={{ fontSize:8, fontWeight:600, color:C.green, background:C.greenL, border:"none", borderRadius:5, padding:"4px 8px", cursor:"pointer" }}>Nouveau relevé</button>
-                                  <button onClick={()=>{ openRateEdit(key,"history",null); loadRateHistory(c.name, s.source_name, ctx); }} style={{ fontSize:8, fontWeight:600, color:C.blue, background:C.bluePale, border:"none", borderRadius:5, padding:"4px 8px", cursor:"pointer" }}>Historique</button>
-                                </div>
-                                {rateEditKey===key&&rateEditMode==="modify"&&(
-                                  <div style={{ marginTop:6 }}>
-                                    <p style={{ margin:"0 0 3px", fontSize:8, color:C.gray, fontStyle:"italic" }}>Corriger modifie le relevé existant. Nouveau relevé ajoute une ligne à l'historique.</p>
-                                    <input type="number" placeholder="Prix corrigé" value={rateEditPrice} onChange={e=>setRateEditPrice(e.target.value)} style={{ ...inp(), marginBottom:4 }}/>
-                                    <input placeholder="Raison de la correction" value={rateEditReason} onChange={e=>setRateEditReason(e.target.value)} style={{ ...inp(), marginBottom:4 }}/>
-                                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:4 }}>
-                                      <button onClick={closeRateEdit} style={{ ...btn(false,C.grayL,C.text), margin:0, fontSize:9, padding:"5px" }}>Annuler</button>
-                                      <button onClick={()=>submitRateCorrection(last)} disabled={!rateEditPrice} style={{ ...btn(!rateEditPrice,C.orange), margin:0, fontSize:9, padding:"5px" }}>Enregistrer correction</button>
-                                    </div>
-                                  </div>
-                                )}
-                                {rateEditKey===key&&rateEditMode==="new"&&(
-                                  <div style={{ marginTop:6 }}>
-                                    <p style={{ margin:"0 0 3px", fontSize:8, color:C.gray, fontStyle:"italic" }}>Nouveau relevé : ajoute une ligne dans l'historique (n'écrase pas l'ancien).</p>
-                                    <input type="number" placeholder="Prix du nouveau relevé" value={rateEditPrice} onChange={e=>setRateEditPrice(e.target.value)} style={{ ...inp(), marginBottom:4 }}/>
-                                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:4 }}>
-                                      <button onClick={closeRateEdit} style={{ ...btn(false,C.grayL,C.text), margin:0, fontSize:9, padding:"5px" }}>Annuler</button>
-                                      <button onClick={async()=>{ await saveSourceRate(c, s, rateEditPrice, key); closeRateEdit(); }} disabled={!rateEditPrice||datesInvalid} style={{ ...btn(!rateEditPrice||datesInvalid,C.green), margin:0, fontSize:9, padding:"5px" }}>Enregistrer nouveau relevé</button>
-                                    </div>
-                                  </div>
-                                )}
-                                {rateEditKey===key&&rateEditMode==="history"&&(
-                                  <div style={{ marginTop:6 }}>
-                                    {rateHistoryRows.length===0?<p style={{ margin:0, fontSize:9, color:C.gray }}>Aucun historique.</p>:rateHistoryRows.map((h,hi)=>{
-                                      const pt=Number(h.price_total||h.price_week||0); const prev=hi>0?Number(rateHistoryRows[hi-1].price_total||rateHistoryRows[hi-1].price_week||0):null; const ev=prev!=null?pt-prev:null;
-                                      return <p key={h.id||hi} style={{ margin:"2px 0 0", fontSize:9, color:C.text }}>{h.collected_at} · <strong>{fmt(pt)}€</strong> · {fmt(Math.round(pt/(h.stay_nights||7)))}€/n · {h.reliability_status}{h.edited_at?" · modifié":""}{ev!=null?<span style={{ color:ev>0?C.green:ev<0?C.red:C.gray, fontWeight:700 }}> · {ev>0?"+":""}{fmt(ev)}€</span>:""}</p>;
-                                    })}
-                                    <button onClick={closeRateEdit} style={{ ...btn(false,C.grayL,C.text), margin:"5px 0 0", fontSize:9, padding:"5px" }}>Fermer</button>
-                                  </div>
-                                )}
+                            <div style={{ ...cd(8), padding:"6px 9px", marginTop:5, background:C.grayL }}>
+                              {last
+                                ? <p style={{ margin:0, fontSize:9, color:C.text }}>Dernier prix : <strong>{fmt(Number(last.price_total||last.price_week))}€</strong> · {last.reliability_status} · {last.collected_at}{last.edited_at?" · modifié":""}</p>
+                                : <p style={{ margin:0, fontSize:9, color:C.gray, fontStyle:"italic" }}>Aucun prix enregistré pour cette période.</p>}
+                              <div style={{ display:"flex", gap:4, marginTop:5, flexWrap:"wrap" }}>
+                                {last&&<button onClick={()=>openRateEdit(key,"modify",Number(last.price_total||last.price_week))} style={{ fontSize:8, fontWeight:600, color:C.orange, background:C.orangeL, border:"none", borderRadius:5, padding:"4px 8px", cursor:"pointer" }}>Modifier</button>}
+                                <button onClick={()=>openRateEdit(key,"new",null)} style={{ fontSize:8, fontWeight:600, color:C.green, background:C.greenL, border:"none", borderRadius:5, padding:"4px 8px", cursor:"pointer" }}>Nouveau relevé</button>
+                                <button onClick={()=>{ openRateEdit(key,"history",null); loadRateHistory(c.name, s.source_name, ctx, "period"); }} style={{ fontSize:8, fontWeight:600, color:C.blue, background:C.bluePale, border:"none", borderRadius:5, padding:"4px 8px", cursor:"pointer" }}>Historique</button>
                               </div>
-                            </>):null}
+                              {rateEditKey===key&&rateEditMode==="modify"&&last&&(
+                                <div style={{ marginTop:6 }}>
+                                  <p style={{ margin:"0 0 3px", fontSize:8, color:C.gray, fontStyle:"italic" }}>Corriger modifie le relevé existant. Nouveau relevé ajoute une ligne à l'historique.</p>
+                                  <input type="number" placeholder="Prix corrigé" value={rateEditPrice} onChange={e=>setRateEditPrice(e.target.value)} style={{ ...inp(), marginBottom:4 }}/>
+                                  <input placeholder="Raison de la correction" value={rateEditReason} onChange={e=>setRateEditReason(e.target.value)} style={{ ...inp(), marginBottom:4 }}/>
+                                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:4 }}>
+                                    <button onClick={closeRateEdit} style={{ ...btn(false,C.grayL,C.text), margin:0, fontSize:9, padding:"5px" }}>Annuler</button>
+                                    <button onClick={()=>submitRateCorrection(last)} disabled={!rateEditPrice} style={{ ...btn(!rateEditPrice,C.orange), margin:0, fontSize:9, padding:"5px" }}>Enregistrer correction</button>
+                                  </div>
+                                </div>
+                              )}
+                              {rateEditKey===key&&rateEditMode==="new"&&(
+                                <div style={{ marginTop:6 }}>
+                                  <p style={{ margin:"0 0 3px", fontSize:8, color:C.gray, fontStyle:"italic" }}>Nouveau relevé : ajoute une ligne dans l'historique (n'écrase pas l'ancien).</p>
+                                  <input type="number" placeholder="Prix du nouveau relevé" value={rateEditPrice} onChange={e=>setRateEditPrice(e.target.value)} style={{ ...inp(), marginBottom:4 }}/>
+                                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:4 }}>
+                                    <button onClick={closeRateEdit} style={{ ...btn(false,C.grayL,C.text), margin:0, fontSize:9, padding:"5px" }}>Annuler</button>
+                                    <button onClick={async()=>{ await saveSourceRate(c, s, rateEditPrice, key); closeRateEdit(); }} disabled={!rateEditPrice||datesInvalid} style={{ ...btn(!rateEditPrice||datesInvalid,C.green), margin:0, fontSize:9, padding:"5px" }}>Enregistrer nouveau relevé</button>
+                                  </div>
+                                </div>
+                              )}
+                              {rateEditKey===key&&rateEditMode==="history"&&(
+                                <div style={{ marginTop:6 }}>
+                                  <div style={{ display:"flex", gap:4, marginBottom:5 }}>
+                                    {[["period","Cette période"],["all","Toutes périodes"]].map(([v,l])=>(
+                                      <button key={v} onClick={()=>loadRateHistory(c.name, s.source_name, ctx, v)} style={{ fontSize:8, fontWeight:rateHistoryScope===v?700:400, color:rateHistoryScope===v?C.white:C.gray, background:rateHistoryScope===v?C.blue:C.white, border:`1px solid ${rateHistoryScope===v?C.blue:C.grayM}`, borderRadius:5, padding:"3px 7px", cursor:"pointer" }}>{l}</button>
+                                    ))}
+                                  </div>
+                                  {rateHistoryRows.length===0?<p style={{ margin:0, fontSize:9, color:C.gray }}>Aucun historique.</p>:rateHistoryRows.map((h,hi)=>{
+                                    const pt=Number(h.price_total||h.price_week||0); const prev=hi>0?Number(rateHistoryRows[hi-1].price_total||rateHistoryRows[hi-1].price_week||0):null; const ev=prev!=null?pt-prev:null;
+                                    return <p key={h.id||hi} style={{ margin:"2px 0 0", fontSize:9, color:C.text }}>{h.collected_at}{rateHistoryScope==="all"?` · ${fmtDateShort(h.period_start)}→${fmtDateShort(h.period_end)}`:""} · <strong>{fmt(pt)}€</strong> · {fmt(Math.round(pt/(h.stay_nights||7)))}€/n · {h.reliability_status}{h.edited_at?" · modifié":""}{ev!=null?<span style={{ color:ev>0?C.green:ev<0?C.red:C.gray, fontWeight:700 }}> · {ev>0?"+":""}{fmt(ev)}€</span>:""}</p>;
+                                  })}
+                                  <button onClick={closeRateEdit} style={{ ...btn(false,C.grayL,C.text), margin:"5px 0 0", fontSize:9, padding:"5px" }}>Fermer</button>
+                                </div>
+                              )}
+                            </div>
                             {st==="ok" ? (
                               <p style={{ margin:"4px 0 0", fontSize:9, color:C.green, fontWeight:600 }}>✓ Prix {s.source_name} enregistré</p>
                             ) : (rateEditKey===key&&(rateEditMode==="modify"||rateEditMode==="new"||rateEditMode==="history")) ? null : (
                               <div style={{ display:"flex", gap:6, alignItems:"center", marginTop:4 }}>
                                 <input type="number" placeholder={`Prix ${s.source_name} vérifié`} value={vp} onChange={e=>setTrackPrices(p=>({ ...p, [key]:e.target.value }))} style={{ flex:1, padding:"5px 8px", fontSize:10, border:`1px solid ${C.grayM}`, borderRadius:6, boxSizing:"border-box" }}/>
-                                <button onClick={()=>saveSourceRate(c, s, vp, key)} disabled={!vp||datesInvalid} style={{ padding:"5px 9px", fontSize:9, fontWeight:700, background:(vp&&!datesInvalid)?C.green:C.grayL, color:(vp&&!datesInvalid)?C.white:C.gray, border:"none", borderRadius:6, cursor:(vp&&!datesInvalid)?"pointer":"default", whiteSpace:"nowrap" }}>{scrapeUsable?"Valider ce prix":"Enregistrer"}</button>
+                                <button onClick={()=>saveSourceRate(c, s, vp, key)} disabled={!vp||datesInvalid} style={{ padding:"5px 9px", fontSize:9, fontWeight:700, background:(vp&&!datesInvalid)?C.green:C.grayL, color:(vp&&!datesInvalid)?C.white:C.gray, border:"none", borderRadius:6, cursor:(vp&&!datesInvalid)?"pointer":"default", whiteSpace:"nowrap" }}>{last?"Enregistrer nouveau relevé":scrapeUsable?"Valider ce prix":"Enregistrer nouveau relevé"}</button>
                               </div>
                             )}
-                            {st==="dup"&&<p style={{ margin:"3px 0 0", fontSize:8, color:C.gold }}>= Relevé déjà existant</p>}
+                            {st==="dup"&&<p style={{ margin:"3px 0 0", fontSize:8, color:C.gold }}>= Relevé déjà existant ce jour</p>}
                             {st==="err"&&<p style={{ margin:"3px 0 0", fontSize:8, color:C.red }}>✗ Erreur d'enregistrement</p>}
                           </div>
                         );
