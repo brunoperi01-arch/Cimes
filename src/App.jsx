@@ -1735,6 +1735,7 @@ export default function App() {
   // Filtres globaux Dashboard (pilotage)
   const [dashFilters, setDashFilters]     = useState({ season:"ete", nights:7, periodId:"2026_w7", capacity:6, accType:"2P6" });
   const [dashCompSegment, setDashCompSegment] = useState("residence");
+  const [dismissedActions, setDismissedActions] = useState([]);
   const resetDashFilters = ()=>setDashFilters({ season:"ete", nights:7, periodId:"2026_w7", capacity:6, accType:"2P6" });
   const [dashOurPrice, setDashOurPrice]   = useState("");
   const [dashOurNotes, setDashOurNotes]   = useState("");
@@ -2588,6 +2589,11 @@ export default function App() {
   ):null;
 
   const NAV=[{id:"dashboard",icon:"▣",l:"Dashboard"},{id:"benchmark",icon:"📊",l:"Benchmark"},{id:"track",icon:"💶",l:"Suivi prix"},{id:"promotions",icon:"🎯",l:"Promos"},{id:"weeks",icon:"📡",l:"Radar"},{id:"diag",icon:"🔬",l:"Diag"}];
+  const NAV_GROUPS=[
+    { label:"Pilotage", items:[{id:"dashboard",icon:"▣",l:"Dashboard"},{id:"benchmark",icon:"📊",l:"Benchmark"},{id:"promotions",icon:"🎯",l:"Promos"},{id:"track",icon:"💶",l:"Suivi prix"}] },
+    { label:"Données", items:[{id:"tarifs",icon:"💰",l:"Tarifs Les Cimes"},{id:"competitors_residence",icon:"🏢",l:"Concurrents Résidences"},{id:"competitors_private",icon:"🏠",l:"Concurrents Particuliers"},{id:"import",icon:"🔗",l:"Sources & Import"}] },
+    { label:"Outils", items:[{id:"weeks",icon:"📡",l:"Radar"},{id:"collect",icon:"📥",l:"Import / Saisie"},{id:"diag",icon:"🔬",l:"Diagnostic"}] },
+  ];
   const goScreen=id=>{ setScreen(id); setCM(null); setIaText(null); setPasteEdit(null); };
   const BNav=()=>isMobile?(
     <div style={{ position:"sticky", bottom:0, background:C.white, borderTop:`0.5px solid ${C.grayM}`, display:"flex", padding:"6px 0 16px", zIndex:10 }}>
@@ -2608,22 +2614,20 @@ export default function App() {
           <p style={{ margin:0, fontSize:9, color:"rgba(255,255,255,0.55)" }}>Benchmark</p>
         </div>
       </div>
-      {NAV.map(n=>(
-        <button key={n.id} onClick={()=>goScreen(n.id)} style={{ width:"100%", display:"flex", alignItems:"center", gap:11, padding:"10px 11px", marginBottom:3, background:screen===n.id?"rgba(255,255,255,0.16)":"transparent", border:"none", borderRadius:10, cursor:"pointer", textAlign:"left" }}>
-          <span style={{ fontSize:15, width:18, textAlign:"center" }}>{n.icon}</span>
-          <span style={{ fontSize:13, fontWeight:screen===n.id?700:500, color:screen===n.id?C.white:"rgba(255,255,255,0.78)" }}>{n.l}</span>
-        </button>
+      {NAV_GROUPS.map((grp,gi)=>(
+        <div key={grp.label} style={{ marginBottom:gi<NAV_GROUPS.length-1?6:0 }}>
+          <p style={{ margin:"6px 8px 4px", fontSize:8, fontWeight:700, color:"rgba(255,255,255,0.4)", letterSpacing:"0.08em", textTransform:"uppercase" }}>{grp.label}</p>
+          {grp.items.map(n=>{
+            const active = screen===n.id;
+            return (
+              <button key={n.id} onClick={()=>goScreen(n.id)} style={{ width:"100%", display:"flex", alignItems:"center", gap:11, padding:"9px 11px", marginBottom:2, background:active?"rgba(255,255,255,0.16)":"transparent", border:"none", borderRadius:10, cursor:"pointer", textAlign:"left" }}>
+                <span style={{ fontSize:14, width:18, textAlign:"center" }}>{n.icon}</span>
+                <span style={{ fontSize:12, fontWeight:active?700:500, color:active?C.white:"rgba(255,255,255,0.78)" }}>{n.l}</span>
+              </button>
+            );
+          })}
+        </div>
       ))}
-      <div style={{ borderTop:"0.5px solid rgba(255,255,255,0.14)", margin:"10px 4px", paddingTop:10 }}>
-        <button onClick={()=>goScreen("competitors_residence")} style={{ width:"100%", display:"flex", alignItems:"center", gap:11, padding:"9px 11px", marginBottom:3, background:screen==="competitors_residence"?"rgba(255,255,255,0.16)":"transparent", border:"none", borderRadius:10, cursor:"pointer", textAlign:"left" }}>
-          <span style={{ fontSize:14, width:18, textAlign:"center" }}>🏢</span>
-          <span style={{ fontSize:12, fontWeight:screen==="competitors_residence"?700:500, color:screen==="competitors_residence"?C.white:"rgba(255,255,255,0.78)" }}>Concurrents Résidences</span>
-        </button>
-        <button onClick={()=>goScreen("competitors_private")} style={{ width:"100%", display:"flex", alignItems:"center", gap:11, padding:"9px 11px", background:screen==="competitors_private"?"rgba(255,255,255,0.16)":"transparent", border:"none", borderRadius:10, cursor:"pointer", textAlign:"left" }}>
-          <span style={{ fontSize:14, width:18, textAlign:"center" }}>🏠</span>
-          <span style={{ fontSize:12, fontWeight:screen==="competitors_private"?700:500, color:screen==="competitors_private"?C.white:"rgba(255,255,255,0.78)" }}>Concurrents Particuliers</span>
-        </button>
-      </div>
       <div style={{ marginTop:"auto", paddingTop:12 }}>
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:6, padding:"0 6px" }}>
           <Badge label={SB_READY?"SUPABASE":"LOCAL"} color={SB_READY?C.green:C.gold} bg={SB_READY?C.greenL:C.goldL} size={9}/>
@@ -2818,24 +2822,56 @@ export default function App() {
       {!isMobile&&(
         <div style={{ display:"grid", gridTemplateColumns:"repeat(5, 1fr) auto", gap:10, padding:"12px 18px 0", alignItems:"stretch" }}>
           {[
-            { ic:"⛰", c:C.blue, bg:C.bluePale, t:"Tarif Les Cimes", v:dfOurPrice?`${fmt(dfOurNight)}€`:"—", s:dfOurPrice?`${fmt(dfOurPrice)}€ / ${dfNights}n · ${dfOurSource}`:"Données insuffisantes" },
-            { ic:"🏢", c:C.blue, bg:C.bluePale, t:"Médiane pros", v:dfProMedian?`${fmt(dfProMedian)}€`:"—", s:dfProRates.length?`${dfProRates.length} relevés`:"Données insuffisantes" },
-            { ic:"🏠", c:"#7C3AED", bg:"#F1E9FF", t:"Médiane particuliers", v:dfPrivMedian?`${fmt(dfPrivMedian)}€`:"—", s:dfPrivRates.length?`${dfPrivRates.length} relevés`:"Données insuffisantes" },
-            { ic:"📈", c:dfPressure==="élevée"?C.red:dfPressure==="moyenne"?C.orange:C.green, bg:dfPressure==="élevée"?C.redL:dfPressure==="moyenne"?C.orangeL:C.greenL, t:"Pression marché", v:dfPressure, s:dfPrivGap!=null?`écart part. ${dfPrivGap>0?"+":""}${dfPrivGap}%`:"—" },
-            { ic:"🎯", c:C.green, bg:C.greenL, t:"Opportunité promo", v:dfPromoLabel, s:dfPromoScore?`Score ${dfPromoScore}/100`:"Données insuffisantes" },
+            { ic:"⛰", c:C.blue, bg:C.bluePale, t:"Tarif Les Cimes", v:dfOurPrice?`${fmt(dfOurNight)}€`:"—", s:dfOurPrice?`${fmt(dfOurPrice)}€ / ${dfNights}n · ${dfOurSource}`:"Données insuffisantes", nav:"tarifs" },
+            { ic:"🏢", c:C.blue, bg:C.bluePale, t:"Médiane pros", v:dfProMedian?`${fmt(dfProMedian)}€`:"—", s:dfProRates.length?`${dfProRates.length} relevés`:"Données insuffisantes", nav:"benchmark" },
+            { ic:"🏠", c:"#7C3AED", bg:"#F1E9FF", t:"Médiane particuliers", v:dfPrivMedian?`${fmt(dfPrivMedian)}€`:"—", s:dfPrivRates.length?`${dfPrivRates.length} relevés`:"Données insuffisantes", nav:"benchmark" },
+            { ic:"📈", c:dfPressure==="élevée"?C.red:dfPressure==="moyenne"?C.orange:C.green, bg:dfPressure==="élevée"?C.redL:dfPressure==="moyenne"?C.orangeL:C.greenL, t:"Pression marché", v:dfPressure, s:dfPrivGap!=null?`écart part. ${dfPrivGap>0?"+":""}${dfPrivGap}%`:"—", nav:"benchmark" },
+            { ic:"🎯", c:C.green, bg:C.greenL, t:"Opportunité promo", v:dfPromoLabel, s:dfPromoScore?`Score ${dfPromoScore}/100`:"Données insuffisantes", nav:"promotions" },
           ].map((k,i)=>(
-            <div key={i} style={card({ padding:"12px 13px" })}>
+            <button key={i} onClick={()=>setScreen(k.nav)} style={{ ...card({ padding:"12px 13px" }), cursor:"pointer", textAlign:"left", display:"block" }}>
               <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:5 }}>
                 <div style={{ width:30, height:30, borderRadius:9, background:k.bg, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}><span style={{ fontSize:15 }}>{k.ic}</span></div>
                 <span style={{ fontSize:9, fontWeight:600, color:C.gray, lineHeight:1.1 }}>{k.t}</span>
               </div>
               <p style={{ margin:0, fontSize:19, fontWeight:700, color:k.c, lineHeight:1.1 }}>{k.v}</p>
               <p style={{ margin:"2px 0 0", fontSize:8, color:C.gray }}>{k.s}</p>
-            </div>
+            </button>
           ))}
           <button onClick={()=>setScreen("benchmark")} style={{ ...card({ padding:"12px 14px" }), background:C.blue, border:"none", cursor:"pointer", display:"flex", flexDirection:"column", justifyContent:"center", minWidth:130 }}>
             <span style={{ fontSize:12, fontWeight:700, color:C.white, textAlign:"left", lineHeight:1.25 }}>Ouvrir Benchmark & décisions →</span>
           </button>
+        </div>
+      )}
+
+      {/* Décisions commerciales */}
+      {!isMobile&&(
+        <div style={{ padding:"14px 18px 0" }}>
+          {sectionTitle("🔥 Actions prioritaires")}
+          {(()=>{
+            const actions=[];
+            if (dfProRates.length<3) actions.push({ ic:"💶", c:C.purple, bg:C.purpleL, t:"Relever les prix concurrents", d:`Moins de 3 relevés pros pour ${dfPeriod?periodOptionLabel(dfPeriod):"cette période"}.`, btn:"Faire le relevé", go:()=>setScreen("track") });
+            if (dfPrivGap!=null&&dfPrivGap>15) actions.push({ ic:"🏠", c:C.orange, bg:C.orangeL, t:"Vérifier les particuliers", d:`Pression particuliers ${dfPrivGap>30?"forte":"moyenne"} (${dfPrivGap>0?"+":""}${dfPrivGap}%).`, btn:"Voir particuliers", go:()=>setScreen("competitors_private") });
+            if (dfProGap!=null&&dfProGap<-5) actions.push({ ic:"⬇️", c:C.red, bg:C.redL, t:"Ajuster le tarif", d:`Le marché pro est ${Math.abs(dfProGap)}% au-dessus de votre tarif.`, btn:"Ouvrir Benchmark", go:()=>setScreen("benchmark") });
+            if (dfPromoScore>=40) actions.push({ ic:"🎯", c:C.green, bg:C.greenL, t:"Créer une promo court séjour", d:`Opportunité promo ${dfPromoLabel.toLowerCase()} sur cette période.`, btn:"Créer promo", go:()=>{ setPromoStayNights(3); setScreen("promotions"); } });
+            if (!dfWeeklyPrice) actions.push({ ic:"📝", c:C.blue, bg:C.bluePale, t:"Compléter les tarifs", d:`Aucun tarif semaine ${dfAcc.label} pour cette période.`, btn:"Gérer les tarifs", go:()=>setScreen("tarifs") });
+            if (dfPrivRates.length===0&&privList.length>0) actions.push({ ic:"🔎", c:C.purple, bg:C.purpleL, t:"Relever les particuliers", d:"Des particuliers sont suivis mais sans relevé sur cette période.", btn:"Faire le relevé", go:()=>setScreen("track") });
+            const shown = actions.filter(a=>!dismissedActions.includes(a.t)).slice(0,6);
+            if (!shown.length) return <div style={card()}><p style={{ margin:0, fontSize:11, color:C.green, fontWeight:600 }}>✓ Aucune action urgente. Données à jour pour cette période.</p></div>;
+            return (
+              <div style={responsiveGrid(3)}>
+                {shown.map((a,i)=>(
+                  <div key={i} style={card({ background:a.bg, borderColor:"transparent" })}>
+                    <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom:3 }}><span style={{ fontSize:15 }}>{a.ic}</span><span style={{ fontSize:12, fontWeight:700, color:a.c }}>{a.t}</span></div>
+                    <p style={{ margin:"0 0 8px", fontSize:10, color:C.text, lineHeight:1.4 }}>{a.d}</p>
+                    <div style={{ display:"flex", gap:6 }}>
+                      <button onClick={a.go} style={{ fontSize:10, fontWeight:700, color:C.white, background:a.c, border:"none", borderRadius:8, padding:"6px 11px", cursor:"pointer" }}>{a.btn}</button>
+                      <button onClick={()=>setDismissedActions(d=>[...d,a.t])} style={{ fontSize:10, fontWeight:600, color:C.gray, background:"transparent", border:`1px solid ${C.grayM}`, borderRadius:8, padding:"6px 10px", cursor:"pointer" }}>Ignorer</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -2939,133 +2975,20 @@ export default function App() {
         </div>
         </div>
 
-        {/* ══ GESTION TARIFS LES CIMES ══════════════════════════ */}
-        <p style={sml}>💰 Gestion tarifs Les Cimes</p>
-
-        {/* Mini résumé */}
-        <div style={{ ...cd(11), padding:"10px 13px", background:C.bluePale, marginBottom:8 }}>
-          <p style={{ margin:"0 0 3px", fontSize:13, fontWeight:700, color:C.blue }}>{(ourRates||[]).filter(r=>r.is_active!==false).length} tarif(s) saisi(s)</p>
-          <p style={{ margin:0, fontSize:10, color:C.blueL }}>Période courante : {selWeek?.label} · {cap}</p>
-          <p style={{ margin:"1px 0 0", fontSize:10, color:C.blueL }}>Source : <strong>{ourRateSource}</strong>{ourPrice>0?` · ${fmt(ourPrice)}€/séjour · ${fmt(ourNight)}€/nuit`:""}</p>
-          {currentOurRate?.updated_at&&<p style={{ margin:"1px 0 0", fontSize:9, color:C.gray }}>Dernière maj : {currentOurRate.updated_at.slice(0,10)}</p>}
+        {/* Carte synthétique tarifs Les Cimes */}
+        {sectionTitle("Tarifs Les Cimes","💰")}
+        <div style={card({ marginBottom:12 })}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:10, flexWrap:"wrap" }}>
+            <div>
+              <p style={{ margin:0, fontSize:20, fontWeight:700, color:C.blue }}>{(ourRates||[]).filter(r=>r.is_active!==false).length}<span style={{ fontSize:10, color:C.gray, fontWeight:400 }}> tarifs enregistrés</span></p>
+              <p style={{ margin:"2px 0 0", fontSize:10, color:C.gray }}>Période courante : {dfPeriod?periodOptionLabel(dfPeriod):"—"}</p>
+              {dfOurPrice>0&&<p style={{ margin:"1px 0 0", fontSize:11, color:C.text, fontWeight:600 }}>{dfAcc.label} · {fmt(dfOurPrice)}€ / {dfNights}n · {fmt(dfOurNight)}€/nuit · {dfOurSource}</p>}
+            </div>
+            <button onClick={()=>setScreen("tarifs")} style={{ ...btn(false,C.blue), width:"auto", padding:"9px 16px", margin:0 }}>Gérer les tarifs →</button>
+          </div>
         </div>
 
-        {/* Tabs */}
-        <div style={{ display:"flex", background:C.grayM, padding:2, borderRadius:9, marginBottom:8 }}>
-          {[["saisie","Saisie rapide"],["import","Import CSV"],["liste","Tarifs enregistrés"]].map(([id,lbl])=>(
-            <button key={id} style={tabB(dashTarifTab===id)} onClick={()=>setDashTarifTab(id)}>{lbl}</button>
-          ))}
-        </div>
 
-        {/* ── Saisie rapide ── */}
-        {dashTarifTab==="saisie"&&(
-          <div style={{ ...cd(11), padding:"11px 13px" }}>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:6 }}>
-              <div>
-                <p style={{ ...sml, margin:"0 0 4px" }}>Période</p>
-                <select value={dashOurPeriodId} onChange={e=>setDashOurPeriodId(e.target.value)} style={inp()}>
-                  <optgroup label="Été 7 nuits">
-                    {ALL_PERIODS.filter(p=>p.season==="ete").map(p=><option key={p.id} value={p.id}>{p.label}</option>)}
-                  </optgroup>
-                  <optgroup label="Hiver 7 nuits">
-                    {ALL_PERIODS.filter(p=>p.season==="hiver"&&(p.stay_nights||7)===7).map(p=><option key={p.id} value={p.id}>{p.label}</option>)}
-                  </optgroup>
-                  <optgroup label="Hiver 2 nuits">
-                    {ALL_PERIODS.filter(p=>p.season==="hiver"&&p.stay_nights===2).map(p=><option key={p.id} value={p.id}>{p.label}</option>)}
-                  </optgroup>
-                </select>
-              </div>
-              <div>
-                <p style={{ ...sml, margin:"0 0 4px" }}>Capacité</p>
-                <select value={dashOurCap} onChange={e=>setDashOurCap(parseInt(e.target.value))} style={inp()}>{[2,4,6,8].map(n=><option key={n} value={n}>{n}P</option>)}</select>
-              </div>
-            </div>
-            <div style={{ display:"flex", gap:5, marginBottom:6, flexWrap:"wrap" }}>
-              <span style={{ fontSize:9, background:C.grayL, color:C.gray, padding:"3px 7px", borderRadius:6 }}>Durée : {dashNights} nuits</span>
-              <span style={{ fontSize:9, background:C.grayL, color:C.gray, padding:"3px 7px", borderRadius:6 }}>{dashPeriod?.season==="hiver"?"Hiver":"Été"}</span>
-              {ALL_PERIODS.find(p=>p.id===dashOurPeriodId)&&ourRates.find(r=>r.period_id===dashOurPeriodId&&Number(r.capacity)===Number(dashOurCap)&&Number(r.stay_nights||7)===dashNights)&&<span style={{ fontSize:9, background:C.greenL, color:C.green, padding:"3px 7px", borderRadius:6, fontWeight:700 }}>existant · sera mis à jour</span>}
-            </div>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:6 }}>
-              <div>
-                <p style={{ ...sml, margin:"0 0 4px" }}>Prix total séjour € *</p>
-                <input type="number" style={inp()} placeholder="340" value={dashOurPrice} onChange={e=>setDashOurPrice(e.target.value)}/>
-              </div>
-              <div>
-                <p style={{ ...sml, margin:"0 0 4px" }}>Prix / nuit (auto)</p>
-                <input type="text" disabled style={{ ...inp(), background:C.grayL, color:C.gray }} value={dashOurPrice?dashPriceNight+"€/nuit":"—"}/>
-              </div>
-            </div>
-            <p style={{ ...sml, margin:"0 0 4px" }}>Notes (optionnel)</p>
-            <input style={{ ...inp(), marginBottom:8 }} placeholder="ex : grille été 2026" value={dashOurNotes} onChange={e=>setDashOurNotes(e.target.value)}/>
-            {dashOurSaved==="ok"&&<div style={{ ...cd(8), padding:"7px 10px", background:C.greenL, marginBottom:6 }}><p style={{ margin:0, fontSize:11, fontWeight:600, color:C.green }}>✓ Tarif enregistré</p></div>}
-            {dashOurSaved?.startsWith("err")&&<div style={{ ...cd(8), padding:"7px 10px", background:C.redL, marginBottom:6 }}><p style={{ margin:0, fontSize:11, color:C.red }}>✗ {dashOurSaved.slice(4)}</p></div>}
-            <button style={btn(dashOurSaving||!dashOurPrice,C.blue)} onClick={handleDashSaveOurRate} disabled={dashOurSaving||!dashOurPrice}>{dashOurSaving?"Enregistrement…":"Enregistrer tarif Les Cimes"}</button>
-          </div>
-        )}
-
-        {/* ── Import CSV ── */}
-        {dashTarifTab==="import"&&(
-          <div style={{ ...cd(11), padding:"11px 13px" }}>
-            <p style={{ margin:"0 0 4px", fontSize:11, fontWeight:700, color:C.blue }}>Importer grille tarifaire Les Cimes</p>
-            <p style={{ margin:"0 0 6px", fontSize:9, color:C.gray, fontFamily:"monospace", lineHeight:1.5 }}>period_id;period_start;period_end;period_label;season;stay_nights;capacity;accommodation_type;price_total;notes</p>
-            {ourCsvResult&&(
-              <div style={{ ...cd(8), padding:"8px 10px", background:ourCsvResult.errors.length===0?C.greenL:C.goldL, marginBottom:6 }}>
-                <p style={{ margin:"0 0 1px", fontSize:11, color:C.green }}>✓ Importés : {ourCsvResult.ok}</p>
-                <p style={{ margin:"0 0 1px", fontSize:11, color:C.blue }}>↻ Mis à jour : {ourCsvResult.updated}</p>
-                <p style={{ margin:"0 0 1px", fontSize:11, color:C.gray }}>⊝ Ignorées : {ourCsvResult.skipped}</p>
-                {ourCsvResult.errors.map((e,i)=><p key={i} style={{ margin:0, fontSize:10, color:C.red }}>✗ {e}</p>)}
-              </div>
-            )}
-            <textarea value={ourCsvText} onChange={e=>setOurCsvText(e.target.value)} placeholder={"2026_w2;2026-06-27;2026-07-04;27 juin → 3 juil;ete;7;6;2P6;340;Tarif été 2026"} style={{ width:"100%", minHeight:80, padding:"8px", fontSize:10, fontFamily:"monospace", border:`1px solid ${C.grayM}`, borderRadius:9, background:C.grayL, color:C.text, resize:"vertical", boxSizing:"border-box", marginBottom:6 }}/>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
-              <button onClick={()=>{ const tpl=["period_id;period_start;period_end;period_label;season;stay_nights;capacity;accommodation_type;price_total;notes","2026_w2;2026-06-27;2026-07-04;27 juin → 3 juil;ete;7;6;2P6;340;Tarif été 2026","2026_w3;2026-07-04;2026-07-11;4 juil → 10 juil;ete;7;8;3P8;460;Tarif été 2026"].join("\n"); const b=new Blob([tpl],{ type:"text/csv;charset=utf-8" }); const u=URL.createObjectURL(b); const a=document.createElement("a"); a.href=u; a.download="modele_tarifs_les_cimes.csv"; a.click(); }} style={{ ...btn(false,C.grayL,C.blueL), margin:0, border:`1px solid ${C.blueL}` }}>⬇ Modèle CSV</button>
-              <button style={{ ...btn(ourCsvLoading||!ourCsvText.trim(),C.blue), margin:0 }} onClick={handleImportOurCsv} disabled={ourCsvLoading||!ourCsvText.trim()}>{ourCsvLoading?"Import…":"Importer tarifs"}</button>
-            </div>
-          </div>
-        )}
-
-        {/* ── Tarifs enregistrés ── */}
-        {dashTarifTab==="liste"&&(
-          <div>
-            <div style={{ display:"flex", gap:4, marginBottom:8, flexWrap:"wrap" }}>
-              {[[0,"Toutes années"],[2026,"2026"],[2027,"2027"]].map(([v,l])=>(
-                <button key={l} onClick={()=>setDashListFilter(f=>({ ...f, year:v }))} style={{ padding:"4px 9px", fontSize:10, fontWeight:dashListFilter.year===v?700:400, background:dashListFilter.year===v?C.blue:C.white, color:dashListFilter.year===v?C.white:C.text, border:`1px solid ${dashListFilter.year===v?C.blue:C.grayM}`, borderRadius:14, cursor:"pointer" }}>{l}</button>
-              ))}
-              {[[0,"Toutes cap."],[2,"2P"],[4,"4P"],[6,"6P"],[8,"8P"]].map(([v,l])=>(
-                <button key={"c"+l} onClick={()=>setDashListFilter(f=>({ ...f, cap:v }))} style={{ padding:"4px 9px", fontSize:10, fontWeight:dashListFilter.cap===v?700:400, background:dashListFilter.cap===v?C.green:C.white, color:dashListFilter.cap===v?C.white:C.text, border:`1px solid ${dashListFilter.cap===v?C.green:C.grayM}`, borderRadius:14, cursor:"pointer" }}>{l}</button>
-              ))}
-              {[[0,"Toutes durées"],[7,"7n"],[2,"2n"]].map(([v,l])=>(
-                <button key={"n"+l} onClick={()=>setDashListFilter(f=>({ ...f, nights:v }))} style={{ padding:"4px 9px", fontSize:10, fontWeight:dashListFilter.nights===v?700:400, background:dashListFilter.nights===v?C.purple:C.white, color:dashListFilter.nights===v?C.white:C.text, border:`1px solid ${dashListFilter.nights===v?C.purple:C.grayM}`, borderRadius:14, cursor:"pointer" }}>{l}</button>
-              ))}
-            </div>
-            <p style={{ ...sml, margin:"0 0 5px" }}>{listFiltered.length} tarif(s){listFiltered.length>30?" · 30 affichés":""}</p>
-            {listFiltered.length===0&&<p style={{ fontSize:11, color:C.gray, textAlign:"center", padding:"14px 0", fontStyle:"italic" }}>Aucun tarif enregistré pour ces filtres.</p>}
-            <div style={cd()}>
-              {listFiltered.slice(0,30).map((r,i,arr)=>(
-                <div key={r.id||`${r.period_id}_${r.capacity}_${r.stay_nights}`} style={rw(i===Math.min(arr.length,30)-1)}>
-                  <div style={{ flex:1, minWidth:0 }}>
-                    <p style={{ margin:0, fontSize:12, fontWeight:500, color:C.text }}>{r.period_label||r.period_id}</p>
-                    <div style={{ display:"flex", gap:4, marginTop:1, flexWrap:"wrap" }}>
-                      <span style={{ fontSize:9, color:C.gray }}>{r.capacity}P · {r.stay_nights||7} nuits</span>
-                      <span style={{ fontSize:9, color:r.season==="hiver"?"#0EA5E9":C.orange }}>{r.season==="hiver"?"Hiver":"Été"}</span>
-                      <span style={{ fontSize:8, background:C.grayL, color:C.gray, padding:"1px 5px", borderRadius:3 }}>{r.source||"saisie"}</span>
-                    </div>
-                    {r.notes&&<p style={{ margin:"1px 0 0", fontSize:9, color:C.gray, fontStyle:"italic" }}>{r.notes}</p>}
-                  </div>
-                  <div style={{ textAlign:"right", flexShrink:0, display:"flex", alignItems:"center", gap:8 }}>
-                    <div>
-                      <p style={{ margin:0, fontSize:12, fontWeight:700, color:C.blue }}>{fmt(Number(r.price_total))}€/séjour</p>
-                      <p style={{ margin:0, fontSize:9, color:C.gray }}>{fmt(Number(r.price_night||Math.round(Number(r.price_total)/(r.stay_nights||7))))}€/nuit</p>
-                    </div>
-                    <button onClick={()=>handleDeleteOurRate(r.id)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:14, color:C.gray, padding:2 }}>🗑</button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* ══ CONCURRENTS SUIVIS ════════════════════════════════ */}
         {sectionTitle("Concurrents suivis","🏨")}
         <div style={responsiveGrid(2)}>
           <div style={card()}>
@@ -3083,10 +3006,12 @@ export default function App() {
         </div>
 
 
-        {/* Import CSV concurrents suivis */}
-        <div style={{ ...cd(11), padding:"11px 13px" }}>
+        {/* Import CSV concurrents + sources (replié) */}
+        <details style={{ ...cd(11), padding:"10px 13px" }}>
+          <summary style={{ fontSize:11, fontWeight:700, color:C.blue, cursor:"pointer" }}>Import CSV concurrents & sources</summary>
+          <div style={{ marginTop:8 }}>
           <p style={{ margin:"0 0 4px", fontSize:11, fontWeight:700, color:C.blue }}>Importer concurrents suivis (CSV)</p>
-          <p style={{ margin:"0 0 6px", fontSize:9, color:C.gray, fontFamily:"monospace", lineHeight:1.5 }}>name;property_type;preferred_channel;platform;booking_url;direct_url;search_location;comparability_score;notes</p>
+          <p style={{ margin:"0 0 6px", fontSize:9, color:C.gray, fontFamily:"monospace", lineHeight:1.5 }}>name;market_segment;property_type;source_type;source_name;source_url;search_location;comparability_score;notes</p>
           {catCsvResult&&(
             <div style={{ ...cd(8), padding:"8px 10px", background:catCsvResult.errors.length===0?C.greenL:C.goldL, marginBottom:6 }}>
               <p style={{ margin:"0 0 1px", fontSize:11, color:C.green }}>✓ Importés : {catCsvResult.ok}</p>
@@ -3094,17 +3019,12 @@ export default function App() {
               {catCsvResult.errors.map((e,i)=><p key={i} style={{ margin:0, fontSize:10, color:C.red }}>✗ {e}</p>)}
             </div>
           )}
-          <textarea value={catCsvText} onChange={e=>setCatCsvText(e.target.value)} placeholder={"Résidence Les Chalets du Verdon;résidence;Booking.com;https://www.booking.com/...;La Foux d'Allos;88;Concurrent direct"} style={{ width:"100%", minHeight:70, padding:"8px", fontSize:10, fontFamily:"monospace", border:`1px solid ${C.grayM}`, borderRadius:9, background:C.grayL, color:C.text, resize:"vertical", boxSizing:"border-box", marginBottom:6 }}/>
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
-            <button onClick={()=>{ const tpl=["name;property_type;preferred_channel;platform;booking_url;direct_url;search_location;comparability_score;notes","Résidence Les Chalets du Verdon;résidence;both;Booking + Direct;https://www.booking.com/...;https://www.chaletsduverdon.com;La Foux d'Allos;88;Concurrent direct","Central Park;résidence;direct;Site direct;;https://www.centralpark-allos.com;La Foux d'Allos;82;Site direct utile","Goélia La Foux;résidence;booking;Booking.com;https://www.booking.com/...;;La Foux d'Allos;85;Concurrent direct"].join("\n"); const b=new Blob([tpl],{ type:"text/csv;charset=utf-8" }); const u=URL.createObjectURL(b); const a=document.createElement("a"); a.href=u; a.download="modele_concurrents_suivis.csv"; a.click(); }} style={{ ...btn(false,C.grayL,C.blueL), margin:0, border:`1px solid ${C.blueL}` }}>⬇ Modèle CSV</button>
+          <textarea value={catCsvText} onChange={e=>setCatCsvText(e.target.value)} placeholder={"Résidence Les Chalets du Verdon;residence;résidence;booking;Booking.com;https://www.booking.com/...;La Foux d'Allos;88;Concurrent direct"} style={{ width:"100%", minHeight:70, padding:"8px", fontSize:10, fontFamily:"monospace", border:`1px solid ${C.grayM}`, borderRadius:9, background:C.grayL, color:C.text, resize:"vertical", boxSizing:"border-box", marginBottom:6 }}/>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:10 }}>
+            <button onClick={()=>{ const tpl=["name;market_segment;property_type;source_type;source_name;source_url;search_location;comparability_score;notes","Résidence Labellemontagne;residence;résidence;booking;Booking.com;https://www.booking.com/...;La Foux d'Allos;80;Concurrent pro","Appartement Central Park particulier;private;particulier;marketplace;Booking particulier;https://www.booking.com/...;La Foux d'Allos;60;Particulier agressif","Studio La Foux Airbnb;private;particulier;marketplace;Airbnb;https://www.airbnb.fr/...;La Foux d'Allos;55;Particulier"].join("\n"); const b=new Blob([tpl],{ type:"text/csv;charset=utf-8" }); const u=URL.createObjectURL(b); const a=document.createElement("a"); a.href=u; a.download="modele_concurrents_suivis.csv"; a.click(); }} style={{ ...btn(false,C.grayL,C.blueL), margin:0, border:`1px solid ${C.blueL}` }}>⬇ Modèle CSV</button>
             <button onClick={handleImportCatalogCsv} disabled={!catCsvText.trim()} style={{ ...btn(!catCsvText.trim(),C.blue), margin:0 }}>Importer concurrents suivis</button>
           </div>
-        </div>
-
-        {/* Import CSV des sources (TO, marketplaces, direct…) */}
-        <details style={{ ...cd(11), padding:"10px 13px" }}>
-          <summary style={{ fontSize:11, fontWeight:700, color:C.blue, cursor:"pointer" }}>Import CSV des sources (TO / marketplaces)</summary>
-          <p style={{ margin:"6px 0", fontSize:9, color:C.gray }}>Format : competitor_name;source_type;source_name;source_url;notes</p>
+          <p style={{ margin:"6px 0", fontSize:9, color:C.gray }}>Sources : competitor_name;source_type;source_name;source_url;notes</p>
           {srcCsvResult&&(
             <div style={{ ...cd(8), padding:"7px 10px", background:C.grayL, marginBottom:6 }}>
               <p style={{ margin:"0 0 1px", fontSize:11, color:C.green }}>✓ Ajoutées : {srcCsvResult.added}</p>
@@ -3114,8 +3034,9 @@ export default function App() {
           )}
           <textarea value={srcCsvText} onChange={e=>setSrcCsvText(e.target.value)} placeholder={"Résidence Les Chalets du Verdon;tour_operator;La France du Nord au Sud;https://www.lafrancedunordausud.fr/...;Fiche TO"} style={{ width:"100%", minHeight:60, padding:"8px", fontSize:10, fontFamily:"monospace", border:`1px solid ${C.grayM}`, borderRadius:9, background:C.grayL, color:C.text, resize:"vertical", boxSizing:"border-box", marginBottom:6 }}/>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
-            <button onClick={()=>{ const tpl=["competitor_name;source_type;source_name;source_url;notes","Résidence Les Chalets du Verdon;tour_operator;La France du Nord au Sud;https://www.lafrancedunordausud.fr/...;Fiche TO","Résidence Les Chalets du Verdon;tour_operator;Maeva;https://www.maeva.com/...;Fiche Maeva","Résidence Labellemontagne;direct;Site direct;https://...;Site officiel"].join("\n"); const b=new Blob([tpl],{ type:"text/csv;charset=utf-8" }); const u=URL.createObjectURL(b); const a=document.createElement("a"); a.href=u; a.download="modele_sources.csv"; a.click(); }} style={{ ...btn(false,C.grayL,C.blueL), margin:0, border:`1px solid ${C.blueL}` }}>⬇ Modèle CSV</button>
+            <button onClick={()=>{ const tpl=["competitor_name;source_type;source_name;source_url;notes","Résidence Les Chalets du Verdon;tour_operator;La France du Nord au Sud;https://www.lafrancedunordausud.fr/...;Fiche TO","Résidence Les Chalets du Verdon;tour_operator;Maeva;https://www.maeva.com/...;Fiche Maeva"].join("\n"); const b=new Blob([tpl],{ type:"text/csv;charset=utf-8" }); const u=URL.createObjectURL(b); const a=document.createElement("a"); a.href=u; a.download="modele_sources.csv"; a.click(); }} style={{ ...btn(false,C.grayL,C.blueL), margin:0, border:`1px solid ${C.blueL}` }}>⬇ Modèle CSV</button>
             <button onClick={handleImportSourcesCsv} disabled={!srcCsvText.trim()} style={{ ...btn(!srcCsvText.trim(),C.blue), margin:0 }}>Importer les sources</button>
+          </div>
           </div>
         </details>
 
@@ -3142,9 +3063,9 @@ export default function App() {
           const allBookingUrls = catalog.filter(c=>c.booking_url).map(c=>buildTrackedBookingUrl(c, ctx));
           const allDirectUrls = catalog.filter(c=>buildTrackedDirectUrl(c)).map(c=>buildTrackedDirectUrl(c));
           return (
-            <>
-              <p style={sml}>🔍 Relevé concurrents suivis</p>
-              <p style={{ margin:"0 0 8px", fontSize:8, color:C.gray, fontStyle:"italic" }}>Corriger modifie le relevé existant. Nouveau relevé ajoute une nouvelle ligne dans l'historique.</p>
+            <details style={{ ...cd(11), padding:"10px 13px", marginTop:8 }}>
+              <summary style={{ fontSize:11, fontWeight:700, color:C.blue, cursor:"pointer" }}>🔍 Relevé concurrents suivis (saisie rapide)</summary>
+              <p style={{ margin:"6px 0 8px", fontSize:8, color:C.gray, fontStyle:"italic" }}>Corriger modifie le relevé existant. Nouveau relevé ajoute une nouvelle ligne dans l'historique.</p>
 
               {/* Sélection de la période du relevé */}
               <div style={{ ...cd(11,4), padding:"10px 12px" }}>
@@ -3360,7 +3281,7 @@ export default function App() {
                   );
                 }); })()}
               </div>
-            </>
+            </details>
           );
         })()}
 
@@ -3392,6 +3313,131 @@ export default function App() {
         </>)}
       </div><BNav/>
     </div>
+    );
+  };
+
+  // Page dédiée : Tarifs Les Cimes (grille, import CSV, saisie, liste)
+  const TarifsLesCimes=()=>{
+    const dashPeriod = ALL_PERIODS.find(p=>p.id===dashOurPeriodId);
+    const dashNights = dashPeriod?.stay_nights || 7;
+    const dashPriceNight = dashOurPrice ? Math.round((parseFloat(dashOurPrice)||0)/dashNights) : 0;
+    const yearOf = r => (r.period_start||"").slice(0,4);
+    const listFiltered = (ourRates||[])
+      .filter(r=>r.is_active!==false)
+      .filter(r=>!dashListFilter.year || yearOf(r)===String(dashListFilter.year))
+      .filter(r=>!dashListFilter.cap || Number(r.capacity)===dashListFilter.cap)
+      .filter(r=>!dashListFilter.nights || Number(r.stay_nights||7)===dashListFilter.nights)
+      .sort((a,b)=>(b.period_start||"").localeCompare(a.period_start||""));
+    return (
+      <div><SBar title="Tarifs Les Cimes"/>
+        <div style={cnt}>
+          <div style={{ ...cd(11), padding:"11px 13px", background:C.bluePale, marginTop:8 }}>
+            <p style={{ margin:0, fontSize:13, fontWeight:700, color:C.blue }}>💰 Gestion tarifs Les Cimes</p>
+            <p style={{ margin:"3px 0 0", fontSize:10, color:C.blueL }}>{(ourRates||[]).filter(r=>r.is_active!==false).length} tarif(s) enregistré(s) · grille semaine de référence.</p>
+          </div>
+          <div style={{ display:"flex", background:C.grayM, padding:2, borderRadius:9, marginBottom:8 }}>
+            {[["saisie","Saisie / modification"],["import","Import CSV"],["liste","Tarifs enregistrés"]].map(([id,lbl])=>(
+              <button key={id} style={tabB(dashTarifTab===id)} onClick={()=>setDashTarifTab(id)}>{lbl}</button>
+            ))}
+          </div>
+          {dashTarifTab==="saisie"&&(
+            <div style={{ ...cd(11), padding:"11px 13px" }}>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:6 }}>
+                <div>
+                  <p style={{ ...sml, margin:"0 0 4px" }}>Période</p>
+                  <select value={dashOurPeriodId} onChange={e=>setDashOurPeriodId(e.target.value)} style={inp()}>
+                    <optgroup label="Été 7 nuits">{ALL_PERIODS.filter(p=>p.season==="ete").map(p=><option key={p.id} value={p.id}>{periodOptionLabel(p)}</option>)}</optgroup>
+                    <optgroup label="Hiver 7 nuits">{ALL_PERIODS.filter(p=>p.season==="hiver"&&(p.stay_nights||7)===7).map(p=><option key={p.id} value={p.id}>{periodOptionLabel(p)}</option>)}</optgroup>
+                    <optgroup label="Hiver 2 nuits">{ALL_PERIODS.filter(p=>p.season==="hiver"&&p.stay_nights===2).map(p=><option key={p.id} value={p.id}>{periodOptionLabel(p)}</option>)}</optgroup>
+                  </select>
+                </div>
+                <div>
+                  <p style={{ ...sml, margin:"0 0 4px" }}>Capacité</p>
+                  <select value={dashOurCap} onChange={e=>setDashOurCap(parseInt(e.target.value))} style={inp()}>{[2,4,6,8].map(n=><option key={n} value={n}>{n}P</option>)}</select>
+                </div>
+              </div>
+              <div style={{ display:"flex", gap:5, marginBottom:6, flexWrap:"wrap" }}>
+                <span style={{ fontSize:9, background:C.grayL, color:C.gray, padding:"3px 7px", borderRadius:6 }}>Durée : {dashNights} nuits</span>
+                <span style={{ fontSize:9, background:C.grayL, color:C.gray, padding:"3px 7px", borderRadius:6 }}>{dashPeriod?.season==="hiver"?"Hiver":"Été"}</span>
+                {ALL_PERIODS.find(p=>p.id===dashOurPeriodId)&&ourRates.find(r=>r.period_id===dashOurPeriodId&&Number(r.capacity)===Number(dashOurCap)&&Number(r.stay_nights||7)===dashNights)&&<span style={{ fontSize:9, background:C.greenL, color:C.green, padding:"3px 7px", borderRadius:6, fontWeight:700 }}>existant · sera mis à jour</span>}
+              </div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:6 }}>
+                <div>
+                  <p style={{ ...sml, margin:"0 0 4px" }}>Prix total séjour € *</p>
+                  <input type="number" style={inp()} placeholder="340" value={dashOurPrice} onChange={e=>setDashOurPrice(e.target.value)}/>
+                </div>
+                <div>
+                  <p style={{ ...sml, margin:"0 0 4px" }}>Prix / nuit (auto)</p>
+                  <input type="text" disabled style={{ ...inp(), background:C.grayL, color:C.gray }} value={dashOurPrice?dashPriceNight+"€/nuit":"—"}/>
+                </div>
+              </div>
+              <p style={{ ...sml, margin:"0 0 4px" }}>Notes (optionnel)</p>
+              <input style={{ ...inp(), marginBottom:8 }} placeholder="ex : grille été 2026" value={dashOurNotes} onChange={e=>setDashOurNotes(e.target.value)}/>
+              {dashOurSaved==="ok"&&<div style={{ ...cd(8), padding:"7px 10px", background:C.greenL, marginBottom:6 }}><p style={{ margin:0, fontSize:11, fontWeight:600, color:C.green }}>✓ Tarif enregistré</p></div>}
+              {dashOurSaved?.startsWith("err")&&<div style={{ ...cd(8), padding:"7px 10px", background:C.redL, marginBottom:6 }}><p style={{ margin:0, fontSize:11, color:C.red }}>✗ {dashOurSaved.slice(4)}</p></div>}
+              <button style={btn(dashOurSaving||!dashOurPrice,C.blue)} onClick={handleDashSaveOurRate} disabled={dashOurSaving||!dashOurPrice}>{dashOurSaving?"Enregistrement…":"Enregistrer tarif Les Cimes"}</button>
+            </div>
+          )}
+          {dashTarifTab==="import"&&(
+            <div style={{ ...cd(11), padding:"11px 13px" }}>
+              <p style={{ margin:"0 0 4px", fontSize:11, fontWeight:700, color:C.blue }}>Importer grille tarifaire Les Cimes</p>
+              <p style={{ margin:"0 0 6px", fontSize:9, color:C.gray, fontFamily:"monospace", lineHeight:1.5 }}>period_id;period_start;period_end;period_label;season;stay_nights;capacity;accommodation_type;price_total;notes</p>
+              {ourCsvResult&&(
+                <div style={{ ...cd(8), padding:"8px 10px", background:ourCsvResult.errors.length===0?C.greenL:C.goldL, marginBottom:6 }}>
+                  <p style={{ margin:"0 0 1px", fontSize:11, color:C.green }}>✓ Importés : {ourCsvResult.ok}</p>
+                  <p style={{ margin:"0 0 1px", fontSize:11, color:C.blue }}>↻ Mis à jour : {ourCsvResult.updated}</p>
+                  <p style={{ margin:"0 0 1px", fontSize:11, color:C.gray }}>⊝ Ignorées : {ourCsvResult.skipped}</p>
+                  {ourCsvResult.errors.map((e,i)=><p key={i} style={{ margin:0, fontSize:10, color:C.red }}>✗ {e}</p>)}
+                </div>
+              )}
+              <textarea value={ourCsvText} onChange={e=>setOurCsvText(e.target.value)} placeholder={"2026_w2;2026-06-27;2026-07-04;27 juin → 3 juil;ete;7;6;2P6;340;Tarif été 2026"} style={{ width:"100%", minHeight:80, padding:"8px", fontSize:10, fontFamily:"monospace", border:`1px solid ${C.grayM}`, borderRadius:9, background:C.grayL, color:C.text, resize:"vertical", boxSizing:"border-box", marginBottom:6 }}/>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
+                <button onClick={()=>{ const tpl=["period_id;period_start;period_end;period_label;season;stay_nights;capacity;accommodation_type;price_total;notes","2026_w2;2026-06-27;2026-07-04;27 juin → 3 juil;ete;7;6;2P6;340;Tarif été 2026","2026_w3;2026-07-04;2026-07-11;4 juil → 10 juil;ete;7;8;3P8;460;Tarif été 2026"].join("\n"); const b=new Blob([tpl],{ type:"text/csv;charset=utf-8" }); const u=URL.createObjectURL(b); const a=document.createElement("a"); a.href=u; a.download="modele_tarifs_les_cimes.csv"; a.click(); }} style={{ ...btn(false,C.grayL,C.blueL), margin:0, border:`1px solid ${C.blueL}` }}>⬇ Modèle CSV</button>
+                <button style={{ ...btn(ourCsvLoading||!ourCsvText.trim(),C.blue), margin:0 }} onClick={handleImportOurCsv} disabled={ourCsvLoading||!ourCsvText.trim()}>{ourCsvLoading?"Import…":"Importer tarifs"}</button>
+              </div>
+            </div>
+          )}
+          {dashTarifTab==="liste"&&(
+            <div>
+              <div style={{ display:"flex", gap:4, marginBottom:8, flexWrap:"wrap" }}>
+                {[[0,"Toutes années"],[2026,"2026"],[2027,"2027"]].map(([v,l])=>(
+                  <button key={l} onClick={()=>setDashListFilter(f=>({ ...f, year:v }))} style={{ padding:"4px 9px", fontSize:10, fontWeight:dashListFilter.year===v?700:400, background:dashListFilter.year===v?C.blue:C.white, color:dashListFilter.year===v?C.white:C.text, border:`1px solid ${dashListFilter.year===v?C.blue:C.grayM}`, borderRadius:14, cursor:"pointer" }}>{l}</button>
+                ))}
+                {[[0,"Toutes cap."],[2,"2P"],[4,"4P"],[6,"6P"],[8,"8P"]].map(([v,l])=>(
+                  <button key={"c"+l} onClick={()=>setDashListFilter(f=>({ ...f, cap:v }))} style={{ padding:"4px 9px", fontSize:10, fontWeight:dashListFilter.cap===v?700:400, background:dashListFilter.cap===v?C.green:C.white, color:dashListFilter.cap===v?C.white:C.text, border:`1px solid ${dashListFilter.cap===v?C.green:C.grayM}`, borderRadius:14, cursor:"pointer" }}>{l}</button>
+                ))}
+                {[[0,"Toutes durées"],[7,"7n"],[4,"4n"],[3,"3n"],[2,"2n"]].map(([v,l])=>(
+                  <button key={"n"+l} onClick={()=>setDashListFilter(f=>({ ...f, nights:v }))} style={{ padding:"4px 9px", fontSize:10, fontWeight:dashListFilter.nights===v?700:400, background:dashListFilter.nights===v?C.purple:C.white, color:dashListFilter.nights===v?C.white:C.text, border:`1px solid ${dashListFilter.nights===v?C.purple:C.grayM}`, borderRadius:14, cursor:"pointer" }}>{l}</button>
+                ))}
+              </div>
+              <p style={{ ...sml, margin:"0 0 5px" }}>{listFiltered.length} tarif(s){listFiltered.length>30?" · 30 affichés":""}</p>
+              {listFiltered.length===0&&<p style={{ fontSize:11, color:C.gray, textAlign:"center", padding:"14px 0", fontStyle:"italic" }}>Aucun tarif enregistré pour ces filtres.</p>}
+              <div style={cd()}>
+                {listFiltered.slice(0,30).map((r,i,arr)=>(
+                  <div key={r.id||`${r.period_id}_${r.capacity}_${r.stay_nights}`} style={rw(i===Math.min(arr.length,30)-1)}>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <p style={{ margin:0, fontSize:12, fontWeight:500, color:C.text }}>{r.period_start?`${fmtDateShort(r.period_start)} → ${fmtDateShort(r.period_end||addDaysStr(r.period_start,r.stay_nights||7))}`:(r.period_label||r.period_id)}</p>
+                      <div style={{ display:"flex", gap:4, marginTop:1, flexWrap:"wrap" }}>
+                        <span style={{ fontSize:9, color:C.gray }}>{r.capacity}P · {r.stay_nights||7} nuits{r.accommodation_type?` · ${r.accommodation_type}`:""}</span>
+                        <span style={{ fontSize:9, color:r.season==="hiver"?"#0EA5E9":C.orange }}>{r.season==="hiver"?"Hiver":"Été"}</span>
+                        <span style={{ fontSize:8, background:C.grayL, color:C.gray, padding:"1px 5px", borderRadius:3 }}>{r.source||"saisie"}</span>
+                      </div>
+                      {r.notes&&<p style={{ margin:"1px 0 0", fontSize:9, color:C.gray, fontStyle:"italic" }}>{r.notes}</p>}
+                    </div>
+                    <div style={{ textAlign:"right", flexShrink:0, display:"flex", alignItems:"center", gap:8 }}>
+                      <div>
+                        <p style={{ margin:0, fontSize:12, fontWeight:700, color:C.blue }}>{fmt(Number(r.price_total))}€/séjour</p>
+                        <p style={{ margin:0, fontSize:9, color:C.gray }}>{fmt(Number(r.price_night||Math.round(Number(r.price_total)/(r.stay_nights||7))))}€/nuit</p>
+                      </div>
+                      <button onClick={()=>handleDeleteOurRate(r.id)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:14, color:C.gray, padding:2 }}>🗑</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div><BNav/>
+      </div>
     );
   };
 
@@ -5006,6 +5052,7 @@ export default function App() {
             {screen === "collect" && Collect()}
             {screen === "benchmark" && BenchmarkDecision()}
             {screen === "promotions" && Promotions()}
+            {screen === "tarifs" && TarifsLesCimes()}
             {screen === "competitors_residence" && CompetitorsSegmentScreen({ segment: "residence" })}
             {screen === "competitors_private" && CompetitorsSegmentScreen({ segment: "private" })}
             {screen === "track" && TrackPrices()}
@@ -5023,6 +5070,7 @@ export default function App() {
           {screen === "collect" && Collect()}
             {screen === "benchmark" && BenchmarkDecision()}
             {screen === "promotions" && Promotions()}
+            {screen === "tarifs" && TarifsLesCimes()}
             {screen === "competitors_residence" && CompetitorsSegmentScreen({ segment: "residence" })}
             {screen === "competitors_private" && CompetitorsSegmentScreen({ segment: "private" })}
             {screen === "track" && TrackPrices()}
