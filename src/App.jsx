@@ -3240,17 +3240,12 @@ export default function App() {
               <div style={{ ...cd(11,4), padding:"9px 12px", background:ctxValid?C.bluePale:C.redL }}>
                 {ctxValid ? (<>
                   <p style={{ margin:0, fontSize:11, color:C.blue, fontWeight:700 }}>Période : {fmtDateShort(ctx.checkin)} → {fmtDateShort(ctx.checkout)} · {ctx.stayNights} nuits</p>
-                  <p style={{ margin:"1px 0 0", fontSize:9, color:C.blueL }}>Booking : arrivée {ctx.checkin} · départ {ctx.checkout}</p>
-                  <p style={{ margin:"1px 0 0", fontSize:9, color:C.blueL }}>Capacité : {ctx.capacity}P</p>
+                  <p style={{ margin:"1px 0 0", fontSize:9, color:C.blueL }}>Capacité : {ctx.capacity}P · Mode : {trackSegment==="private"?"Particuliers suivis":"Résidences suivies"}</p>
+                  {(()=>{ const fams=Array.from(new Set((catalog||[]).filter(c=>competitorSegment(c)===trackSegment).flatMap(c=>sourcesForCompetitor(c).map(s=>sourceBadgeMeta(s.source_type).l)))); return fams.length>0?<p style={{ margin:"1px 0 0", fontSize:9, color:C.blueL }}>Sources : {fams.join(" · ")}</p>:null; })()}
                 </>) : (
                   <p style={{ margin:0, fontSize:11, color:C.red, fontWeight:600 }}>Dates invalides : vérifiez arrivée et départ.</p>
                 )}
                 <p style={{ margin:"4px 0 0", fontSize:9, color:C.gray, fontStyle:"italic" }}>Les prix saisis ici sont considérés comme vérifiés manuellement.</p>
-                <p style={{ margin:"2px 0 0", fontSize:8, color:C.gray, fontStyle:"italic" }}>Pour les TO et sites hors Booking, vérifiez les dates directement sur la fiche avant de saisir le prix.</p>
-                <div style={{ display:"flex", gap:5, marginTop:7, flexWrap:"wrap" }}>
-                  {(allBookingUrls.length>0||allDirectUrls.length>0)&&<button onClick={()=>setTrackedLinksVisible(v=>!v)} disabled={datesInvalid} style={{ fontSize:9, fontWeight:600, color:datesInvalid?C.gray:C.white, background:datesInvalid?C.grayL:C.blue, padding:"5px 9px", borderRadius:6, border:"none", cursor:datesInvalid?"default":"pointer" }}>{trackedLinksVisible?"▲ Masquer les liens":`↗ Ouvrir tous les Booking (${allBookingUrls.length})`}</button>}
-                  {allBookingUrls.length>1&&!datesInvalid&&<button onClick={()=>openAllLinks(allBookingUrls)} style={{ fontSize:9, fontWeight:600, color:C.blue, background:C.white, padding:"5px 9px", borderRadius:6, border:`1px solid ${C.blueL}`, cursor:"pointer" }}>Ouvrir les {Math.min(allBookingUrls.length,5)} premiers</button>}
-                </div>
                 {/* Liste de liens cliquables (évite le blocage multi-onglets) */}
                 {trackedLinksVisible&&!datesInvalid&&(
                   <div style={{ marginTop:8, borderTop:`0.5px solid ${C.grayM}`, paddingTop:8 }}>
@@ -3283,9 +3278,13 @@ export default function App() {
                 ))}
               </div>
 
-              {/* Scraping ciblé automatique (préremplit les lignes ci-dessous) */}
-              <button onClick={()=>scrapeTrackedRates(trackSegment)} disabled={trackedScraping||datesInvalid} style={{ ...btn(trackedScraping||datesInvalid,trackSegment==="private"?"#FF5A5F":C.purple), marginBottom:4 }}>{trackedScraping?"⏳ Scraping en cours…":trackSegment==="private"?"🏠 Scraper les particuliers suivis":"🏢 Scraper les résidences suivies"}</button>
-              <p style={{ margin:"0 0 8px", fontSize:8, color:C.gray, fontStyle:"italic", textAlign:"center" }}>Le scraping automatique sert à préremplir. Vérifiez toujours le prix avant validation.</p>
+              {/* Barre d'action compacte */}
+              <div style={{ display:"flex", gap:5, marginBottom:5, flexWrap:"wrap", alignItems:"center" }}>
+                <button onClick={()=>scrapeTrackedRates(trackSegment)} disabled={trackedScraping||datesInvalid} style={{ flex:"1 1 200px", padding:"8px 12px", fontSize:11, fontWeight:700, background:(trackedScraping||datesInvalid)?C.grayL:(trackSegment==="private"?"#FF5A5F":C.purple), color:(trackedScraping||datesInvalid)?C.gray:C.white, border:"none", borderRadius:9, cursor:(trackedScraping||datesInvalid)?"default":"pointer" }}>{trackedScraping?"⏳ Scraping…":trackSegment==="private"?"🤖 Scraper les particuliers suivis":"🤖 Scraper les résidences suivies"}</button>
+                {allBookingUrls.length>0&&<button onClick={()=>setTrackedLinksVisible(v=>!v)} disabled={datesInvalid} style={{ fontSize:10, fontWeight:600, color:datesInvalid?C.gray:C.blue, background:C.white, border:`1px solid ${C.blueL}`, borderRadius:8, padding:"7px 11px", cursor:datesInvalid?"default":"pointer" }}>{trackedLinksVisible?"▲ Masquer":`Ouvrir tous les Booking (${allBookingUrls.length})`}</button>}
+                {allBookingUrls.length>1&&!datesInvalid&&<button onClick={()=>openAllLinks(allBookingUrls.slice(0,2))} style={{ fontSize:10, fontWeight:600, color:C.blue, background:C.white, border:`1px solid ${C.blueL}`, borderRadius:8, padding:"7px 11px", cursor:"pointer" }}>Ouvrir les 2 premiers</button>}
+              </div>
+              <p style={{ margin:"0 0 8px", fontSize:8, color:C.gray, fontStyle:"italic" }}>Le scraping préremplit les prix. Vérifiez toujours avant validation.</p>
               {trackedScrapeError&&<div style={{ ...cd(9), padding:"8px 11px", background:C.goldL, marginBottom:8 }}><p style={{ margin:0, fontSize:10, color:C.orange }}>{trackedScrapeError}</p></div>}
               {trackedScrapeResults.length>0&&(()=>{ const n=trackedScrapeResults.filter(r=>r.price_total&&r.confidence!=="low"&&!r.warning&&r.channel!=="direct"&&!isSuspiciousDetectedPrice(r.price_total,ctx,{source_type:r.channel})).length; return <div style={{ ...cd(9), padding:"8px 11px", background:C.bluePale, marginBottom:8 }}><p style={{ margin:0, fontSize:10, color:C.blue, fontWeight:600 }}>{n} prix détecté(s) automatiquement. Vérifiez avant validation.</p></div>; })()}
 
@@ -3295,15 +3294,24 @@ export default function App() {
                   : segList.map((c,i)=>{
                   const compSources = sourcesForCompetitor(c);
                   return (
-                    <div key={c.id} style={{ padding:"9px 12px", borderBottom:i<segList.length-1?`0.5px solid ${C.grayL}`:"none" }}>
-                      <div style={{ flex:1, minWidth:0 }}>
-                        <span style={{ fontSize:12, fontWeight:600, color:C.text }}>{c.name}</span>
+                    <div key={c.id} style={{ padding:"10px 12px", borderBottom:i<segList.length-1?`0.5px solid ${C.grayL}`:"none" }}>
+                      {/* En-tête concurrent */}
+                      <div style={{ marginBottom:6 }}>
+                        <span style={{ fontSize:12, fontWeight:700, color:C.text }}>{c.name}</span>
                         <div style={{ display:"flex", gap:4, marginTop:2, alignItems:"center", flexWrap:"wrap" }}>
                           <span style={{ fontSize:9, color:C.gray }}>{c.property_type} · score {c.comparability_score||"?"}</span>
                           {compSources.map(s=>(()=>{ const m=sourceBadgeMeta(s.source_type); return <Badge key={s.id} label={s.source_name} color={m.c} bg={m.bg} size={8}/>; })())}
                         </div>
                       </div>
-                      {compSources.length===0&&<p style={{ margin:"5px 0 0", fontSize:9, color:C.gray, fontStyle:"italic" }}>Aucune source. Ajoutez-en dans « Concurrents suivis ».</p>}
+                      {compSources.length===0&&<p style={{ margin:"2px 0 0", fontSize:9, color:C.gray, fontStyle:"italic" }}>Aucune source. Ajoutez-en dans « Concurrents suivis ».</p>}
+
+                      {/* En-tête colonnes (desktop) */}
+                      {!isMobile&&compSources.length>0&&(
+                        <div style={{ display:"grid", gridTemplateColumns:"1.6fr 1.3fr 1.1fr 1fr 1.4fr", gap:6, padding:"0 4px 4px", borderBottom:`0.5px solid ${C.grayL}` }}>
+                          {["Source","Dernier prix","Auto détecté","Prix vérifié","Actions"].map(h=><span key={h} style={{ fontSize:8, fontWeight:700, color:C.gray, textTransform:"uppercase" }}>{h}</span>)}
+                        </div>
+                      )}
+
                       {compSources.map(s=>{
                         const url = buildSourceUrl(s, c, ctx);
                         const key = `${c.id}_${s.id}`;
@@ -3312,82 +3320,103 @@ export default function App() {
                         const last = lastRateFor(c.name, s.source_name);
                         const injectsDates = s.source_type==="booking" || isLfdnasSource(s);
                         const scrape = findScrapeResultForSource(c, s);
-                        const confColor = scrape?.confidence==="high"?C.green:scrape?.confidence==="medium"?C.orange:C.gray;
-                        const confBg = scrape?.confidence==="high"?C.greenL:scrape?.confidence==="medium"?C.orangeL:C.grayL;
                         const scrapeSuspicious = scrape?.price_total ? isSuspiciousDetectedPrice(scrape.price_total, ctx, s) : false;
                         const scrapeUsable = scrape?.price_total && !scrapeSuspicious && scrape.confidence!=="low" && !scrape.warning && s.source_type!=="direct" && s.source_type!=="other";
+                        const m = sourceBadgeMeta(s.source_type);
+                        const editing = rateEditKey===key && (rateEditMode==="modify"||rateEditMode==="new"||rateEditMode==="history");
+                        // Cellules réutilisables
+                        const cellSource = (
+                          <div style={{ minWidth:0 }}>
+                            <div style={{ display:"flex", alignItems:"center", gap:4, flexWrap:"wrap" }}>
+                              <span style={{ fontSize:10, fontWeight:600, color:C.text }}>{s.source_name}</span>
+                              <Badge label={m.l} color={m.c} bg={m.bg} size={7}/>
+                            </div>
+                            {(injectsDates&&datesInvalid)
+                              ? <span style={{ fontSize:8, fontWeight:600, color:C.gray }}>↗ Ouvrir</span>
+                              : <a href={url} target="_blank" rel="noreferrer" style={{ fontSize:8, fontWeight:600, color:C.blue, textDecoration:"none" }}>↗ Ouvrir</a>}
+                            {isLfdnasSource(s)&&<span style={{ fontSize:7, color:C.purple, fontStyle:"italic", display:"block" }}>Dates ajoutées auto</span>}
+                            {s.source_type==="direct"&&<span style={{ fontSize:7, color:C.gray, fontStyle:"italic", display:"block" }}>Dates à vérifier sur le site</span>}
+                          </div>
+                        );
+                        const cellLast = last
+                          ? <div><span style={{ fontSize:11, fontWeight:700, color:C.text }}>{fmt(Number(last.price_total||last.price_week))}€</span><span style={{ fontSize:8, color:C.gray, display:"block" }}>{last.reliability_status} · {fmtDateShort(last.period_start)||last.collected_at}{last.edited_at?" · modifié":""}</span></div>
+                          : <span style={{ fontSize:9, color:C.gray }}>Aucun prix</span>;
+                        const cellAuto = scrape
+                          ? (scrapeUsable
+                              ? <span style={{ fontSize:9, color:C.orange, fontWeight:600 }}>{fmt(scrape.price_total)}€ à vérifier</span>
+                              : scrapeSuspicious
+                                ? <span style={{ fontSize:8, color:C.gold }}>{fmt(scrape.price_total)}€ ignoré · suspect</span>
+                                : <span style={{ fontSize:8, color:C.gray }}>Non détecté</span>)
+                          : <span style={{ fontSize:9, color:C.grayM }}>—</span>;
+                        const cellVerif = (
+                          <input type="number" placeholder="Prix vérifié" value={vp} onChange={e=>setTrackPrices(p=>({ ...p, [key]:e.target.value }))} style={{ width:"100%", padding:"5px 7px", fontSize:10, border:`1px solid ${C.grayM}`, borderRadius:6, boxSizing:"border-box" }}/>
+                        );
+                        const cellActions = (
+                          <div style={{ display:"flex", gap:3, flexWrap:"wrap" }}>
+                            {last ? (<>
+                              <button onClick={()=>openRateEdit(key,"new",null)} style={{ fontSize:8, fontWeight:600, color:C.green, background:C.greenL, border:"none", borderRadius:5, padding:"4px 6px", cursor:"pointer" }}>Nouveau</button>
+                              <button onClick={()=>openRateEdit(key,"modify",Number(last.price_total||last.price_week))} style={{ fontSize:8, fontWeight:600, color:C.orange, background:C.orangeL, border:"none", borderRadius:5, padding:"4px 6px", cursor:"pointer" }}>Modifier</button>
+                              <button onClick={()=>{ openRateEdit(key,"history",null); loadRateHistory(c.name, s.source_name, ctx, "period"); }} style={{ fontSize:8, fontWeight:600, color:C.blue, background:C.bluePale, border:"none", borderRadius:5, padding:"4px 6px", cursor:"pointer" }}>Histo.</button>
+                            </>):(<>
+                              <button onClick={()=>saveSourceRate(c, s, vp, key)} disabled={!vp||datesInvalid} style={{ fontSize:8, fontWeight:700, background:(vp&&!datesInvalid)?C.green:C.grayL, color:(vp&&!datesInvalid)?C.white:C.gray, border:"none", borderRadius:5, padding:"4px 8px", cursor:(vp&&!datesInvalid)?"pointer":"default" }}>Enregistrer</button>
+                              <button onClick={()=>{ openRateEdit(key,"history",null); loadRateHistory(c.name, s.source_name, ctx, "all"); }} style={{ fontSize:8, fontWeight:600, color:C.blue, background:C.bluePale, border:"none", borderRadius:5, padding:"4px 6px", cursor:"pointer" }}>Histo.</button>
+                            </>)}
+                          </div>
+                        );
                         return (
-                          <div key={s.id} style={{ marginTop:6, paddingTop:6, borderTop:`0.5px dashed ${C.grayL}` }}>
-                            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
-                              <div style={{ display:"flex", alignItems:"center", gap:5, flexWrap:"wrap" }}>
-                                <span style={{ fontSize:10, fontWeight:600, color:C.text }}>{s.source_name}</span>
-                                {scrapeUsable&&<Badge label={scrape.confidence} color={confColor} bg={confBg} size={8}/>}
+                          <div key={s.id}>
+                            {/* Ligne compacte */}
+                            {!isMobile ? (
+                              <div style={{ display:"grid", gridTemplateColumns:"1.6fr 1.3fr 1.1fr 1fr 1.4fr", gap:6, alignItems:"center", padding:"7px 4px", borderBottom:`0.5px solid ${C.grayL}` }}>
+                                {cellSource}{cellLast}{cellAuto}
+                                {last?<span style={{ fontSize:8, color:C.grayM }}>—</span>:cellVerif}
+                                {cellActions}
                               </div>
-                              {(injectsDates&&datesInvalid)
-                                ? <span style={{ fontSize:9, fontWeight:600, color:C.gray, background:C.grayL, padding:"4px 8px", borderRadius:6, border:`1px solid ${C.grayM}` }}>↗ Ouvrir</span>
-                                : <a href={url} target="_blank" rel="noreferrer" style={{ fontSize:9, fontWeight:600, color:C.blue, background:C.white, padding:"4px 8px", borderRadius:6, textDecoration:"none", border:`1px solid ${C.grayM}`, flexShrink:0 }}>↗ Ouvrir</a>}
-                            </div>
-                            {isLfdnasSource(s)&&<p style={{ margin:"2px 0 0", fontSize:8, color:C.purple, fontStyle:"italic" }}>Dates ajoutées automatiquement à l'URL TO.</p>}
-                            {scrape&&(
-                              scrapeUsable
-                                ? <p style={{ margin:"3px 0 0", fontSize:9, color:C.orange }}>Prix détecté automatiquement : {fmt(scrape.price_total)}€ — à vérifier.</p>
-                                : scrapeSuspicious
-                                  ? <p style={{ margin:"3px 0 0", fontSize:8, color:C.gold }}>Prix détecté automatiquement : {fmt(scrape.price_total)}€ — ignoré car suspect.</p>
-                                  : <p style={{ margin:"3px 0 0", fontSize:8, color:C.gray }}>{scrape.warning||(s.source_type==="direct"?"Site direct : vérification manuelle nécessaire.":"Prix non détecté automatiquement.")}</p>
-                            )}
-                            <div style={{ ...cd(8), padding:"6px 9px", marginTop:5, background:C.grayL }}>
-                              {last
-                                ? <p style={{ margin:0, fontSize:9, color:C.text }}>Dernier prix : <strong>{fmt(Number(last.price_total||last.price_week))}€</strong> · {last.reliability_status} · {last.collected_at}{last.edited_at?" · modifié":""}</p>
-                                : <p style={{ margin:0, fontSize:9, color:C.gray, fontStyle:"italic" }}>Aucun prix enregistré pour cette période.</p>}
-                              <div style={{ display:"flex", gap:4, marginTop:5, flexWrap:"wrap" }}>
-                                {last&&<button onClick={()=>openRateEdit(key,"modify",Number(last.price_total||last.price_week))} style={{ fontSize:8, fontWeight:600, color:C.orange, background:C.orangeL, border:"none", borderRadius:5, padding:"4px 8px", cursor:"pointer" }}>Modifier</button>}
-                                <button onClick={()=>openRateEdit(key,"new",null)} style={{ fontSize:8, fontWeight:600, color:C.green, background:C.greenL, border:"none", borderRadius:5, padding:"4px 8px", cursor:"pointer" }}>Nouveau relevé</button>
-                                <button onClick={()=>{ openRateEdit(key,"history",null); loadRateHistory(c.name, s.source_name, ctx, "period"); }} style={{ fontSize:8, fontWeight:600, color:C.blue, background:C.bluePale, border:"none", borderRadius:5, padding:"4px 8px", cursor:"pointer" }}>Historique</button>
-                              </div>
-                              {rateEditKey===key&&rateEditMode==="modify"&&last&&(
-                                <div style={{ marginTop:6 }}>
-                                  <p style={{ margin:"0 0 3px", fontSize:8, color:C.gray, fontStyle:"italic" }}>Corriger modifie le relevé existant. Nouveau relevé ajoute une ligne à l'historique.</p>
-                                  <input type="number" placeholder="Prix corrigé" value={rateEditPrice} onChange={e=>setRateEditPrice(e.target.value)} style={{ ...inp(), marginBottom:4 }}/>
-                                  <input placeholder="Raison de la correction" value={rateEditReason} onChange={e=>setRateEditReason(e.target.value)} style={{ ...inp(), marginBottom:4 }}/>
-                                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:4 }}>
-                                    <button onClick={closeRateEdit} style={{ ...btn(false,C.grayL,C.text), margin:0, fontSize:9, padding:"5px" }}>Annuler</button>
-                                    <button onClick={()=>submitRateCorrection(last)} disabled={!rateEditPrice} style={{ ...btn(!rateEditPrice,C.orange), margin:0, fontSize:9, padding:"5px" }}>Enregistrer correction</button>
-                                  </div>
-                                </div>
-                              )}
-                              {rateEditKey===key&&rateEditMode==="new"&&(
-                                <div style={{ marginTop:6 }}>
-                                  <p style={{ margin:"0 0 3px", fontSize:8, color:C.gray, fontStyle:"italic" }}>Nouveau relevé : ajoute une ligne dans l'historique (n'écrase pas l'ancien).</p>
-                                  <input type="number" placeholder="Prix du nouveau relevé" value={rateEditPrice} onChange={e=>setRateEditPrice(e.target.value)} style={{ ...inp(), marginBottom:4 }}/>
-                                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:4 }}>
-                                    <button onClick={closeRateEdit} style={{ ...btn(false,C.grayL,C.text), margin:0, fontSize:9, padding:"5px" }}>Annuler</button>
-                                    <button onClick={async()=>{ await saveSourceRate(c, s, rateEditPrice, key); closeRateEdit(); }} disabled={!rateEditPrice||datesInvalid} style={{ ...btn(!rateEditPrice||datesInvalid,C.green), margin:0, fontSize:9, padding:"5px" }}>Enregistrer nouveau relevé</button>
-                                  </div>
-                                </div>
-                              )}
-                              {rateEditKey===key&&rateEditMode==="history"&&(
-                                <div style={{ marginTop:6 }}>
-                                  <div style={{ display:"flex", gap:4, marginBottom:5 }}>
-                                    {[["period","Cette période"],["all","Toutes périodes"]].map(([v,l])=>(
-                                      <button key={v} onClick={()=>loadRateHistory(c.name, s.source_name, ctx, v)} style={{ fontSize:8, fontWeight:rateHistoryScope===v?700:400, color:rateHistoryScope===v?C.white:C.gray, background:rateHistoryScope===v?C.blue:C.white, border:`1px solid ${rateHistoryScope===v?C.blue:C.grayM}`, borderRadius:5, padding:"3px 7px", cursor:"pointer" }}>{l}</button>
-                                    ))}
-                                  </div>
-                                  {rateHistoryRows.length===0?<p style={{ margin:0, fontSize:9, color:C.gray }}>Aucun historique.</p>:rateHistoryRows.map((h,hi)=>{
-                                    const pt=Number(h.price_total||h.price_week||0); const prev=hi>0?Number(rateHistoryRows[hi-1].price_total||rateHistoryRows[hi-1].price_week||0):null; const ev=prev!=null?pt-prev:null;
-                                    return <p key={h.id||hi} style={{ margin:"2px 0 0", fontSize:9, color:C.text }}>{h.collected_at}{rateHistoryScope==="all"?` · ${fmtDateShort(h.period_start)}→${fmtDateShort(h.period_end)}`:""} · <strong>{fmt(pt)}€</strong> · {fmt(Math.round(pt/(h.stay_nights||7)))}€/n · {h.reliability_status}{h.edited_at?" · modifié":""}{ev!=null?<span style={{ color:ev>0?C.green:ev<0?C.red:C.gray, fontWeight:700 }}> · {ev>0?"+":""}{fmt(ev)}€</span>:""}</p>;
-                                  })}
-                                  <button onClick={closeRateEdit} style={{ ...btn(false,C.grayL,C.text), margin:"5px 0 0", fontSize:9, padding:"5px" }}>Fermer</button>
-                                </div>
-                              )}
-                            </div>
-                            {st==="ok" ? (
-                              <p style={{ margin:"4px 0 0", fontSize:9, color:C.green, fontWeight:600 }}>✓ Prix {s.source_name} enregistré</p>
-                            ) : (rateEditKey===key&&(rateEditMode==="modify"||rateEditMode==="new"||rateEditMode==="history")) ? null : (
-                              <div style={{ display:"flex", gap:6, alignItems:"center", marginTop:4 }}>
-                                <input type="number" placeholder={`Prix ${s.source_name} vérifié`} value={vp} onChange={e=>setTrackPrices(p=>({ ...p, [key]:e.target.value }))} style={{ flex:1, padding:"5px 8px", fontSize:10, border:`1px solid ${C.grayM}`, borderRadius:6, boxSizing:"border-box" }}/>
-                                <button onClick={()=>saveSourceRate(c, s, vp, key)} disabled={!vp||datesInvalid} style={{ padding:"5px 9px", fontSize:9, fontWeight:700, background:(vp&&!datesInvalid)?C.green:C.grayL, color:(vp&&!datesInvalid)?C.white:C.gray, border:"none", borderRadius:6, cursor:(vp&&!datesInvalid)?"pointer":"default", whiteSpace:"nowrap" }}>{last?"Enregistrer nouveau relevé":scrapeUsable?"Valider ce prix":"Enregistrer nouveau relevé"}</button>
+                            ) : (
+                              <div style={{ ...cd(8), padding:"8px 10px", marginTop:6, background:C.grayL }}>
+                                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 }}>{cellSource}{cellLast}</div>
+                                <div style={{ marginTop:5 }}>{cellAuto}</div>
+                                {!last&&<div style={{ marginTop:5 }}>{cellVerif}</div>}
+                                <div style={{ marginTop:6 }}>{cellActions}</div>
                               </div>
                             )}
+                            {/* Panneaux d'édition (sous la ligne) */}
+                            {rateEditKey===key&&rateEditMode==="modify"&&last&&(
+                              <div style={{ ...cd(8), padding:"8px 10px", margin:"4px 0", background:C.orangeL }}>
+                                <p style={{ margin:"0 0 4px", fontSize:8, color:C.gray, fontStyle:"italic" }}>Corriger modifie le relevé existant.</p>
+                                <input type="number" placeholder="Prix corrigé" value={rateEditPrice} onChange={e=>setRateEditPrice(e.target.value)} style={{ ...inp(), marginBottom:4 }}/>
+                                <input placeholder="Raison de la correction" value={rateEditReason} onChange={e=>setRateEditReason(e.target.value)} style={{ ...inp(), marginBottom:4 }}/>
+                                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:4 }}>
+                                  <button onClick={closeRateEdit} style={{ ...btn(false,C.white,C.text), margin:0, fontSize:9, padding:"5px", border:`1px solid ${C.grayM}` }}>Annuler</button>
+                                  <button onClick={()=>submitRateCorrection(last)} disabled={!rateEditPrice} style={{ ...btn(!rateEditPrice,C.orange), margin:0, fontSize:9, padding:"5px" }}>Enregistrer correction</button>
+                                </div>
+                              </div>
+                            )}
+                            {rateEditKey===key&&rateEditMode==="new"&&(
+                              <div style={{ ...cd(8), padding:"8px 10px", margin:"4px 0", background:C.greenL }}>
+                                <p style={{ margin:"0 0 4px", fontSize:8, color:C.gray, fontStyle:"italic" }}>Nouveau relevé : ajoute une ligne dans l'historique.</p>
+                                <input type="number" placeholder="Prix du nouveau relevé" value={rateEditPrice} onChange={e=>setRateEditPrice(e.target.value)} style={{ ...inp(), marginBottom:4 }}/>
+                                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:4 }}>
+                                  <button onClick={closeRateEdit} style={{ ...btn(false,C.white,C.text), margin:0, fontSize:9, padding:"5px", border:`1px solid ${C.grayM}` }}>Annuler</button>
+                                  <button onClick={async()=>{ await saveSourceRate(c, s, rateEditPrice, key); closeRateEdit(); }} disabled={!rateEditPrice||datesInvalid} style={{ ...btn(!rateEditPrice||datesInvalid,C.green), margin:0, fontSize:9, padding:"5px" }}>Enregistrer</button>
+                                </div>
+                              </div>
+                            )}
+                            {rateEditKey===key&&rateEditMode==="history"&&(
+                              <div style={{ ...cd(8), padding:"8px 10px", margin:"4px 0", background:C.bluePale }}>
+                                <div style={{ display:"flex", gap:4, marginBottom:5 }}>
+                                  {[["period","Cette période"],["all","Toutes périodes"]].map(([v,l])=>(
+                                    <button key={v} onClick={()=>loadRateHistory(c.name, s.source_name, ctx, v)} style={{ fontSize:8, fontWeight:rateHistoryScope===v?700:400, color:rateHistoryScope===v?C.white:C.gray, background:rateHistoryScope===v?C.blue:C.white, border:`1px solid ${rateHistoryScope===v?C.blue:C.grayM}`, borderRadius:5, padding:"3px 7px", cursor:"pointer" }}>{l}</button>
+                                  ))}
+                                </div>
+                                {rateHistoryRows.length===0?<p style={{ margin:0, fontSize:9, color:C.gray }}>Aucun historique.</p>:rateHistoryRows.map((h,hi)=>{
+                                  const pt=Number(h.price_total||h.price_week||0); const prev=hi>0?Number(rateHistoryRows[hi-1].price_total||rateHistoryRows[hi-1].price_week||0):null; const ev=prev!=null?pt-prev:null;
+                                  return <p key={h.id||hi} style={{ margin:"2px 0 0", fontSize:9, color:C.text }}>{h.collected_at}{rateHistoryScope==="all"?` · ${fmtDateShort(h.period_start)}→${fmtDateShort(h.period_end)}`:""} · <strong>{fmt(pt)}€</strong> · {fmt(Math.round(pt/(h.stay_nights||7)))}€/n · {h.reliability_status}{h.edited_at?" · modifié":""}{ev!=null?<span style={{ color:ev>0?C.green:ev<0?C.red:C.gray, fontWeight:700 }}> · {ev>0?"+":""}{fmt(ev)}€</span>:""}</p>;
+                                })}
+                                <button onClick={closeRateEdit} style={{ ...btn(false,C.white,C.text), margin:"5px 0 0", fontSize:9, padding:"5px", border:`1px solid ${C.grayM}` }}>Fermer</button>
+                              </div>
+                            )}
+                            {st==="ok"&&<p style={{ margin:"3px 0 0", fontSize:8, color:C.green, fontWeight:600 }}>✓ Prix {s.source_name} enregistré</p>}
                             {st==="dup"&&<p style={{ margin:"3px 0 0", fontSize:8, color:C.gold }}>= Relevé déjà existant ce jour</p>}
                             {st==="err"&&<p style={{ margin:"3px 0 0", fontSize:8, color:C.red }}>✗ Erreur d'enregistrement</p>}
                           </div>
