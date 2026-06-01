@@ -298,15 +298,37 @@ const OUR_TARIFS_META = { source:"Tarif interne validé", verified_at:"avril 202
 // ══ TYPOLOGIES COMMERCIALES LES CIMES ═══════════════════════════
 const ACCOMMODATION_ORDER = ["2P6","2P6_SUP","3P6","3P8"];
 const ACCOMMODATION_SHORT = { "2P6":"2P6", "2P6_SUP":"2P6 Sup", "3P6":"3P6", "3P8":"3P8" };
-// Déduit la typologie d'une ligne our_rates (accommodation_type, sinon notes, sinon null — ne pas inventer)
+// Normalise une typologie depuis accommodation_type OU notes (ordre : SUP avant 2P6 simple). "" si indéterminé.
+function normalizeAccommodationType(value, notes = "") {
+  const raw = String(value || "").trim().toUpperCase().replace(/\s+/g, "");
+  const n = String(notes || "").toUpperCase();
+  if (raw === "2P6_SUP" || raw === "2P6SUP" || n.includes("2P6 SUP") || n.includes("2P6_SUP") || n.includes("2P6SUP")) return "2P6_SUP";
+  if (raw === "3P8" || n.includes("3P8")) return "3P8";
+  if (raw === "3P6" || n.includes("3P6")) return "3P6";
+  if (raw === "2P6" || n.includes("2P6")) return "2P6";
+  return "";
+}
+// Compat : ancienne API renvoie null si indéterminé
 function inferAccommodationType(rate) {
-  if (rate?.accommodation_type && ACCOMMODATION_TYPES[rate.accommodation_type]) return rate.accommodation_type;
-  const note = String(rate?.notes || rate?.accommodation_label || "").toUpperCase().replace(/\s/g,"");
-  if (note.includes("2P6_SUP") || note.includes("2P6SUP")) return "2P6_SUP";
-  if (note.includes("3P8")) return "3P8";
-  if (note.includes("3P6")) return "3P6";
-  if (note.includes("2P6")) return "2P6";
-  return null;
+  return normalizeAccommodationType(rate?.accommodation_type, rate?.notes || rate?.accommodation_label) || null;
+}
+function sameDate(a, b) {
+  return String(a || "").slice(0, 10) === String(b || "").slice(0, 10);
+}
+// Retrouve la ligne our_rates pour une cellule de grille : par dates + durée + typologie (jamais par period_id)
+function findRateForGridCell(rates, period, accommodationType) {
+  const start = period.period_start || period.week_start;
+  const nights = Number(period.stay_nights || 7);
+  const end = period.period_end || addDaysStr(start, nights);
+  return (rates || []).find(r => {
+    const rType = normalizeAccommodationType(r.accommodation_type, r.notes);
+    return (
+      sameDate(r.period_start, start) &&
+      sameDate(r.period_end, end) &&
+      Number(r.stay_nights || 7) === nights &&
+      rType === accommodationType
+    );
+  }) || null;
 }
 
 const ACCOMMODATION_TYPES = {
@@ -3419,7 +3441,7 @@ export default function App() {
     const activeRates = (ourRates||[]).filter(r=>r.is_active!==false);
     // Saisie : typologie sélectionnée + tarif existant pour préremplissage sûr
     const saisieAcc = dashTarifTab==="saisie" ? (gridFilters.accType||"2P6") : (gridFilters.accType||"2P6");
-    const saisieExisting = activeRates.find(r=>r.period_id===dashOurPeriodId && Number(r.stay_nights||7)===dashNights && inferAccommodationType(r)===saisieAcc);
+    const saisieExisting = dashPeriod ? findRateForGridCell(activeRates, dashPeriod, saisieAcc) : null;
     // ── Données de la grille tarifaire (périodes × typologies) ──
     const gridNights = gridFilters.nights || 7;
     const gridPeriods = ALL_PERIODS
@@ -3427,29 +3449,29 @@ export default function App() {
       .filter(p=>!gridFilters.season || p.season===gridFilters.season)
       .filter(p=>!gridFilters.year || (p.period_start||p.week_start||"").slice(0,4)===String(gridFilters.year))
       .slice().sort((a,b)=>String(a.period_start||a.week_start||"").localeCompare(String(b.period_start||b.week_start||"")));
-    const rateFor = (periodId, accType) => activeRates.find(r=>
-      r.period_id===periodId &&
-      Number(r.stay_nights||7)===gridNights &&
-      inferAccommodationType(r)===accType &&
-      (!gridFilters.source || (r.source||"").includes(gridFilters.source))
-    );
+    const rateFor = (period, accType) => {
+      const r = findRateForGridCell(activeRates, period, accType);
+      if (!r) return null;
+      if (gridFilters.source && !(r.source||"").includes(gridFilters.source)) return null;
+      return r;
+    };
     const gridCols = gridFilters.accType ? [gridFilters.accType] : ACCOMMODATION_ORDER;
     // ── Contrôle grille (anomalies) ──
     const anomalies = (()=>{
       const a=[];
-      const noType = activeRates.filter(r=>!inferAccommodationType(r));
-      if (noType.length) a.push(`${noType.length} ligne(s) sans typologie identifiable.`);
-      // doublons : même période + typologie + durée + capacité
+      const noType = activeRates.filter(r=>!normalizeAccommodationType(r.accommodation_type, r.notes));
+      if (noType.length) a.push(`${noType.length} ligne(s) sans typologie identifiable (ni accommodation_type, ni note).`);
+      // doublons : même dates + typologie + durée
       const seen={}; let dup=0;
-      activeRates.forEach(r=>{ const k=`${r.period_id}_${inferAccommodationType(r)}_${r.stay_nights||7}_${r.capacity}`; seen[k]=(seen[k]||0)+1; });
+      activeRates.forEach(r=>{ const k=`${(r.period_start||"").slice(0,10)}_${(r.period_end||"").slice(0,10)}_${normalizeAccommodationType(r.accommodation_type,r.notes)}_${r.stay_nights||7}`; seen[k]=(seen[k]||0)+1; });
       Object.values(seen).forEach(n=>{ if(n>1) dup++; });
-      if (dup) a.push(`${dup} doublon(s) potentiel(s) (même période/typologie/durée).`);
+      if (dup) a.push(`${dup} doublon(s) potentiel(s) (mêmes dates/typologie/durée).`);
       // 7 nuits ne finissant pas un samedi
       const notSat = activeRates.filter(r=>{ if(Number(r.stay_nights||7)!==7) return false; const end=r.period_end||(r.period_start?addDaysStr(r.period_start,7):null); if(!end) return false; return new Date(end+"T12:00:00Z").getUTCDay()!==6; });
       if (notSat.length) a.push(`${notSat.length} période(s) 7 nuits ne finissant pas un samedi.`);
-      // capacité sans accommodation_type explicite
-      const capNoAcc = activeRates.filter(r=>!r.accommodation_type && r.capacity);
-      if (capNoAcc.length) a.push(`${capNoAcc.length} ligne(s) avec capacité mais sans accommodation_type.`);
+      // accommodation_type vide ET notes sans typologie
+      const capNoAcc = activeRates.filter(r=>!r.accommodation_type && !normalizeAccommodationType("", r.notes) && r.capacity);
+      if (capNoAcc.length) a.push(`${capNoAcc.length} ligne(s) avec capacité mais sans typologie (à compléter).`);
       return a;
     })();
     const listFiltered = activeRates
@@ -3510,7 +3532,7 @@ export default function App() {
                           <p style={{ margin:0, fontSize:8, color:C.gray }}>{p.season==="hiver"?"Hiver":"Été"}</p>
                         </td>
                         {gridCols.map(a=>{
-                          const r=rateFor(p.id,a);
+                          const r=rateFor(p,a);
                           const night=r?Math.round(Number(r.price_total)/(r.stay_nights||gridNights)):0;
                           return (
                             <td key={a} onClick={()=>openTarifCell(p.id,a,gridNights,r||null)} style={{ padding:"8px", textAlign:"center", cursor:"pointer", background:tarifCell&&tarifCell.periodId===p.id&&tarifCell.accType===a?C.bluePale:"transparent" }}>
@@ -3536,7 +3558,7 @@ export default function App() {
               <div key={p.id} style={card({ marginBottom:8 })}>
                 <p style={{ margin:"0 0 5px", fontSize:12, fontWeight:700, color:C.text }}>{periodOptionLabel(p)}</p>
                 {gridCols.map(a=>{
-                  const r=rateFor(p.id,a);
+                  const r=rateFor(p,a);
                   return (
                     <div key={a} onClick={()=>openTarifCell(p.id,a,gridNights,r||null)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"6px 0", borderTop:`0.5px solid ${C.grayL}`, cursor:"pointer" }}>
                       <span style={{ fontSize:11, fontWeight:600, color:C.blue }}>{ACCOMMODATION_SHORT[a]}</span>
