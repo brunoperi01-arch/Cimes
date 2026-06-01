@@ -1734,6 +1734,7 @@ export default function App() {
   const [trackPrices, setTrackPrices]     = useState({});  // saisie prix par clé source
   const [trackSaved, setTrackSaved]       = useState({});
   const [duplicateRatePrompt, setDuplicateRatePrompt] = useState(null); // {key, existingRate, competitor, source, price}
+  const [scrapeDetailsKey, setScrapeDetailsKey] = useState(null); // clé source dont on affiche le debug scraping
   const [histAll, setHistAll]             = useState([]);
   const [histLoading, setHistLoading]     = useState(false);
   const [histFilters, setHistFilters]     = useState({ competitor:"", source:"", capacity:0, status:"", segment:"" });
@@ -2061,7 +2062,7 @@ export default function App() {
         method:"POST", headers:{ "Content-Type":"application/json" },
         body: JSON.stringify({
           context: ctx,
-          competitors: list.map(c=>({ id:c.id, name:c.name, property_type:c.property_type, preferred_channel:c.preferred_channel, booking_url:c.booking_url, direct_url:c.direct_url, search_location:c.search_location, comparability_score:c.comparability_score })),
+          competitors: list.map(c=>({ id:c.id, name:c.name, property_type:c.property_type, preferred_channel:c.preferred_channel, booking_url:c.booking_url, direct_url:c.direct_url, search_location:c.search_location, comparability_score:c.comparability_score, sources: sourcesForCompetitor(c).map(s=>({ source_type:s.source_type, source_name:s.source_name, source_url:s.source_url })) })),
         }),
       });
       const data = await res.json();
@@ -3331,7 +3332,7 @@ export default function App() {
                 {allBookingUrls.length>0&&<button onClick={()=>setTrackedLinksVisible(v=>!v)} disabled={datesInvalid} style={{ fontSize:10, fontWeight:600, color:datesInvalid?C.gray:C.blue, background:C.white, border:`1px solid ${C.blueL}`, borderRadius:8, padding:"7px 11px", cursor:datesInvalid?"default":"pointer" }}>{trackedLinksVisible?"▲ Masquer":`Ouvrir tous les Booking (${allBookingUrls.length})`}</button>}
                 {allBookingUrls.length>1&&!datesInvalid&&<button onClick={()=>openAllLinks(allBookingUrls.slice(0,2))} style={{ fontSize:10, fontWeight:600, color:C.blue, background:C.white, border:`1px solid ${C.blueL}`, borderRadius:8, padding:"7px 11px", cursor:"pointer" }}>Ouvrir les 2 premiers</button>}
               </div>
-              <p style={{ margin:"0 0 8px", fontSize:8, color:C.gray, fontStyle:"italic" }}>Le scraping préremplit les prix. Vérifiez toujours avant validation.</p>
+              <p style={{ margin:"0 0 8px", fontSize:8, color:C.gray, fontStyle:"italic" }}>Le scraping préremplit uniquement les prix détectables. Les prix validés manuellement restent prioritaires.</p>
               {trackedScrapeError&&<div style={{ ...cd(9), padding:"8px 11px", background:C.goldL, marginBottom:8 }}><p style={{ margin:0, fontSize:10, color:C.orange }}>{trackedScrapeError}</p></div>}
               {trackedScrapeResults.length>0&&(()=>{ const n=trackedScrapeResults.filter(r=>r.price_total&&r.confidence!=="low"&&!r.warning&&r.channel!=="direct"&&!isSuspiciousDetectedPrice(r.price_total,ctx,{source_type:r.channel})).length; return <div style={{ ...cd(9), padding:"8px 11px", background:C.bluePale, marginBottom:8 }}><p style={{ margin:0, fontSize:10, color:C.blue, fontWeight:600 }}>{n} prix détecté(s) automatiquement. Vérifiez avant validation.</p></div>; })()}
 
@@ -3389,11 +3390,14 @@ export default function App() {
                           ? <div><span style={{ fontSize:11, fontWeight:700, color:C.text }}>{fmt(Number(last.price_total||last.price_week))}€</span><span style={{ fontSize:8, color:C.gray, display:"block" }}>{last.reliability_status} · {fmtDateShort(last.period_start)||last.collected_at}{last.edited_at?" · modifié":""}</span></div>
                           : <span style={{ fontSize:9, color:C.gray }}>Aucun prix</span>;
                         const cellAuto = scrape
-                          ? (scrapeUsable
-                              ? <span style={{ fontSize:9, color:C.orange, fontWeight:600 }}>{fmt(scrape.price_total)}€ à vérifier</span>
-                              : scrapeSuspicious
-                                ? <span style={{ fontSize:8, color:C.gold }}>{fmt(scrape.price_total)}€ ignoré · suspect</span>
-                                : <span style={{ fontSize:8, color:C.gray }}>Non détecté</span>)
+                          ? (<div>
+                              {scrapeUsable
+                                ? <span style={{ fontSize:9, color:C.orange, fontWeight:600 }}>{fmt(scrape.price_total)}€ à vérifier</span>
+                                : scrapeSuspicious
+                                  ? <span style={{ fontSize:8, color:C.gold }}>{fmt(scrape.price_total)}€ ignoré · suspect</span>
+                                  : <span style={{ fontSize:8, color:C.gray }}>{s.source_type==="direct"?"Vérification manuelle nécessaire":"Non détecté"}</span>}
+                              {scrape.debug&&<button onClick={()=>setScrapeDetailsKey(d=>d===key?null:key)} style={{ display:"block", marginTop:2, fontSize:7, fontWeight:600, color:C.blue, background:"none", border:"none", padding:0, cursor:"pointer", textDecoration:"underline" }}>Détails scraping</button>}
+                            </div>)
                           : <span style={{ fontSize:9, color:C.grayM }}>—</span>;
                         const cellVerif = (
                           <input type="number" placeholder="Prix vérifié" value={vp} onChange={e=>setTrackPrices(p=>({ ...p, [key]:e.target.value }))} style={{ width:"100%", padding:"5px 7px", fontSize:10, border:`1px solid ${C.grayM}`, borderRadius:6, boxSizing:"border-box" }}/>
@@ -3461,6 +3465,19 @@ export default function App() {
                                   return <p key={h.id||hi} style={{ margin:"2px 0 0", fontSize:9, color:C.text }}>{h.collected_at}{rateHistoryScope==="all"?` · ${fmtDateShort(h.period_start)}→${fmtDateShort(h.period_end)}`:""} · <strong>{fmt(pt)}€</strong> · {fmt(Math.round(pt/(h.stay_nights||7)))}€/n · {h.reliability_status}{h.edited_at?" · modifié":""}{ev!=null?<span style={{ color:ev>0?C.green:ev<0?C.red:C.gray, fontWeight:700 }}> · {ev>0?"+":""}{fmt(ev)}€</span>:""}</p>;
                                 })}
                                 <button onClick={closeRateEdit} style={{ ...btn(false,C.white,C.text), margin:"5px 0 0", fontSize:9, padding:"5px", border:`1px solid ${C.grayM}` }}>Fermer</button>
+                              </div>
+                            )}
+                            {/* Détails scraping (debug) */}
+                            {scrapeDetailsKey===key&&scrape?.debug&&(
+                              <div style={{ ...cd(8), padding:"8px 10px", margin:"4px 0", background:C.grayL, fontSize:8, color:C.text }}>
+                                <p style={{ margin:"0 0 3px", fontSize:9, fontWeight:700, color:C.blue }}>Diagnostic scraping</p>
+                                <p style={{ margin:"1px 0", wordBreak:"break-all" }}>URL : {scrape.debug.final_url||scrape.url}</p>
+                                <p style={{ margin:"1px 0" }}>Statut HTTP : {scrape.debug.http_status??"—"} · HTML : {scrape.debug.html_length??0} car.</p>
+                                <p style={{ margin:"1px 0" }}>Méthode : {scrape.debug.detection_method||"—"} · Prix retenu : {scrape.debug.selected_price!=null?fmt(scrape.debug.selected_price)+"€":"—"}</p>
+                                <p style={{ margin:"1px 0" }}>Montants trouvés : {(scrape.debug.prices_found||[]).length?scrape.debug.prices_found.map(p=>fmt(p)+"€").join(", "):"aucun"}</p>
+                                {scrape.debug.failure_reason&&<p style={{ margin:"1px 0", color:C.orange }}>Raison : {scrape.debug.failure_reason}</p>}
+                                {scrape.debug.mode&&<p style={{ margin:"1px 0", color:C.gray, fontStyle:"italic" }}>{scrape.debug.mode}</p>}
+                                <button onClick={()=>setScrapeDetailsKey(null)} style={{ marginTop:4, fontSize:8, fontWeight:600, color:C.gray, background:C.white, border:`1px solid ${C.grayM}`, borderRadius:5, padding:"3px 8px", cursor:"pointer" }}>Fermer</button>
                               </div>
                             )}
                             {/* Choix en cas de doublon du jour */}
