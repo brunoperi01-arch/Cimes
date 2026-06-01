@@ -58,13 +58,15 @@ function buildLfdnasUrl(baseUrl, ctx) {
 }
 
 // ── Détection du type de source ─────────────────────────────────
-function detectSourceKind(source) {
-  const name = String(source.source_name || "").toLowerCase();
-  const url = String(source.source_url || "").toLowerCase();
-  if (url.includes("booking.com") || name.includes("booking")) return "booking";
-  if (url.includes("lafrancedunordausud.fr") || name.includes("france du nord")) return "lfdnas";
-  if (url.includes("maeva.com") || name.includes("maeva")) return "maeva";
-  if (source.source_type === "direct") return "direct";
+function detectSourceKind(source, finalUrl = "") {
+  const name = String(source?.source_name || "").toLowerCase();
+  const type = String(source?.source_type || "").toLowerCase();
+  const rawUrl = String(source?.source_url || "").toLowerCase();
+  const url = String(finalUrl || "").toLowerCase();
+  if (type === "booking" || name.includes("booking") || rawUrl.includes("booking.com") || url.includes("booking.com")) return "booking";
+  if (name.includes("france du nord") || rawUrl.includes("lafrancedunordausud.fr") || url.includes("lafrancedunordausud.fr")) return "lfdnas";
+  if (name.includes("maeva") || rawUrl.includes("maeva.com") || url.includes("maeva.com")) return "maeva";
+  if (type === "direct") return "direct";
   return "generic";
 }
 
@@ -185,55 +187,56 @@ function minPlausible(ctx) {
 }
 
 // ── Extracteurs par source ──────────────────────────────────────
-function extractBookingPrice(html, ctx) {
+// Booking : la page est souvent dynamique (HTTP 202 / HTML court) → manuel
+function extractBookingPrice(html, ctx, meta = {}) {
   const text = stripTags(html);
   const floor = minPlausible(ctx);
   const jsonPrices = pricesFromJson(html).filter((p) => p >= floor);
   const kwPrices = pricesNearKeywords(text, ["total", "séjour", "sejour", "taxes comprises", "pour", "nuits"]).filter((p) => p >= floor);
-  const allPrices = parsePrices(text).filter((p) => p >= floor);
-  const candidates = jsonPrices.length ? jsonPrices : (kwPrices.length ? kwPrices : allPrices);
-  const debug = {
-    detection_method: jsonPrices.length ? "json" : (kwPrices.length ? "keyword" : "generic"),
-    prices_found: Array.from(new Set(candidates)).slice(0, 12),
-    floor,
-  };
+  const candidates = Array.from(new Set(jsonPrices.length ? jsonPrices : kwPrices));
+  const shortOrBlocked = (meta.status === 202) || (Number(meta.html_length || html.length) < 10000);
+  // Page courte/dynamique et aucun prix fiable → manuel
   if (!candidates.length) {
-    return { price_total: null, confidence: "low", warning: "Prix non détecté automatiquement. Ouvrir et vérifier.", debug: { ...debug, failure_reason: "Prix Booking non détecté. Page probablement dynamique ou bloquée." } };
+    const reason = shortOrBlocked
+      ? "Booking retourne une page courte ou dynamique. Scraping simple insuffisant."
+      : "Prix Booking non détecté. Page probablement dynamique ou bloquée.";
+    return {
+      price_total: null, price_candidates: [], confidence: "low",
+      warning: "Booking : prix non détecté automatiquement. Ouvrir et vérifier manuellement.",
+      debug: { detection_method: "booking", prices_found: [], selected_price: null, failure_reason: reason, floor },
+    };
   }
-  const freq = mostFrequent(candidates);
-  const price = freq || median(candidates);
-  const distinct = new Set(candidates).size;
-  const confidence = (jsonPrices.length || freq) ? "medium" : (distinct <= 3 ? "medium" : "low");
+  // Candidats distincts, jamais de moyenne
+  const price_candidates = candidates.slice(0, 6).map((p, i) => ({ price_total: p, price_night: Math.round(p / (Number(ctx.stayNights || 7))), label: `Offre détectée ${i + 1}`, confidence: "medium" }));
+  const single = price_candidates.length === 1;
   return {
-    price_total: price,
-    confidence,
-    warning: confidence === "low" ? "Plusieurs prix possibles. Vérifiez avant validation." : null,
-    debug: { ...debug, selected_price: price },
+    price_total: single ? price_candidates[0].price_total : null,
+    price_candidates,
+    confidence: "medium",
+    warning: single ? "Prix détecté à vérifier." : "Plusieurs prix détectés. Sélectionnez le prix vérifié.",
+    debug: { detection_method: "booking", prices_found: candidates.slice(0, 12), selected_price: single ? price_candidates[0].price_total : null, floor },
   };
 }
+// La France du Nord au Sud : JAMAIS de moyenne — renvoie des candidats distincts
 function extractLfdnasPrice(html, ctx) {
   const text = stripTags(html);
   const floor = minPlausible(ctx);
-  // Ignorer caution / taxe / frais : on cible les prix proches de "prix/total/séjour/réserver/disponible"
   const kwPrices = pricesNearKeywords(text, ["prix", "total", "séjour", "sejour", "réserver", "reserver", "disponible", "à partir"]).filter((p) => p >= floor);
   const jsonPrices = pricesFromJson(html).filter((p) => p >= floor);
-  const candidates = (kwPrices.length ? kwPrices : jsonPrices);
-  const debug = {
-    detection_method: kwPrices.length ? "keyword" : (jsonPrices.length ? "json" : "none"),
-    prices_found: Array.from(new Set(candidates)).slice(0, 12),
-    floor,
-  };
+  const candidates = Array.from(new Set(kwPrices.length ? kwPrices : jsonPrices)).sort((a, b) => a - b);
+  const debug = { detection_method: kwPrices.length ? "lfdnas" : (jsonPrices.length ? "json" : "none"), prices_found: candidates.slice(0, 12), floor };
   if (!candidates.length) {
-    return { price_total: null, confidence: "low", warning: "Prix TO non détecté automatiquement. Vérification manuelle nécessaire.", debug: { ...debug, failure_reason: "Aucun prix plausible proche d'un mot-clé prix." } };
+    return { price_total: null, price_candidates: [], confidence: "low", warning: "Prix TO non détecté automatiquement. Vérification manuelle nécessaire.", debug: { ...debug, selected_price: null, failure_reason: "Aucun prix plausible proche d'un mot-clé prix." } };
   }
-  const freq = mostFrequent(candidates);
-  const price = freq || median(candidates);
-  const confidence = (kwPrices.length && freq) ? "medium" : "low";
+  const price_candidates = candidates.slice(0, 6).map((p, i) => ({ price_total: p, price_night: Math.round(p / (Number(ctx.stayNights || 7))), label: `Offre détectée ${i + 1}`, confidence: "medium" }));
+  const single = price_candidates.length === 1;
   return {
-    price_total: price,
-    confidence,
-    warning: confidence === "low" ? "Prix TO détecté incertain. Vérifiez avant validation." : "Prix détecté à vérifier.",
-    debug: { ...debug, selected_price: price },
+    // Si plusieurs candidats : pas de prix auto (pas de moyenne) ; un seul → proposé à vérifier
+    price_total: single ? price_candidates[0].price_total : null,
+    price_candidates,
+    confidence: "medium",
+    warning: single ? "Prix détecté à vérifier." : "Plusieurs prix détectés. Sélectionnez le prix vérifié.",
+    debug: { ...debug, selected_price: single ? price_candidates[0].price_total : null },
   };
 }
 function extractMaevaPrice(html, ctx) {
@@ -320,22 +323,27 @@ export default async function handler(req, res) {
           const { html, status, finalUrl, mode, error } = await fetchHtml(url);
           if (!html) {
             results.push({
-              ...base, price_total: null, price_night: null, confidence: "low",
+              ...base, price_total: null, price_night: null, confidence: "low", price_candidates: [],
               warning: "Page inaccessible ou bloquée. Vérification manuelle nécessaire.",
-              debug: { http_status: status, final_url: finalUrl, html_length: 0, prices_found: [], selected_price: null, detection_method: "none", failure_reason: error || "Page vide ou bloquée", mode },
+              debug: { http_status: status, final_url: finalUrl, html_length: 0, prices_found: [], price_candidates: [], selected_price: null, detection_method: detectSourceKind(s, finalUrl), failure_reason: error || "Page vide ou bloquée", mode },
             });
             continue;
           }
+          // Re-détecte le type avec l'URL finale (corrige Booking mal nommé)
+          const kindFinal = detectSourceKind(s, finalUrl);
           let r;
-          if (kind === "booking") r = extractBookingPrice(html, ctx);
-          else if (kind === "lfdnas") r = extractLfdnasPrice(html, ctx);
-          else if (kind === "maeva") r = extractMaevaPrice(html, ctx);
+          if (kindFinal === "booking") r = extractBookingPrice(html, ctx, { status, html_length: html.length });
+          else if (kindFinal === "lfdnas") r = extractLfdnasPrice(html, ctx);
+          else if (kindFinal === "maeva") r = extractMaevaPrice(html, ctx);
           else r = extractGenericPrice(html, ctx);
 
           const fullDebug = {
             http_status: status, final_url: finalUrl, html_length: html.length,
-            prices_found: r.debug?.prices_found || [], selected_price: r.debug?.selected_price ?? null,
-            detection_method: r.debug?.detection_method || "none",
+            source_kind: kindFinal,
+            prices_found: r.debug?.prices_found || [],
+            price_candidates: (r.price_candidates || []).map((c) => c.price_total),
+            selected_price: r.debug?.selected_price ?? null,
+            detection_method: r.debug?.detection_method || kindFinal,
             failure_reason: r.debug?.failure_reason || null,
             floor: r.debug?.floor,
             mode: mode === "fetch_simple" ? "Mode fetch simple : certains prix dynamiques peuvent être invisibles." : "browserless",
@@ -344,6 +352,7 @@ export default async function handler(req, res) {
             ...base,
             price_total: r.price_total,
             price_night: r.price_total ? Math.round(r.price_total / nights) : null,
+            price_candidates: r.price_candidates || [],
             confidence: r.confidence,
             extracted_text: r.price_total ? `Prix détecté ~${r.price_total}€` : "",
             warning: r.warning,
