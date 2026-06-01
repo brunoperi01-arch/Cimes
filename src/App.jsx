@@ -1732,6 +1732,10 @@ export default function App() {
   const [dashTarifTab, setDashTarifTab]   = useState("saisie"); // saisie | import | liste
   const [dashOurPeriodId, setDashOurPeriodId] = useState("2026_w7");
   const [dashOurCap, setDashOurCap]       = useState(6);
+  // Filtres globaux Dashboard (pilotage)
+  const [dashFilters, setDashFilters]     = useState({ season:"ete", nights:7, periodId:"2026_w7", capacity:6, accType:"2P6" });
+  const [dashCompSegment, setDashCompSegment] = useState("residence");
+  const resetDashFilters = ()=>setDashFilters({ season:"ete", nights:7, periodId:"2026_w7", capacity:6, accType:"2P6" });
   const [dashOurPrice, setDashOurPrice]   = useState("");
   const [dashOurNotes, setDashOurNotes]   = useState("");
   const [dashOurSaved, setDashOurSaved]   = useState(null);
@@ -2537,8 +2541,8 @@ export default function App() {
   // ── Styles ────────────────────────────────────────────────────
   // ── Styles responsive ─────────────────────────────────────────
   const appShell = { minHeight:"100vh", background:C.grayL, fontFamily:"-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif" };
-  const appContainer = { width:"100%", maxWidth:isMobile?440:1200, margin:"0 auto", padding:isMobile?"0":"18px 20px", boxSizing:"border-box" };
-  const mainGrid = { display:"grid", gridTemplateColumns:"230px 1fr", gap:18, alignItems:"start" };
+  const appContainer = { width:"100%", maxWidth:isMobile?440:1320, margin:"0 auto", padding:isMobile?"0":"18px 20px", boxSizing:"border-box" };
+  const mainGrid = { display:"grid", gridTemplateColumns:"244px 1fr", gap:18, alignItems:"start" };
   // Cadre "téléphone" uniquement en mobile ; en desktop, panneau plein large
   const ph  = isMobile
     ? { width:"100%", maxWidth:440, margin:"0 auto", background:C.grayL, minHeight:"100vh", overflow:"hidden" }
@@ -2552,6 +2556,13 @@ export default function App() {
     alignItems:"start",
   });
   const formGrid = { display:"grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap:8 };
+  const card = (extra={}) => ({ background:C.white, borderRadius:14, border:`0.5px solid ${C.grayM}`, padding:isMobile?"12px":"14px 16px", boxShadow:"0 1px 3px rgba(16,24,40,0.04)", boxSizing:"border-box", ...extra });
+  const sectionTitle = (txt, icon) => (
+    <div style={{ display:"flex", alignItems:"center", gap:7, margin:"4px 2px 8px" }}>
+      {icon&&<span style={{ fontSize:15 }}>{icon}</span>}
+      <span style={{ fontSize:14, fontWeight:700, color:C.text }}>{txt}</span>
+    </div>
+  );
   const cd  =(r=14,mb=8)=>({ background:C.white, borderRadius:r, overflow:"hidden", marginBottom:mb });
   const rw  =last=>({ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 13px", borderBottom:last?"none":`0.5px solid ${C.grayL}` });
   const btn =(dis,bg=C.blue,fg=C.white)=>({ width:"100%", padding:"12px", fontSize:14, fontWeight:600, background:dis?"#C7C7CC":bg, color:fg, border:"none", borderRadius:11, cursor:dis?"not-allowed":"pointer", marginBottom:6 });
@@ -2589,26 +2600,40 @@ export default function App() {
     </div>
   ):null;
   const SideNav=()=>(
-    <div style={{ background:C.white, borderRadius:16, border:`0.5px solid ${C.grayM}`, padding:"14px 10px", position:"sticky", top:18 }}>
-      <div style={{ display:"flex", alignItems:"center", gap:8, padding:"0 8px 12px", borderBottom:`0.5px solid ${C.grayL}`, marginBottom:8 }}>
-        <div style={{ width:30, height:30, background:C.blue, borderRadius:9, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}><span style={{ fontSize:16 }}>⛰</span></div>
+    <div style={{ background:C.blue, borderRadius:16, padding:"16px 12px", position:"sticky", top:18, minHeight:"calc(100vh - 36px)", display:"flex", flexDirection:"column" }}>
+      <div style={{ display:"flex", alignItems:"center", gap:9, padding:"0 6px 16px" }}>
+        <div style={{ width:34, height:34, background:"rgba(255,255,255,0.14)", borderRadius:10, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}><span style={{ fontSize:18 }}>⛰</span></div>
         <div style={{ minWidth:0 }}>
-          <p style={{ margin:0, fontSize:12, fontWeight:700, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>Les Cimes</p>
-          <p style={{ margin:0, fontSize:9, color:C.gray }}>Benchmark</p>
+          <p style={{ margin:0, fontSize:15, fontWeight:700, color:C.white, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>Les Cimes</p>
+          <p style={{ margin:0, fontSize:9, color:"rgba(255,255,255,0.55)" }}>Benchmark</p>
         </div>
       </div>
       {NAV.map(n=>(
-        <button key={n.id} onClick={()=>goScreen(n.id)} style={{ width:"100%", display:"flex", alignItems:"center", gap:10, padding:"9px 10px", marginBottom:2, background:screen===n.id?C.bluePale:"transparent", border:"none", borderRadius:9, cursor:"pointer", textAlign:"left" }}>
-          <span style={{ fontSize:15 }}>{n.icon}</span>
-          <span style={{ fontSize:13, fontWeight:screen===n.id?700:500, color:screen===n.id?C.blue:C.text }}>{n.l}</span>
+        <button key={n.id} onClick={()=>goScreen(n.id)} style={{ width:"100%", display:"flex", alignItems:"center", gap:11, padding:"10px 11px", marginBottom:3, background:screen===n.id?"rgba(255,255,255,0.16)":"transparent", border:"none", borderRadius:10, cursor:"pointer", textAlign:"left" }}>
+          <span style={{ fontSize:15, width:18, textAlign:"center" }}>{n.icon}</span>
+          <span style={{ fontSize:13, fontWeight:screen===n.id?700:500, color:screen===n.id?C.white:"rgba(255,255,255,0.78)" }}>{n.l}</span>
         </button>
       ))}
-      <div style={{ borderTop:`0.5px solid ${C.grayL}`, marginTop:8, paddingTop:8, padding:"8px 10px 0" }}>
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:6 }}>
+      <div style={{ borderTop:"0.5px solid rgba(255,255,255,0.14)", margin:"10px 4px", paddingTop:10 }}>
+        <button onClick={()=>{ setDashCompSegment("residence"); goScreen("dashboard"); }} style={{ width:"100%", display:"flex", alignItems:"center", gap:11, padding:"9px 11px", marginBottom:3, background:"transparent", border:"none", borderRadius:10, cursor:"pointer", textAlign:"left" }}>
+          <span style={{ fontSize:14, width:18, textAlign:"center" }}>🏢</span>
+          <span style={{ fontSize:12, fontWeight:500, color:"rgba(255,255,255,0.78)" }}>Concurrents Résidences</span>
+        </button>
+        <button onClick={()=>{ setDashCompSegment("private"); goScreen("dashboard"); }} style={{ width:"100%", display:"flex", alignItems:"center", gap:11, padding:"9px 11px", background:"transparent", border:"none", borderRadius:10, cursor:"pointer", textAlign:"left" }}>
+          <span style={{ fontSize:14, width:18, textAlign:"center" }}>🏠</span>
+          <span style={{ fontSize:12, fontWeight:500, color:"rgba(255,255,255,0.78)" }}>Concurrents Particuliers</span>
+        </button>
+      </div>
+      <div style={{ marginTop:"auto", paddingTop:12 }}>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:6, padding:"0 6px" }}>
           <Badge label={SB_READY?"SUPABASE":"LOCAL"} color={SB_READY?C.green:C.gold} bg={SB_READY?C.greenL:C.goldL} size={9}/>
-          {user&&<button onClick={handleLogout} style={{ fontSize:10, color:C.gray, background:"none", border:"none", cursor:"pointer" }}>Déco.</button>}
+          {user&&<button onClick={handleLogout} style={{ fontSize:10, color:"rgba(255,255,255,0.6)", background:"none", border:"none", cursor:"pointer" }}>Déco.</button>}
         </div>
-        {user&&<p style={{ margin:"6px 0 0", fontSize:9, color:C.gray, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{user.email}</p>}
+        {user&&<p style={{ margin:"6px 6px 0", fontSize:9, color:"rgba(255,255,255,0.5)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{user.email}</p>}
+        <div style={{ display:"flex", alignItems:"center", gap:7, margin:"10px 6px 0", padding:"7px 9px", background:"rgba(255,255,255,0.08)", borderRadius:9 }}>
+          <span style={{ fontSize:14 }}>🖥️</span>
+          <div><p style={{ margin:0, fontSize:10, fontWeight:700, color:C.white }}>Optimisé desktop</p><p style={{ margin:0, fontSize:8, color:"rgba(255,255,255,0.5)" }}>Interface responsive</p></div>
+        </div>
       </div>
     </div>
   );
@@ -2717,13 +2742,134 @@ export default function App() {
       .filter(r=>!dashListFilter.cap || Number(r.capacity)===dashListFilter.cap)
       .filter(r=>!dashListFilter.nights || Number(r.stay_nights||7)===dashListFilter.nights)
       .sort((a,b)=>(b.period_start||"").localeCompare(a.period_start||""));
+
+    // ── Pilotage : contexte issu des filtres globaux ──
+    const dfPeriod = ALL_PERIODS.find(p=>p.id===dashFilters.periodId) || ALL_PERIODS.find(p=>p.season===dashFilters.season) || ALL_PERIODS[0];
+    const dfAcc = ACCOMMODATION_TYPES[dashFilters.accType] || ACCOMMODATION_TYPES["2P6"];
+    const dfNights = Number(dashFilters.nights||7);
+    const dfCheckin = dfPeriod?.period_start || dfPeriod?.week_start;
+    const dfCheckout = dfNights===7 ? (dfPeriod?.period_end || addDaysStr(dfCheckin,7)) : (dfCheckin?addDaysStr(dfCheckin,dfNights):"");
+    const dfCap = Number(dashFilters.capacity||dfAcc.capacity);
+    const dfCtx = { periodId:dfPeriod?.id, checkin:dfCheckin, checkout:dfCheckout, stayNights:dfNights, capacity:dfCap };
+    // Tarif Les Cimes (semaine → court séjour si <7)
+    const dfWeekly = getOurRateForContext(ourRates, { ...dfCtx, checkout: dfCheckin?addDaysStr(dfCheckin,7):dfCheckout, stayNights:7 }, dashFilters.accType);
+    const dfWeeklyPrice = dfWeekly ? Number(dfWeekly.price_total||dfWeekly.price_week||dfWeekly.price||0) : 0;
+    const dfSSRule = findShortStayRule(shortStayRules, dashFilters.accType, dashFilters.season, dfNights);
+    const dfOurPrice = dfNights===7 ? dfWeeklyPrice : (dfWeeklyPrice?calcShortStayOurPrice({ weeklyPrice:dfWeeklyPrice, stayNights:dfNights, rule:dfSSRule }):0);
+    const dfOurNight = dfOurPrice ? Math.round(dfOurPrice/dfNights) : 0;
+    const dfOurSource = dfWeekly ? "Supabase" : "Grille interne";
+    // Marché pro / particuliers (par dates + durée + capacité)
+    const matchCtx = r => String(r.period_start||"")===String(dfCheckin||"") && String(r.period_end||"")===String(dfCheckout||"") && Number(r.stay_nights||7)===dfNights && Number(r.capacity)===dfCap;
+    const dfProRates = (histAll||[]).filter(r=>!r.is_example && TRUSTED_STATUSES.includes(r.reliability_status||"à vérifier") && matchCtx(r) && r.market_segment!=="private" && r.is_private_rental!==true);
+    const dfPrivRates = (histAll||[]).filter(r=>!r.is_example && TRUSTED_STATUSES.includes(r.reliability_status||"à vérifier") && matchCtx(r) && (r.market_segment==="private"||r.is_private_rental===true));
+    const dfProMedian = median(dfProRates.map(r=>Number(r.price_total||r.price_week||r.price||0)).filter(Boolean));
+    const dfPrivMedian = median(dfPrivRates.map(r=>Number(r.price_total||r.price_week||r.price||0)).filter(Boolean));
+    const dfProGap = (dfOurPrice&&dfProMedian) ? Math.round(((dfOurPrice-dfProMedian)/dfProMedian)*100) : null;
+    const dfPrivGap = (dfOurPrice&&dfPrivMedian) ? Math.round(((dfOurPrice-dfPrivMedian)/dfPrivMedian)*100) : null;
+    // Pression marché : combine écart pro (sous le marché = opportunité) et particuliers
+    const dfPressure = (dfProGap==null&&dfPrivGap==null) ? "indéterminée"
+      : ((dfPrivGap!=null&&dfPrivGap>30)||(dfProGap!=null&&dfProGap<-15)) ? "élevée"
+      : ((dfPrivGap!=null&&dfPrivGap>=15)||(dfProGap!=null&&dfProGap<-5)) ? "moyenne" : "faible";
+    // Opportunité promo : score simple /100 (marché pro au-dessus de notre tarif = opportunité)
+    let dfPromoScore = 0;
+    if (dfProMedian && dfOurPrice) { const adv = (dfProMedian - dfOurPrice)/dfProMedian; dfPromoScore = Math.max(0, Math.min(100, Math.round(50 + adv*200))); }
+    else if (dfProRates.length<3) dfPromoScore = 0;
+    const dfPromoLabel = dfPromoScore>=66 ? "Bonne" : dfPromoScore>=40 ? "Moyenne" : dfProRates.length<3 ? "Données insuff." : "Faible";
+
     return (
     <div><SBar title="Dashboard"/>
+      {/* Filtres globaux */}
+      {!isMobile&&(
+        <div style={{ display:"flex", gap:8, alignItems:"flex-end", flexWrap:"wrap", padding:"12px 18px 0" }}>
+          {[
+            ["Saison","season",[["ete","☀️ Été 2026"],["hiver","❄️ Hiver 2026/2027"]]],
+            ["Durée","nights",[[2,"2 nuits"],[3,"3 nuits"],[4,"4 nuits"],[7,"7 nuits"]]],
+          ].map(([lbl,key,opts])=>(
+            <div key={key} style={{ flex:"1 1 150px" }}>
+              <p style={{ margin:"0 0 3px 2px", fontSize:9, fontWeight:600, color:C.gray }}>{lbl}</p>
+              <select value={dashFilters[key]} onChange={e=>setDashFilters(f=>({ ...f, [key]:key==="nights"?Number(e.target.value):e.target.value }))} style={{ ...inp(), fontSize:12, padding:"8px 9px" }}>
+                {opts.map(([v,l])=><option key={v} value={v}>{l}</option>)}
+              </select>
+            </div>
+          ))}
+          <div style={{ flex:"1 1 200px" }}>
+            <p style={{ margin:"0 0 3px 2px", fontSize:9, fontWeight:600, color:C.gray }}>Période</p>
+            <select value={dashFilters.periodId} onChange={e=>setDashFilters(f=>({ ...f, periodId:e.target.value }))} style={{ ...inp(), fontSize:12, padding:"8px 9px" }}>
+              {ALL_PERIODS.filter(p=>p.season===dashFilters.season&&Number(p.stay_nights||7)===7).map(p=><option key={p.id} value={p.id}>{periodOptionLabel(p)}</option>)}
+            </select>
+          </div>
+          <div style={{ flex:"1 1 110px" }}>
+            <p style={{ margin:"0 0 3px 2px", fontSize:9, fontWeight:600, color:C.gray }}>Capacité</p>
+            <select value={dashFilters.capacity} onChange={e=>setDashFilters(f=>({ ...f, capacity:Number(e.target.value) }))} style={{ ...inp(), fontSize:12, padding:"8px 9px" }}>
+              {[2,4,6,8].map(n=><option key={n} value={n}>{n}P</option>)}
+            </select>
+          </div>
+          <div style={{ flex:"1 1 130px" }}>
+            <p style={{ margin:"0 0 3px 2px", fontSize:9, fontWeight:600, color:C.gray }}>Typologie</p>
+            <select value={dashFilters.accType} onChange={e=>setDashFilters(f=>({ ...f, accType:e.target.value, capacity:ACCOMMODATION_TYPES[e.target.value]?.capacity||f.capacity }))} style={{ ...inp(), fontSize:12, padding:"8px 9px" }}>
+              {Object.entries(ACCOMMODATION_TYPES).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+            </select>
+          </div>
+          <button onClick={resetDashFilters} style={{ fontSize:11, fontWeight:600, color:C.gray, background:C.white, border:`1px solid ${C.grayM}`, borderRadius:9, padding:"9px 12px", cursor:"pointer", whiteSpace:"nowrap" }}>↻ Réinitialiser</button>
+        </div>
+      )}
+
+      {/* Ligne KPI */}
+      {!isMobile&&(
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(5, 1fr) auto", gap:10, padding:"12px 18px 0", alignItems:"stretch" }}>
+          {[
+            { ic:"⛰", c:C.blue, bg:C.bluePale, t:"Tarif Les Cimes", v:dfOurPrice?`${fmt(dfOurNight)}€`:"—", s:dfOurPrice?`${fmt(dfOurPrice)}€ / ${dfNights}n · ${dfOurSource}`:"Données insuffisantes" },
+            { ic:"🏢", c:C.blue, bg:C.bluePale, t:"Médiane pros", v:dfProMedian?`${fmt(dfProMedian)}€`:"—", s:dfProRates.length?`${dfProRates.length} relevés`:"Données insuffisantes" },
+            { ic:"🏠", c:"#7C3AED", bg:"#F1E9FF", t:"Médiane particuliers", v:dfPrivMedian?`${fmt(dfPrivMedian)}€`:"—", s:dfPrivRates.length?`${dfPrivRates.length} relevés`:"Données insuffisantes" },
+            { ic:"📈", c:dfPressure==="élevée"?C.red:dfPressure==="moyenne"?C.orange:C.green, bg:dfPressure==="élevée"?C.redL:dfPressure==="moyenne"?C.orangeL:C.greenL, t:"Pression marché", v:dfPressure, s:dfPrivGap!=null?`écart part. ${dfPrivGap>0?"+":""}${dfPrivGap}%`:"—" },
+            { ic:"🎯", c:C.green, bg:C.greenL, t:"Opportunité promo", v:dfPromoLabel, s:dfPromoScore?`Score ${dfPromoScore}/100`:"Données insuffisantes" },
+          ].map((k,i)=>(
+            <div key={i} style={card({ padding:"12px 13px" })}>
+              <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:5 }}>
+                <div style={{ width:30, height:30, borderRadius:9, background:k.bg, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}><span style={{ fontSize:15 }}>{k.ic}</span></div>
+                <span style={{ fontSize:9, fontWeight:600, color:C.gray, lineHeight:1.1 }}>{k.t}</span>
+              </div>
+              <p style={{ margin:0, fontSize:19, fontWeight:700, color:k.c, lineHeight:1.1 }}>{k.v}</p>
+              <p style={{ margin:"2px 0 0", fontSize:8, color:C.gray }}>{k.s}</p>
+            </div>
+          ))}
+          <button onClick={()=>setScreen("benchmark")} style={{ ...card({ padding:"12px 14px" }), background:C.blue, border:"none", cursor:"pointer", display:"flex", flexDirection:"column", justifyContent:"center", minWidth:130 }}>
+            <span style={{ fontSize:12, fontWeight:700, color:C.white, textAlign:"left", lineHeight:1.25 }}>Ouvrir Benchmark & décisions →</span>
+          </button>
+        </div>
+      )}
+
+      {/* Décisions commerciales */}
+      {!isMobile&&(
+        <div style={{ padding:"14px 18px 0" }}>
+          {sectionTitle("Décisions commerciales","🧭")}
+          <div style={responsiveGrid(3)}>
+            <div style={card({ background:C.redL, borderColor:"#F8C9C9" })}>
+              <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom:4 }}><span style={{ fontSize:15 }}>⬇️</span><span style={{ fontSize:12, fontWeight:700, color:C.red }}>Ajuster / baisser tarif</span></div>
+              <p style={{ margin:"0 0 8px", fontSize:10, color:C.text, lineHeight:1.4 }}>{dfProGap!=null&&dfProGap<-5?`Le marché pro est ${Math.abs(dfProGap)}% au-dessus de votre tarif. Ajustez pour capter la valeur.`:"Tarif globalement aligné sur le marché pro. Surveillez les évolutions."}</p>
+              <button onClick={()=>setScreen("benchmark")} style={{ fontSize:10, fontWeight:700, color:C.white, background:C.red, border:"none", borderRadius:8, padding:"6px 11px", cursor:"pointer" }}>Voir les recommandations</button>
+            </div>
+            <div style={card({ background:C.bluePale, borderColor:"#C9DCF8" })}>
+              <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom:4 }}><span style={{ fontSize:15 }}>🗓️</span><span style={{ fontSize:12, fontWeight:700, color:C.blue }}>Créer un court séjour</span></div>
+              <p style={{ margin:"0 0 8px", fontSize:10, color:C.text, lineHeight:1.4 }}>Les courts séjours peuvent être travaillés sur cette période. Potentiel de remplissage.</p>
+              <button onClick={()=>{ setPromoStayNights(3); setScreen("promotions"); }} style={{ fontSize:10, fontWeight:700, color:C.white, background:C.blue, border:"none", borderRadius:8, padding:"6px 11px", cursor:"pointer" }}>Configurer</button>
+            </div>
+            <div style={card({ background:dfPrivGap!=null&&dfPrivGap>15?"#FFF4E0":C.greenL, borderColor:dfPrivGap!=null&&dfPrivGap>15?"#F5D9A8":"#C9E8D2" })}>
+              <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom:4 }}><span style={{ fontSize:15 }}>👁️</span><span style={{ fontSize:12, fontWeight:700, color:dfPrivGap!=null&&dfPrivGap>15?C.orange:C.green }}>Surveiller les particuliers</span></div>
+              <p style={{ margin:"0 0 8px", fontSize:10, color:C.text, lineHeight:1.4 }}>{dfPrivGap!=null&&dfPrivGap>15?"Les particuliers exercent une pression prix. Réponse : offre directe ciblée.":"Les prix particuliers sont stables. Restez attentif à l'évolution."}</p>
+              <button onClick={()=>setScreen("track")} style={{ fontSize:10, fontWeight:700, color:C.white, background:dfPrivGap!=null&&dfPrivGap>15?C.orange:C.green, border:"none", borderRadius:8, padding:"6px 11px", cursor:"pointer" }}>Suivre le marché</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isMobile&&(
       <div style={{ background:`linear-gradient(135deg,${C.blue},${C.blueL})`, padding:"10px 16px 16px" }}>
         <p style={{ margin:0, fontSize:9, fontWeight:700, color:"rgba(255,255,255,0.5)", textTransform:"uppercase" }}>Les Cimes du Val d'Allos · Veille tarifaire</p>
         <h1 style={{ margin:"2px 0", fontSize:18, fontWeight:700, color:C.white }}>Benchmark {yr}</h1>
         <p style={{ margin:0, fontSize:11, color:"rgba(255,255,255,0.65)" }}>{user?.email} · {cap} · {STATIC_WEEKS.filter(w=>w.year===yr).length} semaines</p>
       </div>
+      )}
       <div style={cnt}>
         <div style={{ display:"flex", gap:6, marginTop:10 }}>
           <div style={{ flex:1 }}>
@@ -3310,6 +3456,33 @@ export default function App() {
             </>
           );
         })()}
+
+        {/* Marché pro vs particuliers (bas de dashboard) */}
+        {!isMobile&&(<>
+          {sectionTitle("Marché pro vs particuliers","⚖️")}
+          <div style={responsiveGrid(2)}>
+            <div style={card()}>
+              <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom:6 }}><span style={{ fontSize:15 }}>🏢</span><span style={{ fontSize:13, fontWeight:700, color:C.blue }}>Marché professionnel</span></div>
+              <p style={{ margin:0, fontSize:20, fontWeight:700, color:C.text }}>{dfProMedian?`${fmt(dfProMedian)}€`:"—"}<span style={{ fontSize:10, color:C.gray, fontWeight:400 }}> médiane {dfNights}n</span></p>
+              <div style={{ display:"flex", gap:14, marginTop:6, flexWrap:"wrap" }}>
+                <span style={{ fontSize:9, color:C.gray }}>Relevés : <strong>{dfProRates.length}</strong></span>
+                <span style={{ fontSize:9, color:C.gray }}>Sources actives : <strong>{proSourcesCount}</strong></span>
+                <span style={{ fontSize:9, color:C.gray }}>Écart Les Cimes : <strong style={{ color:dfProGap>0?C.red:C.green }}>{dfProGap!=null?`${dfProGap>0?"+":""}${dfProGap}%`:"—"}</strong></span>
+              </div>
+              <p style={{ margin:"6px 0 0", fontSize:8, color:C.gray, fontStyle:"italic" }}>Référence principale pour la grille tarifaire.</p>
+            </div>
+            <div style={card({ background:"#FFF7F7" })}>
+              <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom:6 }}><span style={{ fontSize:15 }}>🏠</span><span style={{ fontSize:13, fontWeight:700, color:"#FF5A5F" }}>Loueurs particuliers</span></div>
+              <p style={{ margin:0, fontSize:20, fontWeight:700, color:C.text }}>{dfPrivMedian?`${fmt(dfPrivMedian)}€`:"—"}<span style={{ fontSize:10, color:C.gray, fontWeight:400 }}> médiane {dfNights}n</span></p>
+              <div style={{ display:"flex", gap:14, marginTop:6, flexWrap:"wrap" }}>
+                <span style={{ fontSize:9, color:C.gray }}>Relevés : <strong>{dfPrivRates.length}</strong></span>
+                <span style={{ fontSize:9, color:C.gray }}>Pression : <strong style={{ color:dfPrivGap!=null&&dfPrivGap>30?C.red:dfPrivGap!=null&&dfPrivGap>=15?C.orange:C.green }}>{dfPrivGap==null?"—":dfPrivGap>30?"forte":dfPrivGap>=15?"moyenne":"faible"}</strong></span>
+                <span style={{ fontSize:9, color:C.gray }}>Écart : <strong>{dfPrivGap!=null?`${dfPrivGap>0?"+":""}${dfPrivGap}%`:"—"}</strong></span>
+              </div>
+              <p style={{ margin:"6px 0 0", fontSize:8, color:"#C2185B", fontStyle:"italic" }}>Les particuliers servent d'alerte prix, pas de référence principale.</p>
+            </div>
+          </div>
+        </>)}
       </div><BNav/>
     </div>
     );
