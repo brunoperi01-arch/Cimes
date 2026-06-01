@@ -296,6 +296,19 @@ const OUR_TARIFS = {
 const OUR_TARIFS_META = { source:"Tarif interne validé", verified_at:"avril 2026", status:"réel" };
 
 // ══ TYPOLOGIES COMMERCIALES LES CIMES ═══════════════════════════
+const ACCOMMODATION_ORDER = ["2P6","2P6_SUP","3P6","3P8"];
+const ACCOMMODATION_SHORT = { "2P6":"2P6", "2P6_SUP":"2P6 Sup", "3P6":"3P6", "3P8":"3P8" };
+// Déduit la typologie d'une ligne our_rates (accommodation_type, sinon notes, sinon null — ne pas inventer)
+function inferAccommodationType(rate) {
+  if (rate?.accommodation_type && ACCOMMODATION_TYPES[rate.accommodation_type]) return rate.accommodation_type;
+  const note = String(rate?.notes || rate?.accommodation_label || "").toUpperCase().replace(/\s/g,"");
+  if (note.includes("2P6_SUP") || note.includes("2P6SUP")) return "2P6_SUP";
+  if (note.includes("3P8")) return "3P8";
+  if (note.includes("3P6")) return "3P6";
+  if (note.includes("2P6")) return "2P6";
+  return null;
+}
+
 const ACCOMMODATION_TYPES = {
   "2P6":     { label:"2 pièces 6 pers.",            capacity:6, surfaceMin:34, surfaceMax:45, targetMin:2, targetMax:4, comfort:"budget_famille",        segment:"6p_budget"  },
   "2P6_SUP": { label:"2 pièces 6 pers. supérieur",  capacity:6, surfaceMin:42, surfaceMax:45, targetMin:4, targetMax:6, comfort:"confort_intermediaire", segment:"6p_confort" },
@@ -1729,7 +1742,12 @@ export default function App() {
   const [ourCsvLoading, setOurCsvLoading] = useState(false);
 
   // ── Dashboard : gestion tarifs Les Cimes ──────────────────────
-  const [dashTarifTab, setDashTarifTab]   = useState("saisie"); // saisie | import | liste
+  const [dashTarifTab, setDashTarifTab]   = useState("grille"); // grille | saisie | import | liste
+  const [gridFilters, setGridFilters]     = useState({ year:0, season:"", nights:7, accType:"", source:"" });
+  const [tarifCell, setTarifCell]         = useState(null); // {periodId, accType, nights, existing} édition cellule
+  const [tarifCellPrice, setTarifCellPrice] = useState("");
+  const [tarifCellNotes, setTarifCellNotes] = useState("");
+  const [tarifCellMsg, setTarifCellMsg]   = useState(null);
   const [dashOurPeriodId, setDashOurPeriodId] = useState("2026_w7");
   const [dashOurCap, setDashOurCap]       = useState(6);
   // Filtres globaux Dashboard (pilotage)
@@ -2306,6 +2324,82 @@ export default function App() {
     } catch(e) { setDashOurSaved("err:"+e.message); }
     setDashOurSaving(false);
     setTimeout(()=>setDashOurSaved(null),3000);
+  }
+
+  // ── Saisie typée : enregistre avec la typologie sélectionnée (gridFilters.accType) ─
+  async function handleDashSaveOurRateTyped() {
+    const priceTotal = parseFloat(dashOurPrice)||0;
+    if (!priceTotal || !dashOurPeriodId) return;
+    const period = ALL_PERIODS.find(p=>p.id===dashOurPeriodId);
+    if (!period) { setDashOurSaved("err:Période introuvable"); return; }
+    const accType = gridFilters.accType || "2P6";
+    const acc = ACCOMMODATION_TYPES[accType];
+    const nights = period.stay_nights || 7;
+    const periodStart = period.period_start || period.week_start;
+    setDashOurSaving(true); setDashOurSaved(null);
+    try {
+      await saveOurRate({
+        period_id:          dashOurPeriodId,
+        period_label:       period.label || period.subtitle || null,
+        period_start:       periodStart,
+        period_end:         period.period_end || (periodStart?addDaysStr(periodStart, nights):null),
+        season:             period.season || "ete",
+        stay_nights:        nights,
+        capacity:           acc?.capacity || Number(dashOurCap) || 6,
+        accommodation_type: accType,
+        accommodation_label:acc?.label || null,
+        price_total:        priceTotal,
+        notes:              dashOurNotes || null,
+        source:             "saisie dashboard",
+      });
+      await reloadOurRates();
+      setDashOurSaved("ok"); setDashOurPrice(""); setDashOurNotes("");
+    } catch(e) { setDashOurSaved("err:"+e.message); }
+    setDashOurSaving(false);
+    setTimeout(()=>setDashOurSaved(null),3000);
+  }
+
+  // ── Grille : enregistrer/mettre à jour le tarif d'une cellule (période × typologie) ─
+  async function handleSaveTarifCell() {
+    if (!tarifCell) return;
+    const priceTotal = parseFloat(tarifCellPrice)||0;
+    if (!priceTotal) return;
+    const period = ALL_PERIODS.find(p=>p.id===tarifCell.periodId);
+    if (!period) { setTarifCellMsg("err"); return; }
+    const nights = tarifCell.nights || period.stay_nights || 7;
+    const periodStart = period.period_start || period.week_start;
+    const acc = ACCOMMODATION_TYPES[tarifCell.accType];
+    try {
+      await saveOurRate({
+        period_id:          tarifCell.periodId,
+        period_label:       period.label || period.subtitle || null,
+        period_start:       periodStart,
+        period_end:         period.period_end || (periodStart?addDaysStr(periodStart, nights):null),
+        season:             period.season || "ete",
+        stay_nights:        nights,
+        capacity:           acc?.capacity || tarifCell.capacity || 6,
+        accommodation_type: tarifCell.accType,
+        accommodation_label:acc?.label || null,
+        price_total:        priceTotal,
+        notes:              tarifCellNotes || null,
+        source:             "saisie grille",
+      });
+      await reloadOurRates();
+      setTarifCellMsg("ok");
+      setTimeout(()=>{ setTarifCell(null); setTarifCellPrice(""); setTarifCellNotes(""); setTarifCellMsg(null); }, 900);
+    } catch(e) { setTarifCellMsg("err"); }
+  }
+  async function handleDeleteTarifCell() {
+    if (!tarifCell?.existing?.id) { setTarifCell(null); return; }
+    try { await deleteOurRate(tarifCell.existing.id); await reloadOurRates(); }
+    catch(e) { console.error(e); }
+    setTarifCell(null); setTarifCellPrice(""); setTarifCellNotes(""); setTarifCellMsg(null);
+  }
+  function openTarifCell(periodId, accType, nights, existing) {
+    setTarifCell({ periodId, accType, nights, existing });
+    setTarifCellPrice(existing ? String(existing.price_total||"") : "");
+    setTarifCellNotes(existing ? (existing.notes||"") : "");
+    setTarifCellMsg(null);
   }
 
   async function handleDeleteOurRate(id) {
@@ -3322,8 +3416,43 @@ export default function App() {
     const dashNights = dashPeriod?.stay_nights || 7;
     const dashPriceNight = dashOurPrice ? Math.round((parseFloat(dashOurPrice)||0)/dashNights) : 0;
     const yearOf = r => (r.period_start||"").slice(0,4);
-    const listFiltered = (ourRates||[])
-      .filter(r=>r.is_active!==false)
+    const activeRates = (ourRates||[]).filter(r=>r.is_active!==false);
+    // Saisie : typologie sélectionnée + tarif existant pour préremplissage sûr
+    const saisieAcc = dashTarifTab==="saisie" ? (gridFilters.accType||"2P6") : (gridFilters.accType||"2P6");
+    const saisieExisting = activeRates.find(r=>r.period_id===dashOurPeriodId && Number(r.stay_nights||7)===dashNights && inferAccommodationType(r)===saisieAcc);
+    // ── Données de la grille tarifaire (périodes × typologies) ──
+    const gridNights = gridFilters.nights || 7;
+    const gridPeriods = ALL_PERIODS
+      .filter(p=>Number(p.stay_nights||7)===gridNights)
+      .filter(p=>!gridFilters.season || p.season===gridFilters.season)
+      .filter(p=>!gridFilters.year || (p.period_start||p.week_start||"").slice(0,4)===String(gridFilters.year))
+      .slice().sort((a,b)=>String(a.period_start||a.week_start||"").localeCompare(String(b.period_start||b.week_start||"")));
+    const rateFor = (periodId, accType) => activeRates.find(r=>
+      r.period_id===periodId &&
+      Number(r.stay_nights||7)===gridNights &&
+      inferAccommodationType(r)===accType &&
+      (!gridFilters.source || (r.source||"").includes(gridFilters.source))
+    );
+    const gridCols = gridFilters.accType ? [gridFilters.accType] : ACCOMMODATION_ORDER;
+    // ── Contrôle grille (anomalies) ──
+    const anomalies = (()=>{
+      const a=[];
+      const noType = activeRates.filter(r=>!inferAccommodationType(r));
+      if (noType.length) a.push(`${noType.length} ligne(s) sans typologie identifiable.`);
+      // doublons : même période + typologie + durée + capacité
+      const seen={}; let dup=0;
+      activeRates.forEach(r=>{ const k=`${r.period_id}_${inferAccommodationType(r)}_${r.stay_nights||7}_${r.capacity}`; seen[k]=(seen[k]||0)+1; });
+      Object.values(seen).forEach(n=>{ if(n>1) dup++; });
+      if (dup) a.push(`${dup} doublon(s) potentiel(s) (même période/typologie/durée).`);
+      // 7 nuits ne finissant pas un samedi
+      const notSat = activeRates.filter(r=>{ if(Number(r.stay_nights||7)!==7) return false; const end=r.period_end||(r.period_start?addDaysStr(r.period_start,7):null); if(!end) return false; return new Date(end+"T12:00:00Z").getUTCDay()!==6; });
+      if (notSat.length) a.push(`${notSat.length} période(s) 7 nuits ne finissant pas un samedi.`);
+      // capacité sans accommodation_type explicite
+      const capNoAcc = activeRates.filter(r=>!r.accommodation_type && r.capacity);
+      if (capNoAcc.length) a.push(`${capNoAcc.length} ligne(s) avec capacité mais sans accommodation_type.`);
+      return a;
+    })();
+    const listFiltered = activeRates
       .filter(r=>!dashListFilter.year || yearOf(r)===String(dashListFilter.year))
       .filter(r=>!dashListFilter.cap || Number(r.capacity)===dashListFilter.cap)
       .filter(r=>!dashListFilter.nights || Number(r.stay_nights||7)===dashListFilter.nights)
@@ -3333,13 +3462,112 @@ export default function App() {
         <div style={cnt}>
           <div style={{ ...cd(11), padding:"11px 13px", background:C.bluePale, marginTop:8 }}>
             <p style={{ margin:0, fontSize:13, fontWeight:700, color:C.blue }}>💰 Gestion tarifs Les Cimes</p>
-            <p style={{ margin:"3px 0 0", fontSize:10, color:C.blueL }}>{(ourRates||[]).filter(r=>r.is_active!==false).length} tarif(s) enregistré(s) · grille semaine de référence.</p>
+            <p style={{ margin:"3px 0 0", fontSize:10, color:C.blueL }}>{activeRates.length} tarif(s) enregistré(s) · grille semaine de référence.</p>
           </div>
-          <div style={{ display:"flex", background:C.grayM, padding:2, borderRadius:9, marginBottom:8 }}>
-            {[["saisie","Saisie / modification"],["import","Import CSV"],["liste","Tarifs enregistrés"]].map(([id,lbl])=>(
+
+          {/* Contrôle grille */}
+          {anomalies.length>0&&(
+            <div style={{ ...cd(11), padding:"9px 12px", background:C.goldL, marginBottom:8, borderLeft:`3px solid ${C.gold}` }}>
+              <p style={{ margin:"0 0 3px", fontSize:11, fontWeight:700, color:C.gold }}>🔍 Contrôle grille — {anomalies.length} alerte(s)</p>
+              {anomalies.map((m,i)=><p key={i} style={{ margin:"1px 0 0", fontSize:9, color:C.text }}>• {m}</p>)}
+            </div>
+          )}
+
+          <div style={{ display:"flex", background:C.grayM, padding:2, borderRadius:9, marginBottom:8, flexWrap:"wrap" }}>
+            {[["grille","Grille tarifaire"],["saisie","Saisie / modification"],["import","Import CSV"],["liste","Lignes enregistrées"]].map(([id,lbl])=>(
               <button key={id} style={tabB(dashTarifTab===id)} onClick={()=>setDashTarifTab(id)}>{lbl}</button>
             ))}
           </div>
+
+          {/* ── Grille tarifaire ── */}
+          {dashTarifTab==="grille"&&(<>
+            {/* Filtres */}
+            <div style={{ display:"flex", gap:5, marginBottom:8, flexWrap:"wrap" }}>
+              <select value={gridFilters.year} onChange={e=>setGridFilters(f=>({ ...f, year:parseInt(e.target.value)||0 }))} style={{ ...inp(), flex:"1 1 90px", fontSize:11, padding:"6px 8px" }}><option value="0">Toutes années</option><option value="2026">2026</option><option value="2027">2027</option></select>
+              <select value={gridFilters.season} onChange={e=>setGridFilters(f=>({ ...f, season:e.target.value }))} style={{ ...inp(), flex:"1 1 90px", fontSize:11, padding:"6px 8px" }}><option value="">Été + Hiver</option><option value="ete">Été</option><option value="hiver">Hiver</option></select>
+              <select value={gridFilters.nights} onChange={e=>setGridFilters(f=>({ ...f, nights:parseInt(e.target.value) }))} style={{ ...inp(), flex:"1 1 80px", fontSize:11, padding:"6px 8px" }}>{[7,4,3,2].map(n=><option key={n} value={n}>{n} nuits</option>)}</select>
+              <select value={gridFilters.accType} onChange={e=>setGridFilters(f=>({ ...f, accType:e.target.value }))} style={{ ...inp(), flex:"1 1 110px", fontSize:11, padding:"6px 8px" }}><option value="">Toutes typologies</option>{ACCOMMODATION_ORDER.map(a=><option key={a} value={a}>{ACCOMMODATION_SHORT[a]}</option>)}</select>
+              <select value={gridFilters.source} onChange={e=>setGridFilters(f=>({ ...f, source:e.target.value }))} style={{ ...inp(), flex:"1 1 110px", fontSize:11, padding:"6px 8px" }}><option value="">Toutes sources</option><option value="import">Import CSV</option><option value="saisie">Saisie</option></select>
+            </div>
+
+            {gridPeriods.length===0&&<p style={{ fontSize:11, color:C.gray, textAlign:"center", padding:"16px 0", fontStyle:"italic" }}>Aucune période pour ces filtres.</p>}
+
+            {/* Desktop : tableau */}
+            {!isMobile&&gridPeriods.length>0&&(
+              <div style={{ ...card({ padding:0 }), overflow:"auto" }}>
+                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:11 }}>
+                  <thead>
+                    <tr style={{ background:C.grayL }}>
+                      <th style={{ textAlign:"left", padding:"9px 11px", fontSize:9, fontWeight:700, color:C.gray, textTransform:"uppercase", position:"sticky", left:0, background:C.grayL }}>Période</th>
+                      {gridCols.map(a=><th key={a} style={{ textAlign:"center", padding:"9px 8px", fontSize:9, fontWeight:700, color:C.blue, minWidth:90 }}>{ACCOMMODATION_SHORT[a]}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {gridPeriods.map((p,ri)=>(
+                      <tr key={p.id} style={{ borderTop:`0.5px solid ${C.grayL}` }}>
+                        <td style={{ padding:"8px 11px", verticalAlign:"top" }}>
+                          <p style={{ margin:0, fontSize:11, fontWeight:600, color:C.text }}>{periodOptionLabel(p)}</p>
+                          <p style={{ margin:0, fontSize:8, color:C.gray }}>{p.season==="hiver"?"Hiver":"Été"}</p>
+                        </td>
+                        {gridCols.map(a=>{
+                          const r=rateFor(p.id,a);
+                          const night=r?Math.round(Number(r.price_total)/(r.stay_nights||gridNights)):0;
+                          return (
+                            <td key={a} onClick={()=>openTarifCell(p.id,a,gridNights,r||null)} style={{ padding:"8px", textAlign:"center", cursor:"pointer", background:tarifCell&&tarifCell.periodId===p.id&&tarifCell.accType===a?C.bluePale:"transparent" }}>
+                              {r?(<>
+                                <p style={{ margin:0, fontSize:13, fontWeight:700, color:C.blue }}>{fmt(Number(r.price_total))}€</p>
+                                <p style={{ margin:0, fontSize:8, color:C.gray }}>{fmt(night)}€/nuit</p>
+                                {(r.source||r.notes)&&<p style={{ margin:0, fontSize:7, color:C.gray, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:84 }}>{r.notes||r.source}</p>}
+                              </>):(
+                                <span style={{ fontSize:12, color:C.grayM }}>— <span style={{ color:C.blue, fontWeight:700 }}>+</span></span>
+                              )}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Mobile : cartes par période */}
+            {isMobile&&gridPeriods.map(p=>(
+              <div key={p.id} style={card({ marginBottom:8 })}>
+                <p style={{ margin:"0 0 5px", fontSize:12, fontWeight:700, color:C.text }}>{periodOptionLabel(p)}</p>
+                {gridCols.map(a=>{
+                  const r=rateFor(p.id,a);
+                  return (
+                    <div key={a} onClick={()=>openTarifCell(p.id,a,gridNights,r||null)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"6px 0", borderTop:`0.5px solid ${C.grayL}`, cursor:"pointer" }}>
+                      <span style={{ fontSize:11, fontWeight:600, color:C.blue }}>{ACCOMMODATION_SHORT[a]}</span>
+                      {r?<span style={{ fontSize:12, fontWeight:700, color:C.text }}>{fmt(Number(r.price_total))}€ <span style={{ fontSize:8, color:C.gray, fontWeight:400 }}>· {fmt(Math.round(Number(r.price_total)/(r.stay_nights||gridNights)))}€/n</span></span>:<span style={{ fontSize:12, color:C.grayM }}>— <span style={{ color:C.blue, fontWeight:700 }}>+</span></span>}
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+
+            {/* Panneau d'édition de cellule */}
+            {tarifCell&&(()=>{ const per=ALL_PERIODS.find(x=>x.id===tarifCell.periodId); return (
+              <div style={{ ...cd(11), padding:"11px 13px", marginTop:8, border:`1px solid ${C.blue}` }}>
+                <p style={{ margin:"0 0 6px", fontSize:12, fontWeight:700, color:C.blue }}>{tarifCell.existing?"Modifier":"Ajouter"} — {ACCOMMODATION_SHORT[tarifCell.accType]} · {per?periodOptionLabel(per):""}</p>
+                <p style={{ ...sml, margin:"0 0 4px" }}>Prix total séjour € *</p>
+                <input type="number" autoFocus style={{ ...inp(), marginBottom:6 }} placeholder="655" value={tarifCellPrice} onChange={e=>setTarifCellPrice(e.target.value)}/>
+                {tarifCellPrice&&<p style={{ margin:"0 0 6px", fontSize:9, color:C.gray }}>{fmt(Math.round((parseFloat(tarifCellPrice)||0)/(tarifCell.nights||7)))}€/nuit · {tarifCell.nights} nuits</p>}
+                {tarifCell.existing&&<p style={{ margin:"0 0 6px", fontSize:9, color:C.green, fontWeight:600 }}>Tarif existant : {fmt(Number(tarifCell.existing.price_total))}€ — sera mis à jour</p>}
+                <p style={{ ...sml, margin:"0 0 4px" }}>Notes (optionnel)</p>
+                <input style={{ ...inp(), marginBottom:8 }} placeholder="ex : grille été 2026" value={tarifCellNotes} onChange={e=>setTarifCellNotes(e.target.value)}/>
+                {tarifCellMsg==="ok"&&<p style={{ margin:"0 0 6px", fontSize:11, color:C.green, fontWeight:600 }}>✓ Tarif enregistré</p>}
+                {tarifCellMsg==="err"&&<p style={{ margin:"0 0 6px", fontSize:11, color:C.red }}>✗ Erreur d'enregistrement</p>}
+                <div style={{ display:"grid", gridTemplateColumns:tarifCell.existing?"1fr 1fr 1fr":"1fr 1fr", gap:6 }}>
+                  <button onClick={()=>{ setTarifCell(null); setTarifCellMsg(null); }} style={{ ...btn(false,C.grayL,C.text), margin:0 }}>Annuler</button>
+                  {tarifCell.existing&&<button onClick={handleDeleteTarifCell} style={{ ...btn(false,C.redL,C.red), margin:0 }}>Supprimer</button>}
+                  <button onClick={handleSaveTarifCell} disabled={!tarifCellPrice} style={{ ...btn(!tarifCellPrice,C.blue), margin:0 }}>{tarifCell.existing?"Mettre à jour":"Ajouter tarif"}</button>
+                </div>
+              </div>
+            ); })()}
+          </>)}
+
           {dashTarifTab==="saisie"&&(
             <div style={{ ...cd(11), padding:"11px 13px" }}>
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:6 }}>
@@ -3352,30 +3580,32 @@ export default function App() {
                   </select>
                 </div>
                 <div>
-                  <p style={{ ...sml, margin:"0 0 4px" }}>Capacité</p>
-                  <select value={dashOurCap} onChange={e=>setDashOurCap(parseInt(e.target.value))} style={inp()}>{[2,4,6,8].map(n=><option key={n} value={n}>{n}P</option>)}</select>
+                  <p style={{ ...sml, margin:"0 0 4px" }}>Typologie</p>
+                  <select value={gridFilters.accType||"2P6"} onChange={e=>setGridFilters(f=>({ ...f, accType:e.target.value }))} style={inp()}>{ACCOMMODATION_ORDER.map(a=><option key={a} value={a}>{ACCOMMODATION_SHORT[a]}</option>)}</select>
                 </div>
               </div>
               <div style={{ display:"flex", gap:5, marginBottom:6, flexWrap:"wrap" }}>
                 <span style={{ fontSize:9, background:C.grayL, color:C.gray, padding:"3px 7px", borderRadius:6 }}>Durée : {dashNights} nuits</span>
                 <span style={{ fontSize:9, background:C.grayL, color:C.gray, padding:"3px 7px", borderRadius:6 }}>{dashPeriod?.season==="hiver"?"Hiver":"Été"}</span>
-                {ALL_PERIODS.find(p=>p.id===dashOurPeriodId)&&ourRates.find(r=>r.period_id===dashOurPeriodId&&Number(r.capacity)===Number(dashOurCap)&&Number(r.stay_nights||7)===dashNights)&&<span style={{ fontSize:9, background:C.greenL, color:C.green, padding:"3px 7px", borderRadius:6, fontWeight:700 }}>existant · sera mis à jour</span>}
+                <span style={{ fontSize:9, background:C.grayL, color:C.gray, padding:"3px 7px", borderRadius:6 }}>Capacité : {ACCOMMODATION_TYPES[saisieAcc]?.capacity||"?"}P</span>
+                {saisieExisting&&<span style={{ fontSize:9, background:C.greenL, color:C.green, padding:"3px 7px", borderRadius:6, fontWeight:700 }}>existant · sera mis à jour</span>}
               </div>
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:6 }}>
                 <div>
                   <p style={{ ...sml, margin:"0 0 4px" }}>Prix total séjour € *</p>
-                  <input type="number" style={inp()} placeholder="340" value={dashOurPrice} onChange={e=>setDashOurPrice(e.target.value)}/>
+                  <input type="number" style={inp()} placeholder={saisieExisting?String(saisieExisting.price_total):"655"} value={dashOurPrice} onChange={e=>setDashOurPrice(e.target.value)}/>
                 </div>
                 <div>
                   <p style={{ ...sml, margin:"0 0 4px" }}>Prix / nuit (auto)</p>
                   <input type="text" disabled style={{ ...inp(), background:C.grayL, color:C.gray }} value={dashOurPrice?dashPriceNight+"€/nuit":"—"}/>
                 </div>
               </div>
+              {saisieExisting&&<p style={{ margin:"0 0 6px", fontSize:10, color:C.green, fontWeight:600 }}>Tarif existant : {fmt(Number(saisieExisting.price_total))}€ — laissez vide pour conserver, ou saisissez un nouveau prix pour mettre à jour.</p>}
               <p style={{ ...sml, margin:"0 0 4px" }}>Notes (optionnel)</p>
               <input style={{ ...inp(), marginBottom:8 }} placeholder="ex : grille été 2026" value={dashOurNotes} onChange={e=>setDashOurNotes(e.target.value)}/>
               {dashOurSaved==="ok"&&<div style={{ ...cd(8), padding:"7px 10px", background:C.greenL, marginBottom:6 }}><p style={{ margin:0, fontSize:11, fontWeight:600, color:C.green }}>✓ Tarif enregistré</p></div>}
               {dashOurSaved?.startsWith("err")&&<div style={{ ...cd(8), padding:"7px 10px", background:C.redL, marginBottom:6 }}><p style={{ margin:0, fontSize:11, color:C.red }}>✗ {dashOurSaved.slice(4)}</p></div>}
-              <button style={btn(dashOurSaving||!dashOurPrice,C.blue)} onClick={handleDashSaveOurRate} disabled={dashOurSaving||!dashOurPrice}>{dashOurSaving?"Enregistrement…":"Enregistrer tarif Les Cimes"}</button>
+              <button style={btn(dashOurSaving||!dashOurPrice,C.blue)} onClick={handleDashSaveOurRateTyped} disabled={dashOurSaving||!dashOurPrice}>{dashOurSaving?"Enregistrement…":saisieExisting?"Mettre à jour tarif Les Cimes":"Créer tarif Les Cimes"}</button>
             </div>
           )}
           {dashTarifTab==="import"&&(
@@ -3418,7 +3648,8 @@ export default function App() {
                     <div style={{ flex:1, minWidth:0 }}>
                       <p style={{ margin:0, fontSize:12, fontWeight:500, color:C.text }}>{r.period_start?`${fmtDateShort(r.period_start)} → ${fmtDateShort(r.period_end||addDaysStr(r.period_start,r.stay_nights||7))}`:(r.period_label||r.period_id)}</p>
                       <div style={{ display:"flex", gap:4, marginTop:1, flexWrap:"wrap" }}>
-                        <span style={{ fontSize:9, color:C.gray }}>{r.capacity}P · {r.stay_nights||7} nuits{r.accommodation_type?` · ${r.accommodation_type}`:""}</span>
+                        {(()=>{ const t=inferAccommodationType(r); return t?<span style={{ fontSize:8, fontWeight:700, color:C.blue, background:C.bluePale, padding:"1px 5px", borderRadius:3 }}>{ACCOMMODATION_SHORT[t]}{!r.accommodation_type?" (déduit)":""}</span>:<span style={{ fontSize:8, fontWeight:700, color:C.red, background:C.redL, padding:"1px 5px", borderRadius:3 }}>sans typologie</span>; })()}
+                        <span style={{ fontSize:9, color:C.gray }}>{r.capacity}P · {r.stay_nights||7} nuits</span>
                         <span style={{ fontSize:9, color:r.season==="hiver"?"#0EA5E9":C.orange }}>{r.season==="hiver"?"Hiver":"Été"}</span>
                         <span style={{ fontSize:8, background:C.grayL, color:C.gray, padding:"1px 5px", borderRadius:3 }}>{r.source||"saisie"}</span>
                       </div>
