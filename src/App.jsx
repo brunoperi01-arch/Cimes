@@ -933,10 +933,11 @@ async function getCompetitorCatalog() {
 async function saveCompetitorCatalogItem(item) {
   if (!item.name) throw new Error("Nom du concurrent requis.");
   if (isOwnProperty(item.name)) throw new Error("Les Cimes ne peut pas être enregistré comme concurrent.");
-  const isPrivate = item.is_private_rental === true || item.market_segment === "private";
+  const isPrivate = item.is_private_rental === true || item.market_segment === "private" || item.property_type === "particulier" || item.property_type === "studio";
+  const PRIVATE_SUBTYPES = ["particulier","studio"];
   const basePayload = {
     name:                String(item.name).trim(),
-    property_type:       item.property_type || (isPrivate ? "particulier" : "résidence"),
+    property_type:       isPrivate ? (PRIVATE_SUBTYPES.includes(item.property_type) ? item.property_type : "particulier") : (item.property_type || "résidence"),
     platform:            item.platform || "Booking.com",
     booking_url:         item.booking_url ? normalizeBookingBaseUrl(item.booking_url) : null,
     search_location:     item.search_location || "La Foux d'Allos",
@@ -1083,7 +1084,7 @@ const MARKETPLACES   = ["Airbnb","Abritel","Expedia","Booking.com","Booking part
 // Segment d'un concurrent : "private" (particulier) ou "residence" (pro)
 function competitorSegment(c) {
   if (!c) return "residence";
-  if (c.is_private_rental === true || c.market_segment === "private") return "private";
+  if (c.is_private_rental === true || c.market_segment === "private" || c.property_type === "particulier" || c.property_type === "studio") return "private";
   return "residence";
 }
 function isPrivateCompetitor(c) { return competitorSegment(c) === "private"; }
@@ -3842,9 +3843,12 @@ export default function App() {
           <button onClick={()=>openCatForm(addPreset)} style={{ ...btn(false,accent), marginBottom:8 }}>{isPrivate?"+ Ajouter particulier":"+ Ajouter résidence / pro"}</button>
 
           {/* Formulaire ajout/édition (partagé) */}
-          {catForm&&(catForm.market_segment===segment || (segment==="residence"&&catForm.market_segment!=="private"))&&(
-            <div style={{ ...cd(11), padding:"11px 13px" }}>
-              <p style={{ margin:"0 0 6px", fontSize:11, fontWeight:700, color:C.blue }}>{catForm.id?"Modifier le concurrent":isPrivate?"Ajouter un particulier":"Ajouter une résidence / pro"}</p>
+          {catForm&&(competitorSegment(catForm)===segment)&&(
+            <div style={{ ...cd(11), padding:"11px 13px", borderTop:`3px solid ${accent}` }}>
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8, marginBottom:6, flexWrap:"wrap" }}>
+                <p style={{ margin:0, fontSize:12, fontWeight:700, color:accent }}>{catForm.id?(isPrivate?"🏠 Modifier le particulier":"🏢 Modifier la résidence / pro"):(isPrivate?"🏠 Nouveau concurrent particulier":"🏢 Nouveau concurrent résidence / pro")}</p>
+                <Badge label={isPrivate?"Segment : Particulier":"Segment : Résidence / Pro"} color={isPrivate?"#FF5A5F":C.blue} bg={isPrivate?"#FFE9EA":C.bluePale} size={9}/>
+              </div>
               <p style={{ ...sml, margin:"0 0 4px" }}>Nom *</p>
               <input style={{ ...inp(), marginBottom:6 }} placeholder={isPrivate?"Appartement Central Park 6P":"Résidence Les Chalets du Verdon"} value={catForm.name||""} onChange={e=>setCatForm(f=>({ ...f, name:e.target.value }))}/>
               <p style={{ ...sml, margin:"0 0 4px" }}>Sous-type</p>
