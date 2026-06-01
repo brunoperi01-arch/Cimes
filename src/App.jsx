@@ -3389,13 +3389,28 @@ export default function App() {
                         const cellLast = last
                           ? <div><span style={{ fontSize:11, fontWeight:700, color:C.text }}>{fmt(Number(last.price_total||last.price_week))}€</span><span style={{ fontSize:8, color:C.gray, display:"block" }}>{last.reliability_status} · {fmtDateShort(last.period_start)||last.collected_at}{last.edited_at?" · modifié":""}</span></div>
                           : <span style={{ fontSize:9, color:C.gray }}>Aucun prix</span>;
+                        const candidates = Array.isArray(scrape?.price_candidates) ? scrape.price_candidates : [];
                         const cellAuto = scrape
                           ? (<div>
-                              {scrapeUsable
-                                ? <span style={{ fontSize:9, color:C.orange, fontWeight:600 }}>{fmt(scrape.price_total)}€ à vérifier</span>
-                                : scrapeSuspicious
-                                  ? <span style={{ fontSize:8, color:C.gold }}>{fmt(scrape.price_total)}€ ignoré · suspect</span>
-                                  : <span style={{ fontSize:8, color:C.gray }}>{s.source_type==="direct"?"Vérification manuelle nécessaire":"Non détecté"}</span>}
+                              {s.source_type==="direct"
+                                ? <span style={{ fontSize:8, color:C.gray }}>Vérification manuelle</span>
+                                : candidates.length>1
+                                  ? (<div>
+                                      <span style={{ fontSize:8, color:C.orange, fontWeight:600 }}>Plusieurs prix détectés</span>
+                                      <div style={{ display:"flex", gap:3, marginTop:2, flexWrap:"wrap" }}>
+                                        {candidates.map((cd,ci)=>(
+                                          <button key={ci} onClick={()=>setTrackPrices(p=>({ ...p, [key]:String(cd.price_total) }))} style={{ fontSize:8, fontWeight:700, color:C.blue, background:C.bluePale, border:`1px solid ${C.blueL}`, borderRadius:5, padding:"3px 7px", cursor:"pointer" }}>{fmt(cd.price_total)}€</button>
+                                        ))}
+                                      </div>
+                                    </div>)
+                                  : candidates.length===1
+                                    ? (<div>
+                                        <span style={{ fontSize:9, color:C.orange, fontWeight:600 }}>{fmt(candidates[0].price_total)}€ à vérifier</span>
+                                        <button onClick={()=>setTrackPrices(p=>({ ...p, [key]:String(candidates[0].price_total) }))} style={{ display:"block", marginTop:2, fontSize:8, fontWeight:700, color:C.green, background:C.greenL, border:"none", borderRadius:5, padding:"3px 7px", cursor:"pointer" }}>Utiliser</button>
+                                      </div>)
+                                    : scrapeUsable
+                                      ? <span style={{ fontSize:9, color:C.orange, fontWeight:600 }}>{fmt(scrape.price_total)}€ à vérifier</span>
+                                      : <span style={{ fontSize:8, color:C.gray }}>Non détecté</span>}
                               {scrape.debug&&<button onClick={()=>setScrapeDetailsKey(d=>d===key?null:key)} style={{ display:"block", marginTop:2, fontSize:7, fontWeight:600, color:C.blue, background:"none", border:"none", padding:0, cursor:"pointer", textDecoration:"underline" }}>Détails scraping</button>}
                             </div>)
                           : <span style={{ fontSize:9, color:C.grayM }}>—</span>;
@@ -3471,10 +3486,12 @@ export default function App() {
                             {scrapeDetailsKey===key&&scrape?.debug&&(
                               <div style={{ ...cd(8), padding:"8px 10px", margin:"4px 0", background:C.grayL, fontSize:8, color:C.text }}>
                                 <p style={{ margin:"0 0 3px", fontSize:9, fontWeight:700, color:C.blue }}>Diagnostic scraping</p>
+                                <p style={{ margin:"1px 0" }}>Type source : {scrape.debug.source_kind||scrape.debug.detection_method||"—"}</p>
                                 <p style={{ margin:"1px 0", wordBreak:"break-all" }}>URL : {scrape.debug.final_url||scrape.url}</p>
                                 <p style={{ margin:"1px 0" }}>Statut HTTP : {scrape.debug.http_status??"—"} · HTML : {scrape.debug.html_length??0} car.</p>
                                 <p style={{ margin:"1px 0" }}>Méthode : {scrape.debug.detection_method||"—"} · Prix retenu : {scrape.debug.selected_price!=null?fmt(scrape.debug.selected_price)+"€":"—"}</p>
                                 <p style={{ margin:"1px 0" }}>Montants trouvés : {(scrape.debug.prices_found||[]).length?scrape.debug.prices_found.map(p=>fmt(p)+"€").join(", "):"aucun"}</p>
+                                {(scrape.debug.price_candidates||[]).length>0&&<p style={{ margin:"1px 0" }}>Candidats : {scrape.debug.price_candidates.map(p=>fmt(p)+"€").join(", ")}</p>}
                                 {scrape.debug.failure_reason&&<p style={{ margin:"1px 0", color:C.orange }}>Raison : {scrape.debug.failure_reason}</p>}
                                 {scrape.debug.mode&&<p style={{ margin:"1px 0", color:C.gray, fontStyle:"italic" }}>{scrape.debug.mode}</p>}
                                 <button onClick={()=>setScrapeDetailsKey(null)} style={{ marginTop:4, fontSize:8, fontWeight:600, color:C.gray, background:C.white, border:`1px solid ${C.grayM}`, borderRadius:5, padding:"3px 8px", cursor:"pointer" }}>Fermer</button>
