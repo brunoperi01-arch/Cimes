@@ -1733,6 +1733,7 @@ export default function App() {
   const [sourcesOpenFor, setSourcesOpenFor] = useState(null); // competitor_id dont les sources sont dépliées
   const [trackPrices, setTrackPrices]     = useState({});  // saisie prix par clé source
   const [trackSaved, setTrackSaved]       = useState({});
+  const [duplicateRatePrompt, setDuplicateRatePrompt] = useState(null); // {key, existingRate, competitor, source, price}
   const [histAll, setHistAll]             = useState([]);
   const [histLoading, setHistLoading]     = useState(false);
   const [histFilters, setHistFilters]     = useState({ competitor:"", source:"", capacity:0, status:"", segment:"" });
@@ -2176,52 +2177,97 @@ export default function App() {
   }
 
   // Enregistre un prix relevé pour une source précise (validé)
-  async function saveSourceRate(competitor, source, priceTotal, key) {
-    const price = Number(priceTotal)||0;
-    const ctx = getTrackedPeriodContext();
-    if (!price || isOwnProperty(competitor.name)) return;
-    if (!ctx.checkin || !ctx.checkout || !ctx.stayNights || ctx.stayNights<=0) { setTrackedScrapeError("Dates invalides : vérifiez arrivée et départ."); return; }
+  // Trouve un relevé du même jour pour ce concurrent/source/période (doublon potentiel)
+  function findSameDayRate(competitor, source, ctx) {
+    const today = dateObjToISO(new Date());
+    const norm = v => String(v||"").trim().toLowerCase();
+    return (rates||[]).find(r =>
+      !r.is_example &&
+      norm(r.competitor||r.property_name||r.competitor_name)===norm(competitor.name) &&
+      (norm(r.source_label||r.source)===norm(source.source_name) || norm(r.source_channel)===norm(source.source_type)) &&
+      String(r.period_start||"").slice(0,10)===String(ctx.checkin||"").slice(0,10) &&
+      String(r.period_end||"").slice(0,10)===String(ctx.checkout||"").slice(0,10) &&
+      Number(r.stay_nights||7)===Number(ctx.stayNights||7) &&
+      Number(r.capacity)===Number(ctx.capacity) &&
+      String(r.collected_at||"").slice(0,10)===today
+    ) || null;
+  }
+
+  function buildSourceRatePayload(competitor, source, price, ctx) {
     const url = buildSourceUrl(source, competitor, ctx);
     const scrape = findScrapeResultForSource(competitor, source);
     const detected = scrape?.price_total ? Number(scrape.price_total) : null;
+    return {
+      week_id:            ctx.periodId,
+      competitor:         competitor.name,
+      property_name:      competitor.name,
+      property_type:      isPrivateCompetitor(competitor) ? "particulier" : (competitor.property_type || "résidence"),
+      competitor_id:      null,
+      original_detected_price: detected,
+      market_segment:     isPrivateCompetitor(competitor) ? "private" : "residence",
+      is_private_rental:  isPrivateCompetitor(competitor),
+      capacity:           ctx.capacity,
+      accommodation_type: ctx.accommodationType || null,
+      price:              price,
+      price_total:        price,
+      price_week:         price,
+      price_night:        Math.round(price / ctx.stayNights),
+      price_week_equiv:   Math.round((price / ctx.stayNights) * 7),
+      stay_nights:        ctx.stayNights,
+      period_start:       ctx.checkin,
+      period_end:         ctx.checkout,
+      season:             ctx.season,
+      source:             source.source_name,
+      source_channel:     source.source_type,
+      source_label:       source.source_name,
+      source_url:         url,
+      source_search_url:  url,
+      collection_type:    "relevé manuel " + source.source_name,
+      reliability_status: "validé",
+      comparability_score:competitor.comparability_score || 80,
+      collected_at:       dateObjToISO(new Date()),
+      validated_at:       new Date().toISOString(),
+      validation_notes:   "Prix vérifié manuellement depuis " + source.source_name,
+      is_example:         false,
+    };
+  }
+
+  async function saveSourceRate(competitor, source, priceRaw, key, options={}) {
+    const price = Number(String(priceRaw ?? "").replace(",", "."))||0;
+    const ctx = getTrackedPeriodContext();
+    if (isOwnProperty(competitor.name)) return;
+    if (!price || price<=0) { setTrackSaved(p=>({ ...p, [key]:"noprice" })); return; }
+    if (!ctx.checkin || !ctx.checkout || !ctx.stayNights || ctx.stayNights<=0) { setTrackedScrapeError("Dates invalides : vérifiez arrivée et départ."); return; }
+    // Doublon du jour : proposer un choix plutôt que bloquer
+    const sameDay = findSameDayRate(competitor, source, ctx);
+    if (sameDay && !options.forceNew && !options.updateExisting) {
+      setDuplicateRatePrompt({ key, existingRate:sameDay, competitor, source, price });
+      return;
+    }
     try {
-      await saveCompetitorRate({
-        week_id:            ctx.periodId,
-        competitor:         competitor.name,
-        property_name:      competitor.name,
-        property_type:      isPrivateCompetitor(competitor) ? "particulier" : (competitor.property_type || "résidence"),
-        competitor_id:      null,
-        original_detected_price: detected,
-        market_segment:     isPrivateCompetitor(competitor) ? "private" : "residence",
-        is_private_rental:  isPrivateCompetitor(competitor),
-        capacity:           ctx.capacity,
-        price:              price,
-        price_total:        price,
-        price_week:         price,
-        price_night:        Math.round(price / ctx.stayNights),
-        price_week_equiv:   Math.round((price / ctx.stayNights) * 7),
-        stay_nights:        ctx.stayNights,
-        period_start:       ctx.checkin,
-        period_end:         ctx.checkout,
-        season:             ctx.season,
-        source:             source.source_name,
-        source_channel:     source.source_type,
-        source_label:       source.source_name,
-        source_url:         url,
-        source_search_url:  url,
-        collection_type:    "relevé manuel " + source.source_name,
-        reliability_status: "validé",
-        comparability_score:competitor.comparability_score || 80,
-        validated_at:       new Date().toISOString(),
-        validation_notes:   "Prix vérifié manuellement depuis " + source.source_name,
-        is_example:         false,
-      }, competitors);
+      if (sameDay && options.updateExisting) {
+        await correctCompetitorRate(sameDay, price, "Correction du relevé du jour");
+      } else {
+        const payload = buildSourceRatePayload(competitor, source, price, ctx);
+        if (options.forceNew) payload.validation_notes = "Nouveau relevé ajouté malgré un relevé existant le même jour";
+        await saveCompetitorRate(payload, competitors);
+      }
       setTrackSaved(p=>({ ...p, [key]:"ok" }));
       setTrackPrices(p=>({ ...p, [key]:"" }));
-      loadRates();
+      setDuplicateRatePrompt(null);
+      await loadRates();
+      await loadHistAll();
     } catch(e) {
       setTrackSaved(p=>({ ...p, [key]:e.message?.includes("DUPLICATE")?"dup":"err" }));
     }
+  }
+  // Confirmation du choix doublon
+  async function resolveDuplicateRate(action) {
+    if (!duplicateRatePrompt) return;
+    const { competitor, source, key, price } = duplicateRatePrompt;
+    if (action==="cancel") { setDuplicateRatePrompt(null); return; }
+    setTrackPrices(p=>({ ...p, [key]:String(price) }));
+    await saveSourceRate(competitor, source, price, key, action==="update"?{ updateExisting:true }:{ forceNew:true });
   }
 
   // ── Page Suivi prix : historique + export ─────────────────────
@@ -3417,8 +3463,19 @@ export default function App() {
                                 <button onClick={closeRateEdit} style={{ ...btn(false,C.white,C.text), margin:"5px 0 0", fontSize:9, padding:"5px", border:`1px solid ${C.grayM}` }}>Fermer</button>
                               </div>
                             )}
+                            {/* Choix en cas de doublon du jour */}
+                            {duplicateRatePrompt&&duplicateRatePrompt.key===key&&(
+                              <div style={{ ...cd(8), padding:"8px 10px", margin:"4px 0", background:C.goldL, border:`1px solid ${C.gold}` }}>
+                                <p style={{ margin:"0 0 5px", fontSize:9, color:C.text, fontWeight:600 }}>Un relevé existe déjà aujourd'hui : {fmt(Number(duplicateRatePrompt.existingRate.price_total||duplicateRatePrompt.existingRate.price_week||0))}€. Que faire ?</p>
+                                <div style={{ display:"flex", gap:4, flexWrap:"wrap" }}>
+                                  <button onClick={()=>resolveDuplicateRate("update")} style={{ fontSize:9, fontWeight:700, color:C.white, background:C.orange, border:"none", borderRadius:6, padding:"5px 9px", cursor:"pointer" }}>Mettre à jour le relevé du jour</button>
+                                  <button onClick={()=>resolveDuplicateRate("new")} style={{ fontSize:9, fontWeight:700, color:C.white, background:C.green, border:"none", borderRadius:6, padding:"5px 9px", cursor:"pointer" }}>Créer un nouveau relevé</button>
+                                  <button onClick={()=>resolveDuplicateRate("cancel")} style={{ fontSize:9, fontWeight:600, color:C.gray, background:C.white, border:`1px solid ${C.grayM}`, borderRadius:6, padding:"5px 9px", cursor:"pointer" }}>Annuler</button>
+                                </div>
+                              </div>
+                            )}
                             {st==="ok"&&<p style={{ margin:"3px 0 0", fontSize:8, color:C.green, fontWeight:600 }}>✓ Prix {s.source_name} enregistré</p>}
-                            {st==="dup"&&<p style={{ margin:"3px 0 0", fontSize:8, color:C.gold }}>= Relevé déjà existant ce jour</p>}
+                            {st==="noprice"&&<p style={{ margin:"3px 0 0", fontSize:8, color:C.orange, fontWeight:600 }}>Prix manquant : saisissez un prix vérifié.</p>}
                             {st==="err"&&<p style={{ margin:"3px 0 0", fontSize:8, color:C.red }}>✗ Erreur d'enregistrement</p>}
                           </div>
                         );
