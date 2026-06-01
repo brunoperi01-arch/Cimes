@@ -637,6 +637,8 @@ async function saveCompetitorRate(rate, allCompetitors) {
       ...(clean.source_channel && { source_channel: clean.source_channel }),
       ...(clean.source_label && { source_label: clean.source_label }),
       ...(clean.original_detected_price != null && { original_detected_price: clean.original_detected_price }),
+      ...(clean.market_segment && { market_segment: clean.market_segment }),
+      ...(clean.is_private_rental != null && { is_private_rental: clean.is_private_rental }),
     };
 
     try {
@@ -896,13 +898,14 @@ async function getCompetitorCatalog() {
 async function saveCompetitorCatalogItem(item) {
   if (!item.name) throw new Error("Nom du concurrent requis.");
   if (isOwnProperty(item.name)) throw new Error("Les Cimes ne peut pas être enregistré comme concurrent.");
+  const isPrivate = item.is_private_rental === true || item.market_segment === "private";
   const basePayload = {
     name:                String(item.name).trim(),
-    property_type:       item.property_type || "résidence",
+    property_type:       item.property_type || (isPrivate ? "particulier" : "résidence"),
     platform:            item.platform || "Booking.com",
     booking_url:         item.booking_url ? normalizeBookingBaseUrl(item.booking_url) : null,
     search_location:     item.search_location || "La Foux d'Allos",
-    comparability_score: Number(item.comparability_score || 80),
+    comparability_score: Number(item.comparability_score || (isPrivate ? 60 : 80)),
     notes:               item.notes || null,
     is_active:           item.is_active !== false,
   };
@@ -910,6 +913,11 @@ async function saveCompetitorCatalogItem(item) {
     ...basePayload,
     direct_url:          item.direct_url || null,
     preferred_channel:   item.preferred_channel || "booking",
+    market_segment:      isPrivate ? "private" : "residence",
+    is_private_rental:   isPrivate,
+    ...(item.detected_capacity != null && item.detected_capacity !== "" && { detected_capacity: Number(item.detected_capacity) }),
+    ...(item.detected_rooms && { detected_rooms: item.detected_rooms }),
+    ...(item.detected_surface != null && item.detected_surface !== "" && { detected_surface: Number(item.detected_surface) }),
   };
   if (SB_READY) {
     try {
@@ -949,15 +957,28 @@ async function importCatalogCsv(csvText) {
     const vals = line.split(sep).map(v=>v.trim().replace(/^"|"$/g,""));
     const o={}; headers.forEach((h,i)=>o[h]=vals[i]||"");
     if (!o.name || isOwnProperty(o.name)) { skipped++; continue; }
+    const seg = (o.market_segment||"").toLowerCase()==="private" ? "private" : (o.market_segment||"").toLowerCase()==="residence" ? "residence" : null;
+    const isPrivate = seg==="private" || (o.property_type||"").toLowerCase()==="particulier";
     try {
-      await saveCompetitorCatalogItem({
-        name:o.name, property_type:o.property_type||"résidence",
+      const saved = await saveCompetitorCatalogItem({
+        name:o.name,
+        property_type:o.property_type||(isPrivate?"particulier":"résidence"),
+        market_segment: seg || (isPrivate?"private":"residence"),
+        is_private_rental: isPrivate,
         preferred_channel:o.preferred_channel||"booking",
         platform:o.platform||"Booking.com",
-        booking_url:o.booking_url||null, direct_url:o.direct_url||null,
+        booking_url:(o.source_type==="booking"&&o.source_url)?o.source_url:(o.booking_url||null),
+        direct_url:o.direct_url||null,
         search_location:o.search_location||"La Foux d'Allos",
-        comparability_score:parseFloat(o.comparability_score)||80, notes:o.notes||null,
+        comparability_score:parseFloat(o.comparability_score)||(isPrivate?60:80), notes:o.notes||null,
       });
+      // Nouveau format : créer la source associée si source_type/source_url fournis
+      if (o.source_type && o.source_url) {
+        const compId = saved?.id || saved?.[0]?.id;
+        if (compId) {
+          try { await saveCompetitorSource({ competitor_id:compId, source_type:o.source_type, source_name:o.source_name||o.source_type, source_url:o.source_url, notes:o.notes||null, is_active:true }); } catch {}
+        }
+      }
       ok++;
     } catch(e) { errors.push(e.message); }
   }
@@ -1023,7 +1044,14 @@ const SOURCE_FAMILIES = [
   { type:"other",         name:"Autre page internet" },
 ];
 const TOUR_OPERATORS = ["Maeva","La France du Nord au Sud","Travelski","Locasun","Vacancéole","Montagne Vacances","Autre tour opérateur"];
-const MARKETPLACES   = ["Airbnb","Abritel","Expedia","Booking.com","Autre marketplace"];
+const MARKETPLACES   = ["Airbnb","Abritel","Expedia","Booking.com","Booking particulier","PAP vacances","Leboncoin","Autre marketplace"];
+// Segment d'un concurrent : "private" (particulier) ou "residence" (pro)
+function competitorSegment(c) {
+  if (!c) return "residence";
+  if (c.is_private_rental === true || c.market_segment === "private") return "private";
+  return "residence";
+}
+function isPrivateCompetitor(c) { return competitorSegment(c) === "private"; }
 // Conservé pour compat (anciens types maeva/airbnb/…) — utilisé par les boutons rapides
 const SOURCE_TYPES = [
   { type:"booking", name:"Booking.com" },
@@ -1580,6 +1608,7 @@ export default function App() {
   const [catChannel, setCatChannel]       = useState({});
   // ── Relevé concurrents suivis : dates personnalisables ────────
   const [trackedMode, setTrackedMode]       = useState("period"); // period | custom
+  const [trackSegment, setTrackSegment]     = useState("residence"); // residence | private
   const [trackedSeason, setTrackedSeason]   = useState("ete");
   const [trackedStayNights, setTrackedStayNights] = useState(7);
   const [trackedPeriodId, setTrackedPeriodId] = useState("");
@@ -1600,7 +1629,7 @@ export default function App() {
   const [trackSaved, setTrackSaved]       = useState({});
   const [histAll, setHistAll]             = useState([]);
   const [histLoading, setHistLoading]     = useState(false);
-  const [histFilters, setHistFilters]     = useState({ competitor:"", source:"", capacity:0, status:"" });
+  const [histFilters, setHistFilters]     = useState({ competitor:"", source:"", capacity:0, status:"", segment:"" });
   // ── Décisions commerciales ────────────────────────────────────
   const [decisions, setDecisions]         = useState([]);
   const [decForm, setDecForm]             = useState({ action_type:"maintain", our_price_after:"", direct_price:"", decision_status:"à faire", notes:"" });
@@ -1773,6 +1802,9 @@ export default function App() {
       abritel:   { source_type:"marketplace",    source_name:"Abritel" },
       airbnb:    { source_type:"marketplace",    source_name:"Airbnb" },
       expedia:   { source_type:"marketplace",    source_name:"Expedia" },
+      bookingpart:{ source_type:"marketplace",   source_name:"Booking particulier" },
+      pap:       { source_type:"marketplace",    source_name:"PAP vacances" },
+      leboncoin: { source_type:"marketplace",    source_name:"Leboncoin" },
       other:     { source_type:"other",          source_name:"" },
     };
     const p = presets[kind] || presets.other;
@@ -1897,13 +1929,14 @@ export default function App() {
   }
 
   // ── Scraping ciblé des concurrents suivis (prévalidation) ─────
-  async function scrapeTrackedRates() {
+  async function scrapeTrackedRates(segment) {
     const ctx = getTrackedPeriodContext();
     if (!ctx.checkin || !ctx.checkout || !ctx.stayNights || ctx.stayNights<=0) {
       setTrackedScrapeError("Dates invalides : vérifiez arrivée et départ."); return;
     }
-    const list = (catalog||[]).filter(c=>!isOwnProperty(c.name)).slice(0,5);
-    if (!list.length) { setTrackedScrapeError("Aucun concurrent suivi à scraper."); return; }
+    const seg = segment || trackSegment;
+    const list = (catalog||[]).filter(c=>!isOwnProperty(c.name) && competitorSegment(c)===seg).slice(0,5);
+    if (!list.length) { setTrackedScrapeError(`Aucun concurrent ${seg==="private"?"particulier":"pro"} à scraper.`); return; }
     setTrackedScraping(true); setTrackedScrapeError(""); setTrackedScrapeResults([]); setTrackedScrapeSaved({});
     try {
       const res = await fetch("/api/scrape-tracked-rates", {
@@ -2039,9 +2072,11 @@ export default function App() {
         week_id:            ctx.periodId,
         competitor:         competitor.name,
         property_name:      competitor.name,
-        property_type:      competitor.property_type || "résidence",
+        property_type:      isPrivateCompetitor(competitor) ? "particulier" : (competitor.property_type || "résidence"),
         competitor_id:      null,
         original_detected_price: detected,
+        market_segment:     isPrivateCompetitor(competitor) ? "private" : "residence",
+        is_private_rental:  isPrivateCompetitor(competitor),
         capacity:           ctx.capacity,
         price:              price,
         price_total:        price,
@@ -2509,6 +2544,96 @@ export default function App() {
 
   // ══ ÉCRANS ════════════════════════════════════════════════════
   const Dashboard=()=>{
+    // Rendu d'une ligne concurrent (réutilisé pour Pros et Particuliers)
+    const renderCompetitorRow = (c, i, list) => {
+            const compSources = (sources||[]).filter(s=>s.competitor_id===c.id);
+            const open = sourcesOpenFor===c.id;
+            const priv = isPrivateCompetitor(c);
+            return (
+            <div key={c.id} style={{ borderBottom:i===list.length-1?"none":`0.5px solid ${C.grayL}` }}>
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 13px" }}>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:5, flexWrap:"wrap" }}>
+                  <span style={{ fontSize:12, fontWeight:500, color:C.text }}>{c.name}</span>
+                  <Badge label={priv?"Particulier":c.property_type==="hôtel"?"Hôtel":"Pro"} color={priv?"#FF5A5F":c.property_type==="hôtel"?C.purple:C.blue} bg={priv?"#FFE9EA":c.property_type==="hôtel"?C.purpleL:C.bluePale} size={8}/>
+                  {priv&&c.detected_capacity&&<span style={{ fontSize:8, color:C.gray }}>{c.detected_capacity}P{c.detected_rooms?` · ${c.detected_rooms}`:""}</span>}
+                </div>
+                <div style={{ display:"flex", gap:5, marginTop:1, alignItems:"center", flexWrap:"wrap" }}>
+                  <span style={{ fontSize:9, color:C.gray }}>score {c.comparability_score||"?"}/100</span>
+                  {sourcesForCompetitor(c).length===0
+                    ? <span style={{ fontSize:8, color:C.gray, fontStyle:"italic" }}>Aucune source suivie</span>
+                    : sourcesForCompetitor(c).map(s=>(()=>{ const m=sourceBadgeMeta(s.source_type); return <Badge key={s.id} label={s.source_name} color={m.c} bg={m.bg} size={8}/>; })())}
+                </div>
+                {c.notes&&<p style={{ margin:"1px 0 0", fontSize:9, color:C.gray, fontStyle:"italic" }}>{c.notes}</p>}
+              </div>
+              <div style={{ display:"flex", gap:6, alignItems:"center", flexShrink:0 }}>
+                <button onClick={()=>setSourcesOpenFor(open?null:c.id)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:10, color:C.blue, padding:2 }}>{open?"▲ Sources":"▼ Sources"}</button>
+                <button onClick={()=>openCatForm(c)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:13, color:C.blue, padding:2 }}>✎</button>
+                <button onClick={()=>handleDeleteCatalogItem(c.id)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:14, color:C.gray, padding:2 }}>🗑</button>
+              </div>
+              </div>
+              {open&&(
+                <div style={{ padding:"0 13px 10px", background:C.grayL }}>
+                  <p style={{ ...sml, margin:"6px 0 4px" }}>Sources suivies</p>
+                  {compSources.length===0&&<p style={{ margin:"0 0 6px", fontSize:9, color:C.gray, fontStyle:"italic" }}>Aucune source dédiée. Les URLs Booking/Direct du concurrent sont utilisées par défaut.</p>}
+                  {compSources.map(s=>(
+                    <div key={s.id} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:6, padding:"4px 0" }}>
+                      <div style={{ minWidth:0, flex:1 }}>
+                        <span style={{ fontSize:10, fontWeight:600, color:C.text }}>{s.source_name}</span>
+                        <p style={{ margin:0, fontSize:8, color:C.gray, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{s.source_url}</p>
+                      </div>
+                      <button onClick={()=>handleDeleteSource(s.id)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:12, color:C.gray, flexShrink:0 }}>🗑</button>
+                    </div>
+                  ))}
+                  {sourceForm&&sourceForm.competitor_id===c.id ? (
+                    <div style={{ ...cd(9), padding:"8px 10px", marginTop:6 }}>
+                      <p style={{ ...sml, margin:"0 0 3px" }}>Famille de source</p>
+                      <select value={sourceForm.family} onChange={e=>{ const fam=e.target.value; setSourceForm(f=>{ let st=fam, sn=f.source_name; if(fam==="booking"){st="booking";sn="Booking.com";} else if(fam==="direct"){st="direct";sn="Site direct";} else if(fam==="tour_operator"){st="tour_operator";sn=TOUR_OPERATORS[0];} else if(fam==="marketplace"){st="marketplace";sn=MARKETPLACES[0];} else {st="other";sn="";} return { ...f, family:fam, source_type:st, source_name:sn }; }); }} style={{ ...inp(), marginBottom:5 }}>
+                        {SOURCE_FAMILIES.map(t=><option key={t.type} value={t.type}>{t.name}</option>)}
+                      </select>
+                      {sourceForm.family==="tour_operator"&&(<>
+                        <p style={{ ...sml, margin:"0 0 3px" }}>Tour opérateur</p>
+                        <select value={TOUR_OPERATORS.includes(sourceForm.source_name)?sourceForm.source_name:"Autre tour opérateur"} onChange={e=>setSourceForm(f=>({ ...f, source_name:e.target.value==="Autre tour opérateur"?"":e.target.value, _toOther:e.target.value==="Autre tour opérateur" }))} style={{ ...inp(), marginBottom:5 }}>
+                          {TOUR_OPERATORS.map(o=><option key={o} value={o}>{o}</option>)}
+                        </select>
+                        {(sourceForm._toOther||!TOUR_OPERATORS.includes(sourceForm.source_name))&&<input style={{ ...inp(), marginBottom:5 }} placeholder="Nom du tour opérateur" value={sourceForm.source_name||""} onChange={e=>setSourceForm(f=>({ ...f, source_name:e.target.value }))}/>}
+                      </>)}
+                      {sourceForm.family==="marketplace"&&(<>
+                        <p style={{ ...sml, margin:"0 0 3px" }}>Marketplace / OTA</p>
+                        <select value={MARKETPLACES.includes(sourceForm.source_name)?sourceForm.source_name:MARKETPLACES[0]} onChange={e=>setSourceForm(f=>({ ...f, source_name:e.target.value }))} style={{ ...inp(), marginBottom:5 }}>
+                          {MARKETPLACES.map(o=><option key={o} value={o}>{o}</option>)}
+                        </select>
+                      </>)}
+                      {sourceForm.family==="other"&&(
+                        <input style={{ ...inp(), marginBottom:5 }} placeholder="Nom de la source (ex : Vente privée, Office tourisme)" value={sourceForm.source_name||""} onChange={e=>setSourceForm(f=>({ ...f, source_name:e.target.value }))}/>
+                      )}
+                      <input style={{ ...inp(), marginBottom:5 }} placeholder="URL de la fiche" value={sourceForm.source_url} onChange={e=>setSourceForm(f=>({ ...f, source_url:e.target.value }))}/>
+                      <input style={{ ...inp(), marginBottom:5 }} placeholder="Notes (optionnel)" value={sourceForm.notes||""} onChange={e=>setSourceForm(f=>({ ...f, notes:e.target.value }))}/>
+                      {sourceForm.error&&<p style={{ margin:"0 0 5px", fontSize:9, color:C.red }}>✗ {sourceForm.error}</p>}
+                      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:5 }}>
+                        <button onClick={()=>setSourceForm(null)} style={{ ...btn(false,C.grayL,C.text), margin:0 }}>Annuler</button>
+                        <button onClick={handleSaveSource} style={{ ...btn(false,C.blue), margin:0 }}>Enregistrer source</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ display:"flex", gap:4, flexWrap:"wrap", marginTop:4 }}>
+                      {(priv
+                        ? [["marketplace","marketplace","Booking particulier","+ Booking part."],["marketplace","marketplace","Airbnb","+ Airbnb"],["marketplace","marketplace","Abritel","+ Abritel"],["marketplace","marketplace","PAP vacances","+ PAP"],["other","other","","+ Autre"]]
+                        : [["booking","booking","Booking.com","+ Booking"],["direct","direct","Site direct","+ Direct"],["tour_operator","tour_operator",TOUR_OPERATORS[0],"+ TO"],["marketplace","marketplace",MARKETPLACES[0],"+ OTA"],["other","other","","+ Autre"]]
+                      ).map(([fam,st,sn,lbl],bi)=>(
+                        <button key={bi} onClick={()=>setSourceForm({ competitor_id:c.id, family:fam, source_type:st, source_name:sn, source_url:"", notes:"" })} style={{ fontSize:9, fontWeight:600, color:C.blue, background:C.bluePale, border:"none", borderRadius:6, padding:"5px 8px", cursor:"pointer" }}>{lbl}</button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            );
+    };
+    const prosList = (catalog||[]).filter(c=>!isPrivateCompetitor(c));
+    const privList = (catalog||[]).filter(c=>isPrivateCompetitor(c));
+    const proSourcesCount = (sources||[]).filter(s=>{ const c=catalog.find(x=>x.id===s.competitor_id); return c&&!isPrivateCompetitor(c); }).length;
+    const privSourcesCount = (sources||[]).filter(s=>{ const c=catalog.find(x=>x.id===s.competitor_id); return c&&isPrivateCompetitor(c); }).length;
     // Résumé tarifs Les Cimes
     const dashPeriod = ALL_PERIODS.find(p=>p.id===dashOurPeriodId);
     const dashNights = dashPeriod?.stay_nights || 7;
@@ -2715,94 +2840,37 @@ export default function App() {
         {/* ══ CONCURRENTS SUIVIS ════════════════════════════════ */}
         <p style={sml}>🏢 Concurrents suivis</p>
 
+        {/* Résumé segments */}
+        <div style={{ ...responsiveGrid(2), marginBottom:8 }}>
+          <div style={{ ...cd(11,0), padding:"8px 11px", background:C.bluePale }}>
+            <p style={{ margin:0, fontSize:9, color:C.blueL, fontWeight:700 }}>🏢 Résidences / Pros</p>
+            <p style={{ margin:"1px 0 0", fontSize:13, fontWeight:700, color:C.blue }}>{prosList.length} concurrents · {proSourcesCount} sources</p>
+          </div>
+          <div style={{ ...cd(11,0), padding:"8px 11px", background:"#FFE9EA" }}>
+            <p style={{ margin:0, fontSize:9, color:"#C2185B", fontWeight:700 }}>🏠 Particuliers</p>
+            <p style={{ margin:"1px 0 0", fontSize:13, fontWeight:700, color:"#FF5A5F" }}>{privList.length} concurrents · {privSourcesCount} sources</p>
+          </div>
+        </div>
+
         <div style={{ ...cd(11), padding:"9px 12px", background:C.goldL, marginBottom:8 }}>
           <p style={{ margin:0, fontSize:9, color:C.orange, fontWeight:600, lineHeight:1.4 }}>Les prix Claude sont indicatifs. Les prix validés manuellement sont prioritaires.</p>
         </div>
 
-        {/* Liste + ajout */}
+        {/* Bloc A : Résidences / Pros */}
+        <p style={{ ...sml, marginTop:4 }}>🏢 Concurrents suivis — Résidences / Pros</p>
         <div style={cd()}>
-          {catalog.length===0&&<div style={{ padding:"12px 13px" }}><p style={{ margin:0, fontSize:11, color:C.gray, fontStyle:"italic" }}>Aucun concurrent suivi. Ajoutez-en un pour relever ses prix Booking facilement.</p></div>}
-          {catalog.map((c,i)=>{
-            const compSources = (sources||[]).filter(s=>s.competitor_id===c.id);
-            const open = sourcesOpenFor===c.id;
-            return (
-            <div key={c.id} style={{ borderBottom:i===catalog.length-1?"none":`0.5px solid ${C.grayL}` }}>
-              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 13px" }}>
-              <div style={{ flex:1, minWidth:0 }}>
-                <div style={{ display:"flex", alignItems:"center", gap:5, flexWrap:"wrap" }}>
-                  <span style={{ fontSize:12, fontWeight:500, color:C.text }}>{c.name}</span>
-                  <Badge label={c.property_type} color={c.property_type==="hôtel"?C.purple:c.property_type==="particulier"?"#FF5A5F":C.blue} bg={c.property_type==="hôtel"?C.purpleL:c.property_type==="particulier"?"#FFE9EA":C.bluePale} size={8}/>
-                </div>
-                <div style={{ display:"flex", gap:5, marginTop:1, alignItems:"center", flexWrap:"wrap" }}>
-                  <span style={{ fontSize:9, color:C.gray }}>score {c.comparability_score||"?"}/100</span>
-                  {sourcesForCompetitor(c).length===0
-                    ? <span style={{ fontSize:8, color:C.gray, fontStyle:"italic" }}>Aucune source suivie</span>
-                    : sourcesForCompetitor(c).map(s=>(()=>{ const m=sourceBadgeMeta(s.source_type); return <Badge key={s.id} label={s.source_name} color={m.c} bg={m.bg} size={8}/>; })())}
-                </div>
-                {c.notes&&<p style={{ margin:"1px 0 0", fontSize:9, color:C.gray, fontStyle:"italic" }}>{c.notes}</p>}
-              </div>
-              <div style={{ display:"flex", gap:6, alignItems:"center", flexShrink:0 }}>
-                <button onClick={()=>setSourcesOpenFor(open?null:c.id)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:10, color:C.blue, padding:2 }}>{open?"▲ Sources":"▼ Sources"}</button>
-                <button onClick={()=>openCatForm(c)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:13, color:C.blue, padding:2 }}>✎</button>
-                <button onClick={()=>handleDeleteCatalogItem(c.id)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:14, color:C.gray, padding:2 }}>🗑</button>
-              </div>
-              </div>
-              {open&&(
-                <div style={{ padding:"0 13px 10px", background:C.grayL }}>
-                  <p style={{ ...sml, margin:"6px 0 4px" }}>Sources suivies</p>
-                  {compSources.length===0&&<p style={{ margin:"0 0 6px", fontSize:9, color:C.gray, fontStyle:"italic" }}>Aucune source dédiée. Les URLs Booking/Direct du concurrent sont utilisées par défaut.</p>}
-                  {compSources.map(s=>(
-                    <div key={s.id} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:6, padding:"4px 0" }}>
-                      <div style={{ minWidth:0, flex:1 }}>
-                        <span style={{ fontSize:10, fontWeight:600, color:C.text }}>{s.source_name}</span>
-                        <p style={{ margin:0, fontSize:8, color:C.gray, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{s.source_url}</p>
-                      </div>
-                      <button onClick={()=>handleDeleteSource(s.id)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:12, color:C.gray, flexShrink:0 }}>🗑</button>
-                    </div>
-                  ))}
-                  {sourceForm&&sourceForm.competitor_id===c.id ? (
-                    <div style={{ ...cd(9), padding:"8px 10px", marginTop:6 }}>
-                      <p style={{ ...sml, margin:"0 0 3px" }}>Famille de source</p>
-                      <select value={sourceForm.family} onChange={e=>{ const fam=e.target.value; setSourceForm(f=>{ let st=fam, sn=f.source_name; if(fam==="booking"){st="booking";sn="Booking.com";} else if(fam==="direct"){st="direct";sn="Site direct";} else if(fam==="tour_operator"){st="tour_operator";sn=TOUR_OPERATORS[0];} else if(fam==="marketplace"){st="marketplace";sn=MARKETPLACES[0];} else {st="other";sn="";} return { ...f, family:fam, source_type:st, source_name:sn }; }); }} style={{ ...inp(), marginBottom:5 }}>
-                        {SOURCE_FAMILIES.map(t=><option key={t.type} value={t.type}>{t.name}</option>)}
-                      </select>
-                      {sourceForm.family==="tour_operator"&&(<>
-                        <p style={{ ...sml, margin:"0 0 3px" }}>Tour opérateur</p>
-                        <select value={TOUR_OPERATORS.includes(sourceForm.source_name)?sourceForm.source_name:"Autre tour opérateur"} onChange={e=>setSourceForm(f=>({ ...f, source_name:e.target.value==="Autre tour opérateur"?"":e.target.value, _toOther:e.target.value==="Autre tour opérateur" }))} style={{ ...inp(), marginBottom:5 }}>
-                          {TOUR_OPERATORS.map(o=><option key={o} value={o}>{o}</option>)}
-                        </select>
-                        {(sourceForm._toOther||!TOUR_OPERATORS.includes(sourceForm.source_name))&&<input style={{ ...inp(), marginBottom:5 }} placeholder="Nom du tour opérateur" value={sourceForm.source_name||""} onChange={e=>setSourceForm(f=>({ ...f, source_name:e.target.value }))}/>}
-                      </>)}
-                      {sourceForm.family==="marketplace"&&(<>
-                        <p style={{ ...sml, margin:"0 0 3px" }}>Marketplace / OTA</p>
-                        <select value={MARKETPLACES.includes(sourceForm.source_name)?sourceForm.source_name:MARKETPLACES[0]} onChange={e=>setSourceForm(f=>({ ...f, source_name:e.target.value }))} style={{ ...inp(), marginBottom:5 }}>
-                          {MARKETPLACES.map(o=><option key={o} value={o}>{o}</option>)}
-                        </select>
-                      </>)}
-                      {sourceForm.family==="other"&&(
-                        <input style={{ ...inp(), marginBottom:5 }} placeholder="Nom de la source (ex : Vente privée, Office tourisme)" value={sourceForm.source_name||""} onChange={e=>setSourceForm(f=>({ ...f, source_name:e.target.value }))}/>
-                      )}
-                      <input style={{ ...inp(), marginBottom:5 }} placeholder="URL de la fiche" value={sourceForm.source_url} onChange={e=>setSourceForm(f=>({ ...f, source_url:e.target.value }))}/>
-                      <input style={{ ...inp(), marginBottom:5 }} placeholder="Notes (optionnel)" value={sourceForm.notes||""} onChange={e=>setSourceForm(f=>({ ...f, notes:e.target.value }))}/>
-                      {sourceForm.error&&<p style={{ margin:"0 0 5px", fontSize:9, color:C.red }}>✗ {sourceForm.error}</p>}
-                      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:5 }}>
-                        <button onClick={()=>setSourceForm(null)} style={{ ...btn(false,C.grayL,C.text), margin:0 }}>Annuler</button>
-                        <button onClick={handleSaveSource} style={{ ...btn(false,C.blue), margin:0 }}>Enregistrer source</button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div style={{ display:"flex", gap:4, flexWrap:"wrap", marginTop:4 }}>
-                      {[["booking","booking","Booking.com","+ Booking"],["direct","direct","Site direct","+ Direct"],["tour_operator","tour_operator",TOUR_OPERATORS[0],"+ TO"],["marketplace","marketplace",MARKETPLACES[0],"+ OTA"],["other","other","","+ Autre"]].map(([fam,st,sn,lbl])=>(
-                        <button key={fam} onClick={()=>setSourceForm({ competitor_id:c.id, family:fam, source_type:st, source_name:sn, source_url:"", notes:"" })} style={{ fontSize:9, fontWeight:600, color:C.blue, background:C.bluePale, border:"none", borderRadius:6, padding:"5px 8px", cursor:"pointer" }}>{lbl}</button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-            );
-          })}
+          {prosList.length===0&&<div style={{ padding:"12px 13px" }}><p style={{ margin:0, fontSize:11, color:C.gray, fontStyle:"italic" }}>Aucune résidence / pro suivie.</p></div>}
+          {prosList.map((c,i)=>renderCompetitorRow(c,i,prosList))}
         </div>
+        <button onClick={()=>openCatForm({ market_segment:"residence", is_private_rental:false, property_type:"résidence", search_location:"La Foux d'Allos" })} style={{ ...btn(false,C.blue), marginBottom:10 }}>+ Ajouter résidence / pro</button>
+
+        {/* Bloc B : Particuliers */}
+        <p style={sml}>🏠 Concurrents suivis — Particuliers</p>
+        <div style={cd()}>
+          {privList.length===0&&<div style={{ padding:"12px 13px" }}><p style={{ margin:0, fontSize:11, color:C.gray, fontStyle:"italic" }}>Aucun particulier suivi. Ajoutez les annonces Booking / Airbnb / Abritel concurrentes.</p></div>}
+          {privList.map((c,i)=>renderCompetitorRow(c,i,privList))}
+        </div>
+        <button onClick={()=>openCatForm({ market_segment:"private", is_private_rental:true, property_type:"particulier", search_location:"La Foux d'Allos" })} style={{ ...btn(false,"#FF5A5F"), marginBottom:4 }}>+ Ajouter particulier</button>
 
         {/* Formulaire ajout/édition */}
         {catForm ? (
@@ -2811,15 +2879,31 @@ export default function App() {
             <p style={{ ...sml, margin:"0 0 4px" }}>Nom *</p>
             <input style={{ ...inp(), marginBottom:6 }} placeholder="Résidence Les Chalets du Verdon" value={catForm.name||""} onChange={e=>setCatForm(f=>({ ...f, name:e.target.value }))}/>
             <div style={{ marginBottom:6 }}>
-              <p style={{ ...sml, margin:"0 0 4px" }}>Type</p>
-              <select value={catForm.property_type||"résidence"} onChange={e=>setCatForm(f=>({ ...f, property_type:e.target.value }))} style={inp()}>{["résidence","hôtel","particulier"].map(t=><option key={t} value={t}>{t}</option>)}</select>
+              <p style={{ ...sml, margin:"0 0 4px" }}>Type de concurrent</p>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:5, marginBottom:6 }}>
+                {[["residence","🏢 Résidence / pro"],["private","🏠 Particulier"]].map(([seg,l])=>{
+                  const active = (catForm.market_segment||"residence")===seg;
+                  return <button key={seg} onClick={()=>setCatForm(f=>({ ...f, market_segment:seg, is_private_rental:seg==="private", property_type:seg==="private"?"particulier":(f.property_type==="particulier"?"résidence":f.property_type||"résidence") }))} style={{ padding:"7px 4px", fontSize:10, fontWeight:active?700:400, background:active?(seg==="private"?C.purple:C.blue):C.grayL, color:active?C.white:C.text, border:"none", borderRadius:8, cursor:"pointer" }}>{l}</button>;
+                })}
+              </div>
+              <p style={{ ...sml, margin:"0 0 4px" }}>Sous-type</p>
+              <select value={catForm.property_type||"résidence"} onChange={e=>setCatForm(f=>({ ...f, property_type:e.target.value }))} style={inp()}>{((catForm.market_segment||"residence")==="private"?["particulier","studio"]:["résidence","hôtel"]).map(t=><option key={t} value={t}>{t}</option>)}</select>
             </div>
+            {(catForm.market_segment||"residence")==="private"&&(
+              <div style={{ ...formGrid, marginBottom:6 }}>
+                <div><p style={{ ...sml, margin:"0 0 4px" }}>Capacité détectée</p><input type="number" style={inp()} placeholder="6" value={catForm.detected_capacity||""} onChange={e=>setCatForm(f=>({ ...f, detected_capacity:e.target.value }))}/></div>
+                <div><p style={{ ...sml, margin:"0 0 4px" }}>Pièces / surface</p><input style={inp()} placeholder="3P / 45m²" value={catForm.detected_rooms||""} onChange={e=>setCatForm(f=>({ ...f, detected_rooms:e.target.value }))}/></div>
+              </div>
+            )}
 
             {/* Sources du concurrent */}
             <div style={{ ...cd(9), padding:"9px 11px", marginBottom:8, background:C.grayL }}>
               <p style={{ margin:"0 0 5px", fontSize:11, fontWeight:700, color:C.blue }}>Sources du concurrent</p>
               <div style={{ display:"flex", gap:4, flexWrap:"wrap", marginBottom:competitorFormSources.length?8:0 }}>
-                {[["booking","+ Booking"],["direct","+ Site direct"],["maeva","+ Maeva"],["lafrance","+ La France du Nord au Sud"],["travelski","+ Travelski"],["locasun","+ Locasun"],["abritel","+ Abritel"],["airbnb","+ Airbnb"],["expedia","+ Expedia"],["other","+ Autre"]].map(([k,l])=>(
+                {((catForm.market_segment||"residence")==="private"
+                  ? [["bookingpart","+ Booking particulier"],["airbnb","+ Airbnb"],["abritel","+ Abritel"],["pap","+ PAP vacances"],["leboncoin","+ Leboncoin"],["other","+ Autre"]]
+                  : [["booking","+ Booking"],["direct","+ Site direct"],["maeva","+ Maeva"],["lafrance","+ La France du Nord au Sud"],["travelski","+ Travelski"],["locasun","+ Locasun"],["abritel","+ Abritel"],["airbnb","+ Airbnb"],["expedia","+ Expedia"],["other","+ Autre"]]
+                ).map(([k,l])=>(
                   <button key={k} onClick={()=>addCompetitorFormSource(k)} style={{ fontSize:9, fontWeight:600, color:C.blue, background:C.bluePale, border:"none", borderRadius:6, padding:"5px 8px", cursor:"pointer" }}>{l}</button>
                 ))}
               </div>
@@ -2862,9 +2946,7 @@ export default function App() {
               <button onClick={handleSaveCatalogItem} disabled={catSaving||!catForm.name?.trim()} style={{ ...btn(catSaving||!catForm.name?.trim(),C.blue), margin:0 }}>{catSaving?"…":"Enregistrer"}</button>
             </div>
           </div>
-        ) : (
-          <button onClick={()=>openCatForm(null)} style={{ ...btn(false,C.blue), marginBottom:8 }}>+ Ajouter concurrent</button>
-        )}
+        ) : null}
 
         {/* Import CSV concurrents suivis */}
         <div style={{ ...cd(11), padding:"11px 13px" }}>
@@ -3022,17 +3104,26 @@ export default function App() {
                 )}
               </div>
 
+              {/* Sélecteur de segment marché */}
+              <div style={{ display:"flex", gap:5, marginBottom:6 }}>
+                {[["residence","🏢 Résidences / Pros"],["private","🏠 Particuliers"]].map(([seg,l])=>(
+                  <button key={seg} onClick={()=>setTrackSegment(seg)} style={{ flex:1, padding:"7px 4px", fontSize:10, fontWeight:trackSegment===seg?700:400, background:trackSegment===seg?(seg==="private"?"#FF5A5F":C.blue):C.grayL, color:trackSegment===seg?C.white:C.text, border:"none", borderRadius:8, cursor:"pointer" }}>{l}</button>
+                ))}
+              </div>
+
               {/* Scraping ciblé automatique (préremplit les lignes ci-dessous) */}
-              <button onClick={scrapeTrackedRates} disabled={trackedScraping||datesInvalid} style={{ ...btn(trackedScraping||datesInvalid,C.purple), marginBottom:4 }}>{trackedScraping?"⏳ Scraping en cours…":"🤖 Scraper les concurrents suivis"}</button>
+              <button onClick={()=>scrapeTrackedRates(trackSegment)} disabled={trackedScraping||datesInvalid} style={{ ...btn(trackedScraping||datesInvalid,trackSegment==="private"?"#FF5A5F":C.purple), marginBottom:4 }}>{trackedScraping?"⏳ Scraping en cours…":trackSegment==="private"?"🏠 Scraper les particuliers suivis":"🏢 Scraper les résidences suivies"}</button>
               <p style={{ margin:"0 0 8px", fontSize:8, color:C.gray, fontStyle:"italic", textAlign:"center" }}>Le scraping automatique sert à préremplir. Vérifiez toujours le prix avant validation.</p>
               {trackedScrapeError&&<div style={{ ...cd(9), padding:"8px 11px", background:C.goldL, marginBottom:8 }}><p style={{ margin:0, fontSize:10, color:C.orange }}>{trackedScrapeError}</p></div>}
               {trackedScrapeResults.length>0&&(()=>{ const n=trackedScrapeResults.filter(r=>r.price_total&&r.confidence!=="low"&&!r.warning&&r.channel!=="direct"&&!isSuspiciousDetectedPrice(r.price_total,ctx,{source_type:r.channel})).length; return <div style={{ ...cd(9), padding:"8px 11px", background:C.bluePale, marginBottom:8 }}><p style={{ margin:0, fontSize:10, color:C.blue, fontWeight:600 }}>{n} prix détecté(s) automatiquement. Vérifiez avant validation.</p></div>; })()}
 
               <div style={cd()}>
-                {catalog.map((c,i)=>{
+                {(()=>{ const segList=(catalog||[]).filter(c=>competitorSegment(c)===trackSegment); return segList.length===0
+                  ? <div style={{ padding:"12px 13px" }}><p style={{ margin:0, fontSize:10, color:C.gray, fontStyle:"italic" }}>Aucun concurrent {trackSegment==="private"?"particulier":"pro"} suivi.</p></div>
+                  : segList.map((c,i)=>{
                   const compSources = sourcesForCompetitor(c);
                   return (
-                    <div key={c.id} style={{ padding:"9px 12px", borderBottom:i<catalog.length-1?`0.5px solid ${C.grayL}`:"none" }}>
+                    <div key={c.id} style={{ padding:"9px 12px", borderBottom:i<segList.length-1?`0.5px solid ${C.grayL}`:"none" }}>
                       <div style={{ flex:1, minWidth:0 }}>
                         <span style={{ fontSize:12, fontWeight:600, color:C.text }}>{c.name}</span>
                         <div style={{ display:"flex", gap:4, marginTop:2, alignItems:"center", flexWrap:"wrap" }}>
@@ -3132,7 +3223,7 @@ export default function App() {
                       })}
                     </div>
                   );
-                })}
+                }); })()}
               </div>
             </>
           );
@@ -3961,6 +4052,10 @@ export default function App() {
       if(histFilters.source && r.source!==histFilters.source) return false;
       if(histFilters.capacity && Number(r.capacity)!==histFilters.capacity) return false;
       if(histFilters.status && (r.reliability_status||"à vérifier")!==histFilters.status) return false;
+      if(histFilters.segment){
+        const seg = (r.market_segment==="private"||r.is_private_rental===true) ? "private" : (String(r.property_type||"").toLowerCase().includes("hôtel")||String(r.property_type||"").toLowerCase().includes("hotel")) ? "hotel" : "residence";
+        if(seg!==histFilters.segment) return false;
+      }
       return true;
     });
     // Évolution vs relevé précédent (même concurrent/source/capacité/durée)
@@ -3995,6 +4090,7 @@ export default function App() {
             <select value={histFilters.source} onChange={e=>setHistFilters(f=>({ ...f, source:e.target.value }))} style={{ ...inp(), flex:"1 1 45%", fontSize:11, padding:"5px 7px" }}><option value="">Toutes sources</option>{fltSources.map(n=><option key={n} value={n}>{n}</option>)}</select>
             <select value={histFilters.capacity} onChange={e=>setHistFilters(f=>({ ...f, capacity:parseInt(e.target.value)||0 }))} style={{ ...inp(), flex:"1 1 45%", fontSize:11, padding:"5px 7px" }}><option value="0">Toutes cap.</option>{[2,4,6,8].map(n=><option key={n} value={n}>{n}P</option>)}</select>
             <select value={histFilters.status} onChange={e=>setHistFilters(f=>({ ...f, status:e.target.value }))} style={{ ...inp(), flex:"1 1 45%", fontSize:11, padding:"5px 7px" }}><option value="">Tous statuts</option>{["validé","à vérifier","rejeté"].map(n=><option key={n} value={n}>{n}</option>)}</select>
+            <select value={histFilters.segment} onChange={e=>setHistFilters(f=>({ ...f, segment:e.target.value }))} style={{ ...inp(), flex:"1 1 45%", fontSize:11, padding:"5px 7px" }}><option value="">Tous segments</option><option value="residence">Résidences / Pros</option><option value="private">Particuliers</option><option value="hotel">Hôtels / secondaires</option></select>
           </div>
 
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
@@ -4014,10 +4110,12 @@ export default function App() {
                   <div style={{ flex:1, minWidth:0 }}>
                     <span style={{ fontSize:11, fontWeight:600, color:C.text }}>{r.competitor||r.property_name}</span>
                     <div style={{ display:"flex", gap:4, marginTop:1, alignItems:"center", flexWrap:"wrap" }}>
+                      {(()=>{ const priv=r.market_segment==="private"||r.is_private_rental===true; const hotel=String(r.property_type||"").toLowerCase().includes("hôtel")||String(r.property_type||"").toLowerCase().includes("hotel"); return <Badge label={priv?"Particulier":hotel?"Hôtel":"Pro"} color={priv?"#FF5A5F":hotel?C.purple:C.blue} bg={priv?"#FFE9EA":hotel?C.purpleL:C.bluePale} size={8}/>; })()}
                       <Badge label={r.source_label||r.source||"?"} color={C.blue} bg={C.bluePale} size={8}/>
                       {r.source_channel&&<span style={{ fontSize:8, color:C.gray }}>({r.source_channel})</span>}
                       <span style={{ fontSize:8, color:C.gray }}>{r.collected_at} · {r.capacity}P · {nights}n</span>
                       <ReliaBadge status={r.reliability_status||"à vérifier"}/>
+                      {r.edited_at&&<span style={{ fontSize:8, color:C.gold, fontWeight:600 }}>modifié</span>}
                     </div>
                     <p style={{ margin:"1px 0 0", fontSize:8, color:C.gray }}>{r.period_start} → {r.period_end}</p>
                     {(r.source_url||r.source_search_url)&&<a href={r.source_url||r.source_search_url} target="_blank" rel="noreferrer" style={{ fontSize:8, color:C.blue, textDecoration:"none" }}>↗ source</a>}
@@ -4062,15 +4160,30 @@ export default function App() {
       if (ch==="airbnb"||ch==="abritel"||ch==="expedia") return "marketplace";
       return "other";
     };
-    // Marché vérifié : capacité = celle de la typologie
+    // Marché vérifié PRO (résidences) : sert à la médiane principale — exclut les particuliers
     const verified = (histAll||[]).filter(r=>
       !r.is_example &&
       TRUSTED_STATUSES.includes(r.reliability_status || "à vérifier") &&
       r.week_id===ctx.periodId &&
       Number(r.capacity)===Number(acc.capacity) &&
       Number(r.stay_nights||7)===Number(ctx.stayNights) &&
+      r.market_segment!=="private" && r.is_private_rental!==true &&
       (!r.source_channel || benchSourceFilter[famOf(r.source_channel)] !== false)
     );
+    // Marché PARTICULIERS : pression prix uniquement (ne pilote pas la médiane principale)
+    const privateRates = (histAll||[]).filter(r=>
+      !r.is_example &&
+      TRUSTED_STATUSES.includes(r.reliability_status || "à vérifier") &&
+      r.week_id===ctx.periodId &&
+      Number(r.capacity)===Number(acc.capacity) &&
+      Number(r.stay_nights||7)===Number(ctx.stayNights) &&
+      (r.market_segment==="private" || r.is_private_rental===true)
+    );
+    const privPrices = privateRates.map(r=>Number(r.price_total||r.price_week||r.price||0)).filter(Boolean);
+    const privMedian = median(privPrices);
+    const privMin = privPrices.length ? Math.min(...privPrices) : null;
+    const privGapPct = (benchOurPrice && privMedian) ? Math.round(((benchOurPrice - privMedian) / privMedian) * 100) : null;
+    const privPressure = privGapPct==null ? "indéterminée" : privGapPct>30 ? "forte" : privGapPct>=15 ? "moyenne" : "faible";
     const dec = calcBenchmarkDecision({ ourPrice:benchOurPrice, marketRates:verified, stayNights:ctx.stayNights });
     const priceOf = r => Number(r.price_total||r.price_week||r.price||0);
     const usedSources = Array.from(new Set(verified.map(r=>r.source).filter(Boolean)));
@@ -4191,7 +4304,34 @@ export default function App() {
             </div>
           </div>
 
-          {/* D. Tableau benchmark */}
+          {/* Marché pro vs particuliers */}
+          <div style={responsiveGrid(2)}>
+            <div style={{ ...cd(11,0), padding:"9px 11px", background:C.bluePale }}>
+              <p style={{ margin:"0 0 2px", fontSize:8, color:C.blueL, fontWeight:700, textTransform:"uppercase" }}>🏢 Marché pro (médiane principale)</p>
+              <p style={{ margin:0, fontSize:10, color:C.blue }}>{dec.validatedCount} relevés{dec.marketMedian?` · médiane ${fmt(dec.marketMedian)}€`:""}</p>
+              {dec.marketMedian&&<p style={{ margin:0, fontSize:9, color:C.blueL }}>min {fmt(dec.marketMin)}€ · max {fmt(dec.marketMax)}€</p>}
+            </div>
+            <div style={{ ...cd(11,0), padding:"9px 11px", background:"#FFE9EA" }}>
+              <p style={{ margin:"0 0 2px", fontSize:8, color:"#C2185B", fontWeight:700, textTransform:"uppercase" }}>🏠 Marché particuliers (pression)</p>
+              <p style={{ margin:0, fontSize:10, color:"#FF5A5F" }}>{privateRates.length} relevés{privMedian?` · médiane ${fmt(privMedian)}€`:""}</p>
+              {privMedian&&<p style={{ margin:0, fontSize:9, color:"#C2185B" }}>min {fmt(privMin)}€</p>}
+            </div>
+          </div>
+
+          {/* Bloc pression particuliers */}
+          {privateRates.length>0&&(
+            <div style={{ ...cd(11), padding:"10px 12px", borderLeft:`3px solid ${privPressure==="forte"?C.red:privPressure==="moyenne"?C.orange:C.green}` }}>
+              <p style={{ margin:"0 0 4px", fontSize:11, fontWeight:700, color:C.text }}>⚠ Pression des particuliers : <span style={{ color:privPressure==="forte"?C.red:privPressure==="moyenne"?C.orange:C.green }}>{privPressure}</span></p>
+              <div style={{ display:"flex", gap:12, flexWrap:"wrap", marginBottom:5 }}>
+                <span style={{ fontSize:9, color:C.gray }}>Annonces suivies : <strong>{(catalog||[]).filter(isPrivateCompetitor).length}</strong></span>
+                <span style={{ fontSize:9, color:C.gray }}>Prix validés : <strong>{privPrices.length}</strong></span>
+                {privMin&&<span style={{ fontSize:9, color:C.gray }}>Mini particulier : <strong>{fmt(privMin)}€</strong></span>}
+                {privMedian&&<span style={{ fontSize:9, color:C.gray }}>Médiane : <strong>{fmt(privMedian)}€</strong></span>}
+                {privGapPct!=null&&<span style={{ fontSize:9, color:C.gray }}>Écart Les Cimes : <strong style={{ color:privGapPct>0?C.red:C.green }}>{privGapPct>0?"+":""}{privGapPct}%</strong></span>}
+              </div>
+              <p style={{ margin:0, fontSize:8, color:C.gray, fontStyle:"italic" }}>Les particuliers servent d'alerte prix, mais ne doivent pas piloter seuls la grille tarifaire.</p>
+            </div>
+          )}
           <p style={sml}>Concurrents validés</p>
           {verified.length===0?(
             <div style={{ ...cd(11), padding:"12px", textAlign:"center", border:`2px dashed ${C.grayM}` }}>
@@ -4325,7 +4465,7 @@ export default function App() {
       if (ch==="airbnb"||ch==="abritel"||ch==="expedia") return "marketplace";
       return "other";
     };
-    // Marché validé : correspondance par DATES (cohérent avec le relevé), durée, capacité, sources
+    // Marché validé PRO : correspondance par DATES, durée, capacité, sources (exclut particuliers)
     const verified = (histAll||[]).filter(r=>
       !r.is_example &&
       TRUSTED_STATUSES.includes(r.reliability_status||"à vérifier") &&
@@ -4333,11 +4473,26 @@ export default function App() {
       String(r.period_end||"")===String(checkout||"") &&
       Number(r.stay_nights||7)===stayNights &&
       Number(r.capacity)===capacity &&
+      r.market_segment!=="private" && r.is_private_rental!==true &&
       (!r.source_channel || promoSourceFilter[famOf(r.source_channel)] !== false)
     );
+    // Marché particuliers : pression prix
+    const privRates = (histAll||[]).filter(r=>
+      !r.is_example &&
+      TRUSTED_STATUSES.includes(r.reliability_status||"à vérifier") &&
+      String(r.period_start||"")===String(checkin||"") &&
+      String(r.period_end||"")===String(checkout||"") &&
+      Number(r.stay_nights||7)===stayNights &&
+      Number(r.capacity)===capacity &&
+      (r.market_segment==="private" || r.is_private_rental===true)
+    );
+    const privPrices = privRates.map(r=>Number(r.price_total||r.price_week||r.price||0)).filter(Boolean);
+    const privMed = median(privPrices);
     // Tarif Les Cimes
     const ourRate = getOurRateForContext(ourRates, { periodId, checkin, checkout, stayNights, capacity }, promoAccType);
     const ourPrice = ourRate ? Number(ourRate.price_total||ourRate.price_week||ourRate.price||0) : 0;
+    const privGap = (ourPrice && privMed) ? Math.round(((ourPrice - privMed) / privMed) * 100) : null;
+    const privPressure = privGap==null ? null : privGap>30 ? "forte" : privGap>=15 ? "moyenne" : "faible";
     // Règle promo applicable
     const rule = (promoRules||[]).find(r=>r.is_active!==false && (!r.accommodation_type||r.accommodation_type===promoAccType) && (!r.stay_nights||Number(r.stay_nights)===stayNights) && (!r.season||r.season===promoSeason)) || null;
     const opp = calcPromoOpportunity({ ourPrice, marketRates:verified, stayNights, accommodationType:promoAccType, capacity, promoRule:rule, daysToArrival });
@@ -4410,6 +4565,14 @@ export default function App() {
               ))}
             </div>
           </div>
+
+          {/* Alerte pression particuliers */}
+          {privPressure==="forte"&&(
+            <div style={{ ...cd(11), padding:"10px 12px", borderLeft:`3px solid ${C.red}`, background:"#FFE9EA" }}>
+              <p style={{ margin:"0 0 3px", fontSize:11, fontWeight:700, color:C.red }}>⚠ Pression particuliers forte ({privGap>0?"+":""}{privGap}% vs médiane particuliers)</p>
+              <p style={{ margin:0, fontSize:9, color:"#C2185B" }}>Les particuliers sont agressifs sur cette période. Réponse conseillée : créer une offre directe courte durée (2-3 nuits) ou dernière minute plutôt que baisser toute la grille semaine. Mettez en avant les services inclus (piscine, sauna, résidence, accueil, wifi).</p>
+            </div>
+          )}
 
           {/* Proposition */}
           {opp.needData ? (
