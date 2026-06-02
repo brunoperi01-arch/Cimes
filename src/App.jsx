@@ -857,6 +857,108 @@ function getOurRateForContext(ourRates, ctx, accommodationType) {
   return null;
 }
 
+const OUR_PROMOTIONS_LS = "lescimes_our_promotions";
+const PROMO_CHANNELS = { direct:"Direct", booking:"Booking", tour_operator:"Tour-opérateur", marketplace:"Marketplace", other:"Autre" };
+const PROMO_TYPES = { promo_directe:"Promo directe", derniere_minute:"Dernière minute", court_sejour:"Court séjour", early_booking:"Early booking", other:"Autre" };
+
+async function getOurPromotions() {
+  if (SB_READY) {
+    try { return await sb.select("our_promotions", "order=updated_at.desc&select=*"); }
+    catch { return ls.get(OUR_PROMOTIONS_LS); }
+  }
+  return ls.get(OUR_PROMOTIONS_LS);
+}
+// Promo active correspondant au contexte (dates + durée + capacité + typologie), statut "active"
+function getActivePromoForContext(promotions, ctx, accommodationType) {
+  if (!promotions?.length || !ctx) return null;
+  const capacity = Number(ctx.capacity);
+  const stayNights = Number(ctx.stayNights || ctx.stay_nights || 7);
+  const start = ctx.checkin || ctx.period_start || ctx.week_start;
+  const end = ctx.checkout || ctx.period_end;
+  const accType = String(accommodationType || "");
+  const today = dateObjToISO(new Date());
+  const active = promotions.filter(p => {
+    if (p.status !== "active") return false;
+    if (p.date_start && String(p.date_start).slice(0,10) > today) return false; // pas encore commencée
+    if (p.date_end && String(p.date_end).slice(0,10) < today) return false;     // expirée
+    return true;
+  });
+  // 1. dates + durée + capacité + typologie
+  if (accType) {
+    const m = active.find(p =>
+      String(p.period_start||"")===String(start||"") && String(p.period_end||"")===String(end||"") &&
+      Number(p.capacity)===capacity && Number(p.stay_nights||7)===stayNights &&
+      String(p.accommodation_type||"")===accType
+    );
+    if (m) return m;
+  }
+  // 2. dates + durée + capacité (sans typologie)
+  const byDates = active.find(p =>
+    String(p.period_start||"")===String(start||"") && String(p.period_end||"")===String(end||"") &&
+    Number(p.capacity)===capacity && Number(p.stay_nights||7)===stayNights
+  );
+  if (byDates) return byDates;
+  // 3. period_id + capacité + durée
+  const byPeriod = active.find(p =>
+    String(p.period_id||"")===String(ctx.periodId||ctx.period_id||"") &&
+    Number(p.capacity)===capacity && Number(p.stay_nights||7)===stayNights
+  );
+  return byPeriod || null;
+}
+async function saveOurPromotion(promo) {
+  const pricePromo = Number(promo.price_promo || 0);
+  const pricePublic = Number(promo.price_public || 0);
+  if (!pricePromo) throw new Error("Prix promo manquant.");
+  if (!promo.period_id || !promo.capacity) throw new Error("Période et capacité requises.");
+  const stayNights = Number(promo.stay_nights || 7);
+  const discountPct = pricePublic > 0 ? Math.round((1 - pricePromo / pricePublic) * 100) : 0;
+  const payload = {
+    period_id:          promo.period_id,
+    period_label:       promo.period_label || null,
+    period_start:       promo.period_start || null,
+    period_end:         promo.period_end || null,
+    season:             promo.season || "ete",
+    stay_nights:        stayNights,
+    capacity:           Number(promo.capacity),
+    accommodation_type: promo.accommodation_type || null,
+    price_public:       pricePublic || null,
+    price_promo:        pricePromo,
+    price_promo_night:  Math.round(pricePromo / stayNights),
+    discount_pct:       discountPct,
+    channel:            promo.channel || "direct",
+    promo_type:         promo.promo_type || "promo_directe",
+    date_start:         promo.date_start || null,
+    date_end:           promo.date_end || null,
+    notes:              promo.notes || null,
+    status:             promo.status || "active",
+    updated_at:         new Date().toISOString(),
+  };
+  if (SB_READY) {
+    try {
+      if (promo.id) { await sb.update("our_promotions", promo.id, payload); return { ...payload, id: promo.id }; }
+      const ins = await sb.insert("our_promotions", payload); return Array.isArray(ins) ? ins[0] : ins;
+    } catch (e) {
+      // Fallback localStorage si table absente
+      const all = ls.get(OUR_PROMOTIONS_LS);
+      if (promo.id) { const i = all.findIndex(x=>x.id===promo.id); if (i>=0) all[i] = { ...all[i], ...payload }; }
+      else all.unshift({ ...payload, id: "local_"+Date.now() });
+      ls.set(OUR_PROMOTIONS_LS, all);
+      return payload;
+    }
+  }
+  const all = ls.get(OUR_PROMOTIONS_LS);
+  if (promo.id) { const i = all.findIndex(x=>x.id===promo.id); if (i>=0) all[i] = { ...all[i], ...payload }; }
+  else all.unshift({ ...payload, id: "local_"+Date.now() });
+  ls.set(OUR_PROMOTIONS_LS, all);
+  return payload;
+}
+async function deleteOurPromotion(id) {
+  if (SB_READY) { try { await sb.update("our_promotions", id, { status: "expiree" }); return; } catch {} }
+  const all = ls.get(OUR_PROMOTIONS_LS);
+  const i = all.findIndex(x=>x.id===id);
+  if (i>=0) { all[i].status = "expiree"; ls.set(OUR_PROMOTIONS_LS, all); }
+}
+
 async function saveOurRate(rate) {
   const stayNights = Number(rate.stay_nights || 7);
   const priceTotal = Number(rate.price_total || 0);
@@ -1784,6 +1886,7 @@ export default function App() {
 
   // ── Tarifs Les Cimes (our_rates) ──────────────────────────────
   const [ourRates, setOurRates]           = useState([]);
+  const [ourPromotions, setOurPromotions] = useState([]);
   // ── Concurrents suivis (competitor_catalog) ───────────────────
   const [catalog, setCatalog]             = useState([]);
   const [catForm, setCatForm]             = useState(null); // null = fermé ; objet = formulaire ouvert
@@ -1830,6 +1933,9 @@ export default function App() {
   const [decMsg, setDecMsg]               = useState(null);
   const [benchSourceFilter, setBenchSourceFilter] = useState({ booking:true, direct:true, tour_operator:true, marketplace:false, other:false });
   const [benchAccType, setBenchAccType]   = useState("2P6");
+  const [benchPriceMode, setBenchPriceMode] = useState("public"); // public | promo
+  const [promoForm, setPromoForm]         = useState(null); // null=fermé ; objet=formulaire
+  const [promoSaved, setPromoSaved]       = useState(null);
   const [benchOccupancy, setBenchOccupancy] = useState(6);
   // ── Promotions & courts séjours ───────────────────────────────
   const [promoOpps, setPromoOpps]         = useState([]);
@@ -1987,10 +2093,57 @@ export default function App() {
   useEffect(()=>{ if(user) loadRates(); },[loadRates,user]);
   useEffect(()=>{ if(user) getImports().then(setImports).catch(()=>{}); },[user]);
   useEffect(()=>{ if(user) getOurRates().then(setOurRates).catch(()=>{}); },[user]);
+  useEffect(()=>{ if(user) getOurPromotions().then(setOurPromotions).catch(()=>{}); },[user]);
   useEffect(()=>{ if(user) getCompetitorCatalog().then(setCatalog).catch(()=>{}); },[user]);
   useEffect(()=>{ if(user) getCompetitorSources().then(setSources).catch(()=>{}); },[user]);
 
   async function reloadOurRates() { try { const d=await getOurRates(); setOurRates(d||[]); } catch {} }
+  async function reloadOurPromotions() { try { const d=await getOurPromotions(); setOurPromotions(d||[]); } catch {} }
+  // Ouvre le formulaire promo (édition si promo fournie, sinon création préremplie depuis le contexte)
+  function openPromoForm(existing, opts={}) {
+    const period = ALL_PERIODS.find(p=>p.id===(existing?.period_id||opts.periodId));
+    const accType = existing?.accommodation_type || opts.accType || "2P6";
+    const acc = ACCOMMODATION_TYPES[accType];
+    const nights = period?.stay_nights || existing?.stay_nights || 7;
+    const periodStart = existing?.period_start || period?.period_start || period?.week_start || (opts.ctx&&opts.ctx.checkin) || "";
+    const periodEnd = existing?.period_end || period?.period_end || (periodStart?addDaysStr(periodStart, nights):"") || (opts.ctx&&opts.ctx.checkout) || "";
+    const pricePublic = existing?.price_public ?? opts.pricePublic ?? "";
+    setPromoForm({
+      id: existing?.id || null,
+      period_id: existing?.period_id || opts.periodId || "",
+      period_label: period?.label || null,
+      period_start: periodStart,
+      period_end: periodEnd,
+      season: period?.season || existing?.season || "ete",
+      stay_nights: nights,
+      capacity: existing?.capacity || acc?.capacity || (opts.ctx&&opts.ctx.capacity) || 6,
+      accommodation_type: accType,
+      price_public: pricePublic===""?"":String(pricePublic),
+      price_promo: existing?.price_promo?String(existing.price_promo):"",
+      channel: existing?.channel || "direct",
+      promo_type: existing?.promo_type || "promo_directe",
+      date_start: existing?.date_start ? String(existing.date_start).slice(0,10) : "",
+      date_end: existing?.date_end ? String(existing.date_end).slice(0,10) : "",
+      notes: existing?.notes || "",
+      status: existing?.status || "active",
+    });
+    setPromoSaved(null);
+    setScreen("promotions");
+  }
+  async function handleSavePromo() {
+    if (!promoForm) return;
+    const pricePromo = parseFloat(promoForm.price_promo)||0;
+    if (!pricePromo || !promoForm.period_id) { setPromoSaved("err"); return; }
+    try {
+      await saveOurPromotion({ ...promoForm, price_public: parseFloat(promoForm.price_public)||0, price_promo: pricePromo });
+      await reloadOurPromotions();
+      setPromoSaved("ok");
+      setTimeout(()=>{ setPromoForm(null); setPromoSaved(null); }, 900);
+    } catch(e) { setPromoSaved("err"); }
+  }
+  async function handleDeletePromo(id) {
+    try { await deleteOurPromotion(id); await reloadOurPromotions(); } catch(e) { console.error(e); }
+  }
 
   // ── Concurrents suivis : chargement + handlers ────────────────
   async function reloadCatalog() { try { const d=await getCompetitorCatalog(); setCatalog(d||[]); } catch {} }
@@ -3775,6 +3928,7 @@ export default function App() {
                               {r?(<>
                                 <p style={{ margin:0, fontSize:15, fontWeight:700, color:C.blue }}>{fmt(Number(r.price_total))}€</p>
                                 <p style={{ margin:0, fontSize:11, color:C.gray }}>{fmt(night)}€/nuit</p>
+                                {(()=>{ const promo=getActivePromoForContext(ourPromotions, { checkin:r.period_start, checkout:r.period_end, capacity:r.capacity, stayNights:r.stay_nights||gridNights, periodId:p.id }, a); return promo&&promo.price_promo?<p style={{ margin:"1px 0 0", fontSize:9, fontWeight:700, color:C.green, background:C.greenL, borderRadius:3, padding:"1px 4px", display:"inline-block" }}>Promo active : {fmt(promo.price_promo)}€</p>:null; })()}
                                 {(r.source||r.notes)&&<p style={{ margin:0, fontSize:10, color:C.gray, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:90 }}>{r.notes||r.source}</p>}
                               </>):(
                                 <span style={{ fontSize:14, color:C.grayM }}>— <span style={{ color:C.blue, fontWeight:700 }}>+</span></span>
@@ -5072,12 +5226,18 @@ export default function App() {
     // La capacité de travail est imposée par la typologie choisie
     const ctx = { ...baseCtx, capacity: acc.capacity };
     const datesInvalid = !ctx.checkin || !ctx.checkout || !ctx.stayNights || ctx.stayNights<=0;
-    // Tarif Les Cimes pour cette typologie (dates + durée + capacité + typologie)
+    // Tarif PUBLIC Les Cimes pour cette typologie (dates + durée + capacité + typologie)
     const benchOurRate = getOurRateForContext(ourRates, ctx, benchAccType);
     const benchFallback = OUR_TARIFS[`${acc.capacity}p`]?.[selWeek?.season_type] || 0;
-    const benchOurPrice = benchOurRate
+    const benchPublicPrice = benchOurRate
       ? Number(benchOurRate.price_total || benchOurRate.price_week || benchOurRate.price || 0)
       : benchFallback;
+    // Promo active éventuelle (n'écrase JAMAIS le tarif public)
+    const benchActivePromo = getActivePromoForContext(ourPromotions, ctx, benchAccType);
+    const benchPromoPrice = benchActivePromo ? Number(benchActivePromo.price_promo || 0) : 0;
+    // Prix retenu pour l'analyse selon le choix (public par défaut)
+    const usePromo = benchPriceMode==="promo" && benchPromoPrice>0;
+    const benchOurPrice = usePromo ? benchPromoPrice : benchPublicPrice;
     const benchOurNight = benchOurPrice ? Math.round(benchOurPrice / ctx.stayNights) : 0;
     const benchOurSource = benchOurRate
       ? (benchOurRate.match_type==="dates+typologie" ? "Supabase · correspondance dates+typologie"
@@ -5219,12 +5379,33 @@ export default function App() {
             <div style={{ ...cd(11,0), padding:"10px 12px", background:C.bluePale }}>
               <p style={{ margin:"0 0 1px", fontSize:11, color:C.blueL, fontWeight:700, textTransform:"uppercase" }}>Nos tarifs Les Cimes</p>
               <p style={{ margin:"0 0 2px", fontSize:12, color:C.blueL }}>Typologie : <strong>{acc.label}</strong> · Capacité : <strong>{acc.capacity}P</strong></p>
-              {benchOurPrice>0?(<>
-                <p style={{ margin:0, fontSize:18, fontWeight:700, color:C.blue }}>{fmt(benchOurPrice)}€<span style={{ fontSize:10 }}>/séjour</span></p>
-                <p style={{ margin:0, fontSize:10, color:C.blueL }}>{fmt(benchOurNight)}€/nuit · {benchOurSource}</p>
-                {(()=>{ const ppn=pricePerPersonNight(benchOurPrice, ctx.stayNights, benchOccupancy); return ppn?<p style={{ margin:"1px 0 0", fontSize:10, color:C.blueL, fontWeight:600 }}>{fmt(ppn)}€/pers/nuit ({benchOccupancy}P)</p>:null; })()}
+              {/* Tarif PUBLIC (officiel, jamais écrasé) */}
+              {benchPublicPrice>0?(<>
+                <p style={{ margin:0, fontSize:10, color:C.blueL, fontWeight:600, textTransform:"uppercase" }}>Tarif public</p>
+                <p style={{ margin:0, fontSize:18, fontWeight:700, color:C.blue }}>{fmt(benchPublicPrice)}€<span style={{ fontSize:10 }}>/séjour</span></p>
+                <p style={{ margin:0, fontSize:10, color:C.blueL }}>{fmt(Math.round(benchPublicPrice/ctx.stayNights))}€/nuit · {benchOurSource}</p>
               </>):(<p style={{ margin:0, fontSize:13, color:C.gray, fontStyle:"italic" }}>Tarif {acc.label} à définir</p>)}
-              <button onClick={()=>{ setScreen("dashboard"); setDashTarifTab("saisie"); setDashOurPeriodId(selWeekId); setDashOurCap(acc.capacity); }} style={{ ...btn(false,C.white,C.blue), margin:"7px 0 0", border:`1px solid ${C.blueL}`, padding:"6px" }}>Modifier tarif</button>
+              {/* Promo active éventuelle */}
+              {benchActivePromo&&benchPromoPrice>0&&(
+                <div style={{ marginTop:6, padding:"6px 8px", background:C.greenL, borderRadius:8 }}>
+                  <p style={{ margin:0, fontSize:10, color:C.green, fontWeight:700, textTransform:"uppercase" }}>Promo active</p>
+                  <p style={{ margin:0, fontSize:16, fontWeight:700, color:C.green }}>{fmt(benchPromoPrice)}€ <span style={{ fontSize:11, fontWeight:600 }}>(-{benchActivePromo.discount_pct||0}%)</span></p>
+                  <p style={{ margin:0, fontSize:10, color:C.green }}>{PROMO_TYPES[benchActivePromo.promo_type]||benchActivePromo.promo_type} · {PROMO_CHANNELS[benchActivePromo.channel]||benchActivePromo.channel}</p>
+                </div>
+              )}
+              {/* Choix du prix utilisé pour l'analyse */}
+              {benchPublicPrice>0&&benchActivePromo&&benchPromoPrice>0&&(
+                <div style={{ display:"flex", gap:4, marginTop:6 }}>
+                  {[["public",`Tarif public (${fmt(benchPublicPrice)}€)`],["promo",`Promo active (${fmt(benchPromoPrice)}€)`]].map(([v,l])=>(
+                    <button key={v} onClick={()=>setBenchPriceMode(v)} style={{ flex:1, fontSize:10, fontWeight:benchPriceMode===v?700:500, color:benchPriceMode===v?C.white:C.blue, background:benchPriceMode===v?C.blue:C.white, border:`1px solid ${C.blueL}`, borderRadius:6, padding:"5px", cursor:"pointer" }}>{l}</button>
+                  ))}
+                </div>
+              )}
+              {usePromo&&<p style={{ margin:"4px 0 0", fontSize:9, color:C.green, fontStyle:"italic" }}>Analyse basée sur le prix promo.</p>}
+              <div style={{ display:"flex", gap:4, marginTop:7 }}>
+                <button onClick={()=>{ setScreen("dashboard"); setDashTarifTab("saisie"); setDashOurPeriodId(selWeekId); setDashOurCap(acc.capacity); }} style={{ ...btn(false,C.white,C.blue), margin:0, border:`1px solid ${C.blueL}`, padding:"6px", fontSize:11 }}>Modifier tarif public</button>
+                <button onClick={()=>openPromoForm(benchActivePromo, { periodId:selWeekId, accType:benchAccType, ctx, pricePublic:benchPublicPrice })} style={{ ...btn(false,C.green), margin:0, padding:"6px", fontSize:11 }}>{benchActivePromo?"Modifier promo":"Créer une promo"}</button>
+              </div>
             </div>
             <div style={{ ...cd(11,0), padding:"10px 12px", background:dec.validatedCount>=3?C.greenL:C.goldL }}>
               <p style={{ margin:"0 0 1px", fontSize:11, color:dec.validatedCount>=3?C.green:C.gold, fontWeight:700, textTransform:"uppercase" }}>Marché vérifié ({dec.validatedCount})</p>
@@ -5471,6 +5652,122 @@ export default function App() {
             <p style={{ margin:0, fontSize:12, fontWeight:700, color:C.purple }}>🎯 Promotions & courts séjours</p>
             <p style={{ margin:"2px 0 0", fontSize:10, color:C.purple }}>Analyse des offres marché par durée et propositions promo (nuitée, week-end, mid-week, dernière minute).</p>
           </div>
+
+          {/* ── Promotions commerciales Les Cimes (séparées des tarifs publics) ── */}
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:4 }}>
+            <p style={sml}>Promotions commerciales</p>
+            <button onClick={()=>openPromoForm(null, {})} style={{ fontSize:11, fontWeight:700, color:C.white, background:C.green, border:"none", borderRadius:7, padding:"6px 11px", cursor:"pointer" }}>+ Créer une promo</button>
+          </div>
+          <p style={{ margin:"0 0 6px", fontSize:10, color:C.gray, fontStyle:"italic" }}>Une promo ne remplace jamais le tarif public (our_rates). Elle est stockée séparément dans our_promotions.</p>
+
+          {/* Formulaire promo */}
+          {promoForm&&(()=>{ const pub=parseFloat(promoForm.price_public)||0; const pp=parseFloat(promoForm.price_promo)||0; const disc=pub>0&&pp>0?Math.round((1-pp/pub)*100):0; const per=ALL_PERIODS.find(x=>x.id===promoForm.period_id); return (
+            <div style={{ ...cd(11), padding:"11px 13px", border:`1px solid ${C.green}`, marginBottom:8 }}>
+              <p style={{ margin:"0 0 6px", fontSize:12, fontWeight:700, color:C.green }}>{promoForm.id?"Modifier la promo":"Nouvelle promo"}</p>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:6 }}>
+                <div>
+                  <p style={{ ...sml, margin:"0 0 4px" }}>Période</p>
+                  <select value={promoForm.period_id} onChange={e=>{ const p=ALL_PERIODS.find(x=>x.id===e.target.value); setPromoForm(f=>({ ...f, period_id:e.target.value, period_label:p?.label||null, period_start:p?(p.period_start||p.week_start):"", period_end:p?(p.period_end||addDaysStr(p.period_start||p.week_start,p.stay_nights||7)):"", season:p?.season||f.season, stay_nights:p?.stay_nights||f.stay_nights })); }} style={inp()}>
+                    <option value="">Choisir…</option>
+                    <optgroup label="Été 7 nuits">{ALL_PERIODS.filter(p=>p.season==="ete"&&(p.stay_nights||7)===7).map(p=><option key={p.id} value={p.id}>{periodOptionLabel(p)}</option>)}</optgroup>
+                    <optgroup label="Hiver 7 nuits">{ALL_PERIODS.filter(p=>p.season==="hiver"&&(p.stay_nights||7)===7).map(p=><option key={p.id} value={p.id}>{periodOptionLabel(p)}</option>)}</optgroup>
+                  </select>
+                </div>
+                <div>
+                  <p style={{ ...sml, margin:"0 0 4px" }}>Typologie</p>
+                  <select value={promoForm.accommodation_type} onChange={e=>{ const a=ACCOMMODATION_TYPES[e.target.value]; setPromoForm(f=>({ ...f, accommodation_type:e.target.value, capacity:a?.capacity||f.capacity })); }} style={inp()}>{ACCOMMODATION_ORDER.map(a=><option key={a} value={a}>{ACCOMMODATION_SHORT[a]}</option>)}</select>
+                </div>
+              </div>
+              <div style={{ display:"flex", gap:5, marginBottom:6, flexWrap:"wrap" }}>
+                <span style={{ fontSize:10, background:C.grayL, color:C.gray, padding:"3px 7px", borderRadius:6 }}>Capacité : {promoForm.capacity}P</span>
+                <span style={{ fontSize:10, background:C.grayL, color:C.gray, padding:"3px 7px", borderRadius:6 }}>Durée : {promoForm.stay_nights} nuits</span>
+                {per&&<span style={{ fontSize:10, background:C.grayL, color:C.gray, padding:"3px 7px", borderRadius:6 }}>{periodOptionLabel(per)}</span>}
+              </div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:6, marginBottom:6 }}>
+                <div>
+                  <p style={{ ...sml, margin:"0 0 4px" }}>Tarif public €</p>
+                  <input type="number" style={{ ...inp(), background:C.grayL }} value={promoForm.price_public} onChange={e=>setPromoForm(f=>({ ...f, price_public:e.target.value }))} placeholder="655"/>
+                </div>
+                <div>
+                  <p style={{ ...sml, margin:"0 0 4px" }}>Prix promo € *</p>
+                  <input type="number" style={inp()} value={promoForm.price_promo} onChange={e=>setPromoForm(f=>({ ...f, price_promo:e.target.value }))} placeholder="499"/>
+                </div>
+                <div>
+                  <p style={{ ...sml, margin:"0 0 4px" }}>Remise</p>
+                  <input type="text" disabled style={{ ...inp(), background:C.grayL, color:disc>0?C.green:C.gray, fontWeight:700 }} value={disc>0?`-${disc}%`:"—"}/>
+                </div>
+              </div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:6 }}>
+                <div>
+                  <p style={{ ...sml, margin:"0 0 4px" }}>Canal</p>
+                  <select value={promoForm.channel} onChange={e=>setPromoForm(f=>({ ...f, channel:e.target.value }))} style={inp()}>{Object.entries(PROMO_CHANNELS).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select>
+                </div>
+                <div>
+                  <p style={{ ...sml, margin:"0 0 4px" }}>Type</p>
+                  <select value={promoForm.promo_type} onChange={e=>setPromoForm(f=>({ ...f, promo_type:e.target.value }))} style={inp()}>{Object.entries(PROMO_TYPES).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select>
+                </div>
+              </div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:6 }}>
+                <div>
+                  <p style={{ ...sml, margin:"0 0 4px" }}>Date début</p>
+                  <input type="date" style={inp()} value={promoForm.date_start} onChange={e=>setPromoForm(f=>({ ...f, date_start:e.target.value }))}/>
+                </div>
+                <div>
+                  <p style={{ ...sml, margin:"0 0 4px" }}>Date fin</p>
+                  <input type="date" style={inp()} value={promoForm.date_end} onChange={e=>setPromoForm(f=>({ ...f, date_end:e.target.value }))}/>
+                </div>
+              </div>
+              <p style={{ ...sml, margin:"0 0 4px" }}>Statut</p>
+              <div style={{ display:"flex", gap:4, marginBottom:6 }}>
+                {[["active","Active"],["brouillon","Brouillon"],["expiree","Expirée"]].map(([v,l])=>(
+                  <button key={v} onClick={()=>setPromoForm(f=>({ ...f, status:v }))} style={{ flex:1, fontSize:10, fontWeight:promoForm.status===v?700:500, color:promoForm.status===v?C.white:C.gray, background:promoForm.status===v?C.purple:C.white, border:`1px solid ${C.grayM}`, borderRadius:6, padding:"5px", cursor:"pointer" }}>{l}</button>
+                ))}
+              </div>
+              <p style={{ ...sml, margin:"0 0 4px" }}>Notes</p>
+              <input style={{ ...inp(), marginBottom:8 }} value={promoForm.notes} onChange={e=>setPromoForm(f=>({ ...f, notes:e.target.value }))} placeholder="ex : offre directe -10%"/>
+              {promoSaved==="ok"&&<p style={{ margin:"0 0 6px", fontSize:11, color:C.green, fontWeight:600 }}>✓ Promo enregistrée</p>}
+              {promoSaved==="err"&&<p style={{ margin:"0 0 6px", fontSize:11, color:C.red }}>✗ Prix promo et période requis</p>}
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
+                <button onClick={()=>{ setPromoForm(null); setPromoSaved(null); }} style={{ ...btn(false,C.white,C.text), margin:0, border:`1px solid ${C.grayM}` }}>Annuler</button>
+                <button onClick={handleSavePromo} disabled={!promoForm.price_promo||!promoForm.period_id} style={{ ...btn(!promoForm.price_promo||!promoForm.period_id,C.green), margin:0 }}>{promoForm.id?"Mettre à jour":"Créer la promo"}</button>
+              </div>
+            </div>
+          ); })()}
+
+          {/* Liste des promos */}
+          {ourPromotions.length===0
+            ? <p style={{ margin:"0 0 8px", fontSize:11, color:C.gray, fontStyle:"italic", textAlign:"center", padding:"8px 0" }}>Aucune promo enregistrée.</p>
+            : (
+              <div style={{ ...card({ padding:0 }), overflow:"auto", marginBottom:10 }}>
+                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+                  <thead><tr style={{ background:C.grayL }}>
+                    {["Période","Typo.","Public","Promo","Remise","Canal","Statut","Actions"].map(h=><th key={h} style={{ textAlign:"left", padding:"7px 8px", fontSize:10, fontWeight:700, color:C.gray, textTransform:"uppercase", whiteSpace:"nowrap" }}>{h}</th>)}
+                  </tr></thead>
+                  <tbody>
+                    {ourPromotions.map((p,i)=>{
+                      const stColor = p.status==="active"?C.green:p.status==="brouillon"?C.orange:C.gray;
+                      const stBg = p.status==="active"?C.greenL:p.status==="brouillon"?C.orangeL:C.grayL;
+                      const stLabel = p.status==="active"?"Active":p.status==="brouillon"?"Brouillon":"Expirée";
+                      return (
+                        <tr key={p.id||i} style={{ borderTop:`0.5px solid ${C.grayL}` }}>
+                          <td style={{ padding:"7px 8px", whiteSpace:"nowrap", fontWeight:600, color:C.text }}>{(p.period_start&&p.period_end)?`${fmtDateShort(p.period_start)} → ${fmtDateShort(p.period_end)}`:p.period_label||"—"}</td>
+                          <td style={{ padding:"7px 8px", color:C.gray }}>{ACCOMMODATION_SHORT[p.accommodation_type]||p.accommodation_type||`${p.capacity}P`}</td>
+                          <td style={{ padding:"7px 8px", color:C.gray }}>{p.price_public?`${fmt(p.price_public)}€`:"—"}</td>
+                          <td style={{ padding:"7px 8px", fontWeight:700, color:C.green }}>{fmt(p.price_promo)}€</td>
+                          <td style={{ padding:"7px 8px", fontWeight:700, color:p.discount_pct>0?C.green:C.gray }}>{p.discount_pct>0?`-${p.discount_pct}%`:"—"}</td>
+                          <td style={{ padding:"7px 8px", color:C.gray }}>{PROMO_CHANNELS[p.channel]||p.channel}</td>
+                          <td style={{ padding:"7px 8px" }}><Badge label={stLabel} color={stColor} bg={stBg} size={10}/></td>
+                          <td style={{ padding:"7px 8px", whiteSpace:"nowrap" }}>
+                            <button onClick={()=>openPromoForm(p,{})} style={{ fontSize:11, fontWeight:600, color:C.blue, background:"none", border:"none", cursor:"pointer", padding:0, marginRight:8 }}>Modifier</button>
+                            {p.status!=="expiree"&&<button onClick={()=>handleDeletePromo(p.id)} style={{ fontSize:11, fontWeight:600, color:C.red, background:"none", border:"none", cursor:"pointer", padding:0 }}>Désactiver</button>}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
 
           {/* Sélecteurs */}
           <div style={{ ...cd(11), padding:"10px 12px" }}>
