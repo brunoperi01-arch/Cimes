@@ -2278,7 +2278,7 @@ export default function App() {
     catch { setHistAll([]); }
     setHistLoading(false);
   }
-  useEffect(()=>{ if(user && (screen==="track"||screen==="benchmark")) loadHistAll(); /* eslint-disable-next-line */ },[user,screen]);
+  useEffect(()=>{ if(user && (screen==="track"||screen==="benchmark"||screen==="dashboard")) loadHistAll(); /* eslint-disable-next-line */ },[user,screen]);
   useEffect(()=>{ if(user) getCommercialDecisions().then(setDecisions).catch(()=>{}); },[user]);
   // L'occupation cible suit par défaut la capacité de la typologie choisie
   useEffect(()=>{ const a=ACCOMMODATION_TYPES[benchAccType]; if(a) setBenchOccupancy(a.capacity); },[benchAccType]);
@@ -2305,17 +2305,32 @@ export default function App() {
   }
   function loadRateHistory(name, sourceLabel, ctx, scope="period") {
     setRateHistoryScope(scope);
-    const rows = (rates||[]).filter(r=>
-      !r.is_example &&
-      (r.competitor===name||r.property_name===name||r.competitor_name===name) &&
-      (r.source===sourceLabel || r.source_label===sourceLabel) &&
-      (scope==="all" || (
-        String(r.period_start||"")===String(ctx.checkin||"") &&
-        String(r.period_end||"")===String(ctx.checkout||"") &&
-        Number(r.stay_nights||7)===Number(ctx.stayNights) &&
-        Number(r.capacity)===Number(ctx.capacity)
-      ))
-    ).slice().sort((a,b)=>String(a.collected_at).localeCompare(String(b.collected_at)));
+    const norm = v => String(v||"").trim().toLowerCase();
+    const competitorName = norm(name);
+    const srcName = norm(sourceLabel);
+    const source = (histAll&&histAll.length) ? histAll : (rates||[]);
+    const rows = source.filter(r=>{
+      if (r.is_example) return false;
+      const rateComp = norm(r.competitor||r.property_name||r.competitor_name);
+      const rateSrcLabel = norm(r.source_label||r.source);
+      const rateSrcChannel = norm(r.source_channel);
+      const sameCompetitor = rateComp===competitorName;
+      const sameSource = rateSrcLabel===srcName || rateSrcChannel===srcName || (rateSrcLabel&&srcName&&(rateSrcLabel.includes(srcName)||srcName.includes(rateSrcLabel)));
+      const sameCapacity = Number(r.capacity)===Number(ctx.capacity);
+      const sameDuration = Number(r.stay_nights||7)===Number(ctx.stayNights||7);
+      const isValid = ["validé","réel","saisi manuellement","importé CSV"].includes(r.reliability_status);
+      if (!sameCompetitor || !sameSource || !sameCapacity || !sameDuration || !isValid) return false;
+      if (scope==="period") {
+        return String(r.period_start||"").slice(0,10)===String(ctx.checkin||"").slice(0,10)
+            && String(r.period_end||"").slice(0,10)===String(ctx.checkout||"").slice(0,10);
+      }
+      return true; // mode "all" : pas de filtre sur les dates
+    }).slice().sort((a,b)=>{
+      const da=String(a.period_start||a.collected_at||a.created_at||"");
+      const db=String(b.period_start||b.collected_at||b.created_at||"");
+      return da.localeCompare(db);
+    });
+    if (typeof console!=="undefined") console.log("Historique demandé", { competitor:name, source:sourceLabel, mode:scope, ctx, rows });
     setRateHistoryRows(rows);
   }
   // Réinitialise les messages de sauvegarde + scraping quand le contexte de relevé change
@@ -3422,10 +3437,10 @@ export default function App() {
                             {last ? (<>
                               <button onClick={()=>openRateEdit(key,"new",null)} style={{ fontSize:12, fontWeight:600, color:C.green, background:C.greenL, border:"none", borderRadius:5, padding:"5px 8px", cursor:"pointer" }}>Nouveau</button>
                               <button onClick={()=>openRateEdit(key,"modify",Number(last.price_total||last.price_week))} style={{ fontSize:12, fontWeight:600, color:C.orange, background:C.orangeL, border:"none", borderRadius:5, padding:"5px 8px", cursor:"pointer" }}>Modifier</button>
-                              <button onClick={()=>{ openRateEdit(key,"history",null); loadRateHistory(c.name, s.source_name, ctx, "period"); }} style={{ fontSize:12, fontWeight:600, color:C.blue, background:C.bluePale, border:"none", borderRadius:5, padding:"5px 8px", cursor:"pointer" }}>Histo.</button>
+                              <button onClick={async()=>{ openRateEdit(key,"history",null); await loadHistAll(); loadRateHistory(c.name, s.source_name, ctx, "period"); }} style={{ fontSize:12, fontWeight:600, color:C.blue, background:C.bluePale, border:"none", borderRadius:5, padding:"5px 8px", cursor:"pointer" }}>Histo.</button>
                             </>):(<>
                               <button onClick={()=>saveSourceRate(c, s, vp, key)} disabled={!vp||datesInvalid} style={{ fontSize:12, fontWeight:700, background:(vp&&!datesInvalid)?C.green:C.grayL, color:(vp&&!datesInvalid)?C.white:C.gray, border:"none", borderRadius:5, padding:"5px 10px", cursor:(vp&&!datesInvalid)?"pointer":"default" }}>Enregistrer</button>
-                              <button onClick={()=>{ openRateEdit(key,"history",null); loadRateHistory(c.name, s.source_name, ctx, "all"); }} style={{ fontSize:12, fontWeight:600, color:C.blue, background:C.bluePale, border:"none", borderRadius:5, padding:"5px 8px", cursor:"pointer" }}>Histo.</button>
+                              <button onClick={async()=>{ openRateEdit(key,"history",null); await loadHistAll(); loadRateHistory(c.name, s.source_name, ctx, "all"); }} style={{ fontSize:12, fontWeight:600, color:C.blue, background:C.bluePale, border:"none", borderRadius:5, padding:"5px 8px", cursor:"pointer" }}>Histo.</button>
                             </>)}
                           </div>
                         );
@@ -3475,9 +3490,16 @@ export default function App() {
                                     <button key={v} onClick={()=>loadRateHistory(c.name, s.source_name, ctx, v)} style={{ fontSize:11, fontWeight:rateHistoryScope===v?700:400, color:rateHistoryScope===v?C.white:C.gray, background:rateHistoryScope===v?C.blue:C.white, border:`1px solid ${rateHistoryScope===v?C.blue:C.grayM}`, borderRadius:5, padding:"3px 7px", cursor:"pointer" }}>{l}</button>
                                   ))}
                                 </div>
-                                {rateHistoryRows.length===0?<p style={{ margin:0, fontSize:12, color:C.gray }}>Aucun historique.</p>:rateHistoryRows.map((h,hi)=>{
-                                  const pt=Number(h.price_total||h.price_week||0); const prev=hi>0?Number(rateHistoryRows[hi-1].price_total||rateHistoryRows[hi-1].price_week||0):null; const ev=prev!=null?pt-prev:null;
-                                  return <p key={h.id||hi} style={{ margin:"2px 0 0", fontSize:12, color:C.text }}>{h.collected_at}{rateHistoryScope==="all"?` · ${fmtDateShort(h.period_start)}→${fmtDateShort(h.period_end)}`:""} · <strong>{fmt(pt)}€</strong> · {fmt(Math.round(pt/(h.stay_nights||7)))}€/n · {h.reliability_status}{h.edited_at?" · modifié":""}{ev!=null?<span style={{ color:ev>0?C.green:ev<0?C.red:C.gray, fontWeight:700 }}> · {ev>0?"+":""}{fmt(ev)}€</span>:""}</p>;
+                                {rateHistoryRows.length===0
+                                  ? <p style={{ margin:0, fontSize:12, color:C.gray }}>{rateHistoryScope==="all"?"Aucun historique enregistré pour cette source.":"Aucun relevé enregistré pour cette période."}</p>
+                                  : rateHistoryRows.map((h,hi)=>{
+                                  const pt=Number(h.price_total||h.price||h.price_week||0);
+                                  const nights=Number(h.stay_nights||7);
+                                  const pn=h.price_night||Math.round(pt/nights);
+                                  const prev=hi>0?Number(rateHistoryRows[hi-1].price_total||rateHistoryRows[hi-1].price||rateHistoryRows[hi-1].price_week||0):null;
+                                  const ev=prev!=null?pt-prev:null;
+                                  const per=(h.period_start&&h.period_end)?`${fmtDateShort(h.period_start)} → ${fmtDateShort(h.period_end)} · ${nights}n`:"Période inconnue";
+                                  return <p key={h.id||hi} style={{ margin:"3px 0 0", fontSize:12, color:C.text }}><span style={{ color:C.gray }}>{h.collected_at}</span> · <strong>{per}</strong> · <strong>{fmt(pt)}€</strong> · {fmt(pn)}€/n · {h.reliability_status}{h.edited_at?" · modifié":""}{ev!=null?<span style={{ color:ev>0?C.green:ev<0?C.red:C.gray, fontWeight:700 }}> · {ev>0?"+":""}{fmt(ev)}€</span>:""}</p>;
                                 })}
                                 <button onClick={closeRateEdit} style={{ ...btn(false,C.white,C.text), margin:"5px 0 0", fontSize:12, padding:"5px", border:`1px solid ${C.grayM}` }}>Fermer</button>
                               </div>
