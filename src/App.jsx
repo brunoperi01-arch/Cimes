@@ -3484,6 +3484,7 @@ export default function App() {
                               : <a href={url} target="_blank" rel="noreferrer" style={{ fontSize:11, fontWeight:600, color:C.blue, textDecoration:"none" }}>↗ Ouvrir</a>}
                             {isLfdnasSource(s)&&<span style={{ fontSize:10, color:C.purple, fontStyle:"italic", display:"block" }}>Dates ajoutées auto</span>}
                             {s.source_type==="direct"&&<span style={{ fontSize:10, color:C.gray, fontStyle:"italic", display:"block" }}>Dates à vérifier sur le site</span>}
+                            {s.source_type==="booking"&&<span style={{ fontSize:10, color:C.gray, fontStyle:"italic", display:"block" }}>Booking bloque souvent le scraping. Ouvrez la fiche puis saisissez le prix vérifié.</span>}
                           </div>
                         );
                         const cellLast = last
@@ -3510,10 +3511,14 @@ export default function App() {
                                       </div>)
                                     : scrapeUsable
                                       ? <span style={{ fontSize:12, color:C.orange, fontWeight:600 }}>{fmt(scrape.price_total)}€ à vérifier</span>
-                                      : <span style={{ fontSize:11, color:C.gray }}>Non détecté</span>}
+                                      : s.source_type==="booking"
+                                        ? <span style={{ fontSize:11, color:C.purple, fontWeight:600 }}>Booking manuel · à saisir après ouverture</span>
+                                        : <span style={{ fontSize:11, color:C.gray }}>Non détecté</span>}
                               {scrape.debug&&<button onClick={()=>setScrapeDetailsKey(d=>d===key?null:key)} style={{ display:"block", marginTop:2, fontSize:10, fontWeight:600, color:C.blue, background:"none", border:"none", padding:0, cursor:"pointer", textDecoration:"underline" }}>Détails scraping</button>}
                             </div>)
-                          : <span style={{ fontSize:12, color:C.grayM }}>—</span>;
+                          : (s.source_type==="booking"
+                              ? <span style={{ fontSize:11, color:C.purple, fontWeight:600 }}>Booking manuel</span>
+                              : <span style={{ fontSize:12, color:C.grayM }}>—</span>);
                         const cellVerif = (
                           <input type="number" placeholder="Prix vérifié" value={vp} onChange={e=>setTrackPrices(p=>({ ...p, [key]:e.target.value }))} style={{ width:"100%", padding:"7px 8px", fontSize:14, border:`1px solid ${C.grayM}`, borderRadius:6, boxSizing:"border-box" }}/>
                         );
