@@ -1251,6 +1251,98 @@ const SOURCE_FAMILIES = [
 ];
 const TOUR_OPERATORS = ["Maeva","La France du Nord au Sud","Travelski","Locasun","Vacancéole","Montagne Vacances","Autre tour opérateur"];
 const MARKETPLACES   = ["Airbnb","Abritel","Expedia","Booking.com","Booking particulier","PAP vacances","Leboncoin","Autre marketplace"];
+
+// ══ RADAR MARCHÉ MONTAGNE ══════════════════════════════════════
+const RADAR_RESULTS_LS = "lescimes_market_radar";
+// Sources scannables : segment par défaut + générateur d'URL de recherche (dates/capacité injectées)
+const RADAR_SOURCES = [
+  { key:"booking",   name:"Booking",                  segment:"mixte",     build:(q)=>`https://www.booking.com/searchresults.fr.html?ss=${encodeURIComponent(q.zone)}&checkin=${q.checkin}&checkout=${q.checkout}&group_adults=${q.capacity}&no_rooms=1&group_children=0` },
+  { key:"airbnb",    name:"Airbnb",                    segment:"private",   build:(q)=>`https://www.airbnb.fr/s/${encodeURIComponent(q.zone)}/homes?checkin=${q.checkin}&checkout=${q.checkout}&adults=${q.capacity}` },
+  { key:"abritel",   name:"Abritel",                   segment:"private",   build:(q)=>`https://www.abritel.fr/search?destination=${encodeURIComponent(q.zone)}&startDate=${q.checkin}&endDate=${q.checkout}&adults=${q.capacity}` },
+  { key:"maeva",     name:"Maeva",                     segment:"tour_operator", build:(q)=>`https://www.maeva.com/fr-fr/recherche?destination=${encodeURIComponent(q.zone)}&dateDebut=${q.checkin}&dateFin=${q.checkout}&nbPersonnes=${q.capacity}` },
+  { key:"lfdnas",    name:"La France du Nord au Sud",  segment:"tour_operator", build:(q)=>`https://www.lafrancedunordausud.fr/location-vacances/?date_debut=${q.checkin}&date_fin=${q.checkout}&nbPax=${q.capacity}&adultePax=${q.capacity}&enfantPax=0&babiePax=0&recherche=${encodeURIComponent(q.zone)}` },
+  { key:"travelski", name:"Travelski",                 segment:"tour_operator", build:(q)=>`https://www.travelski.com/ski/recherche?destination=${encodeURIComponent(q.zone)}&dateDepart=${q.checkin}&duree=${q.stayNights}&personnes=${q.capacity}` },
+  { key:"locasun",   name:"Locasun",                   segment:"tour_operator", build:(q)=>`https://www.locasun.fr/recherche?q=${encodeURIComponent(q.zone)}&arrivee=${q.checkin}&depart=${q.checkout}&voyageurs=${q.capacity}` },
+  { key:"skiplanet", name:"Ski Planet",                segment:"tour_operator", build:(q)=>`https://www.skiplanet.com/recherche?station=${encodeURIComponent(q.zone)}&date=${q.checkin}&duree=${q.stayNights}&personnes=${q.capacity}` },
+  { key:"pap",       name:"PAP Vacances",              segment:"private",   build:(q)=>`https://www.pap-vacances.fr/location-vacances/recherche?lieu=${encodeURIComponent(q.zone)}&du=${q.checkin}&au=${q.checkout}&personnes=${q.capacity}` },
+  { key:"leboncoin", name:"Leboncoin",                 segment:"private",   build:(q)=>`https://www.leboncoin.fr/recherche?category=12&text=${encodeURIComponent(q.zone+" location vacances")}` },
+];
+const RADAR_SEGMENT_LABEL = { residence:"Résidence / Pro", private:"Particulier", hotel:"Hôtel", tour_operator:"Tour-opérateur", marketplace:"Marketplace", non_comparable:"Non comparable", mixte:"Mixte" };
+const RADAR_SEGMENT_COLOR = { residence:["#2563EB","#EAF0FF"], private:["#FF5A5F","#FFE9EA"], hotel:["#7C3AED","#F1EAFE"], tour_operator:["#D45400","#FFF0E6"], marketplace:["#0EA5E9","#E0F2FE"], non_comparable:["#8E8E93","#F0F0F2"], mixte:["#8E8E93","#F0F0F2"] };
+
+async function getRadarResults() {
+  if (SB_READY) {
+    try { const rows = await sb.select("market_radar_results", "select=*&order=scan_date.desc&limit=300"); return rows || []; }
+    catch (e) { console.warn("getRadarResults:", e?.message); return ls.get(RADAR_RESULTS_LS) || []; }
+  }
+  return ls.get(RADAR_RESULTS_LS) || [];
+}
+async function saveRadarResult(r) {
+  const payload = {
+    scan_date:           r.scan_date || dateObjToISO(new Date()),
+    period_start:        r.period_start || null,
+    period_end:          r.period_end || null,
+    stay_nights:         Number(r.stay_nights || 7),
+    capacity:            r.capacity != null ? Number(r.capacity) : null,
+    source_name:         r.source_name || null,
+    source_url:          r.source_url || null,
+    property_name:       r.property_name || null,
+    market_segment:      r.market_segment || "non_comparable",
+    property_type:       r.property_type || null,
+    detected_price:      r.detected_price != null ? Number(r.detected_price) : null,
+    price_night:         r.price_night != null ? Number(r.price_night) : null,
+    price_candidates:    Array.isArray(r.price_candidates) ? r.price_candidates.join(",") : (r.price_candidates || null),
+    detected_capacity:   r.detected_capacity != null ? Number(r.detected_capacity) : null,
+    detected_surface:    r.detected_surface != null ? Number(r.detected_surface) : null,
+    comparability_score: r.comparability_score != null ? Number(r.comparability_score) : null,
+    confidence:          r.confidence || "low",
+    ai_summary:          r.ai_summary || null,
+    recommended_action:  r.recommended_action || null,
+    status:              r.status || "nouveau",
+  };
+  if (SB_READY) {
+    try {
+      if (r.id && !String(r.id).startsWith("local_")) { await sb.update("market_radar_results", `id=eq.${r.id}`, payload); return { ...payload, id:r.id }; }
+      const ins = await sb.insert("market_radar_results", payload); return Array.isArray(ins) ? ins[0] : ins;
+    } catch (e) {
+      const all = ls.get(RADAR_RESULTS_LS) || [];
+      const row = { ...payload, id: r.id || "local_"+Date.now()+"_"+Math.random().toString(36).slice(2,6) };
+      const i = all.findIndex(x=>x.id===row.id); if (i>=0) all[i]=row; else all.unshift(row);
+      ls.set(RADAR_RESULTS_LS, all); return row;
+    }
+  }
+  const all = ls.get(RADAR_RESULTS_LS) || [];
+  const row = { ...payload, id: r.id || "local_"+Date.now()+"_"+Math.random().toString(36).slice(2,6) };
+  const i = all.findIndex(x=>x.id===row.id); if (i>=0) all[i]=row; else all.unshift(row);
+  ls.set(RADAR_RESULTS_LS, all); return row;
+}
+async function updateRadarStatus(id, status) {
+  if (SB_READY && !String(id).startsWith("local_")) { try { await sb.update("market_radar_results", `id=eq.${id}`, { status }); return; } catch {} }
+  const all = ls.get(RADAR_RESULTS_LS) || [];
+  const i = all.findIndex(x=>x.id===id); if (i>=0) { all[i].status=status; ls.set(RADAR_RESULTS_LS, all); }
+}
+// Recommandation commerciale selon la composition du marché détecté
+function radarMarketRecommendation(results, ourPrice) {
+  const usable = (results||[]).filter(r=>r.detected_price>0 && r.market_segment!=="non_comparable");
+  if (!usable.length) return { level:"neutral", text:"Pas assez d'offres analysées pour une recommandation." };
+  const priv = usable.filter(r=>r.market_segment==="private");
+  const pros = usable.filter(r=>r.market_segment==="residence"||r.market_segment==="hotel");
+  const tos  = usable.filter(r=>r.market_segment==="tour_operator");
+  const med = arr => { if(!arr.length) return 0; const s=arr.map(r=>Number(r.detected_price)).sort((a,b)=>a-b); const m=Math.floor(s.length/2); return s.length%2?s[m]:Math.round((s[m-1]+s[m])/2); };
+  const proMed = med(pros), toMed = med(tos);
+  const cheaperPriv = ourPrice>0 ? priv.filter(r=>Number(r.detected_price) < ourPrice*0.9).length : 0;
+  if (priv.length>=3 && cheaperPriv >= Math.ceil(priv.length/2)) {
+    return { level:"warning", text:"Beaucoup de particuliers moins chers : créez une offre courte durée ou directe, ne cassez pas toute la grille publique." };
+  }
+  if (proMed>0 && ourPrice>0 && proMed > ourPrice*1.05) {
+    return { level:"good", text:"Marché pro plus cher que vous : possibilité de maintenir ou d'augmenter légèrement le tarif public." };
+  }
+  if (toMed>0 && ourPrice>0 && toMed < ourPrice*0.9) {
+    return { level:"warning", text:"Tour-opérateur agressif : surveillez ce canal et ajustez une promo directe ciblée." };
+  }
+  return { level:"neutral", text:"Marché équilibré. Maintenez le tarif public et surveillez les particuliers." };
+}
+
 // Segment d'un concurrent : "private" (particulier) ou "residence" (pro)
 function competitorSegment(c) {
   if (!c) return "residence";
@@ -1900,6 +1992,13 @@ export default function App() {
   // ── Tarifs Les Cimes (our_rates) ──────────────────────────────
   const [ourRates, setOurRates]           = useState([]);
   const [ourPromotions, setOurPromotions] = useState([]);
+  const [radarResults, setRadarResults]   = useState([]);
+  const [radarFilters, setRadarFilters]   = useState({ season:"ete", periodId:"", stay_nights:7, capacity:6, accType:"2P6", zone:"La Foux d'Allos" });
+  const [radarSources, setRadarSources]   = useState(()=>RADAR_SOURCES.map(s=>s.key));
+  const [radarScanning, setRadarScanning] = useState(false);
+  const [radarAnalyzing, setRadarAnalyzing] = useState(null);
+  const [radarManual, setRadarManual]     = useState(null);
+  const [radarMsg, setRadarMsg]           = useState(null);
   // ── Concurrents suivis (competitor_catalog) ───────────────────
   const [catalog, setCatalog]             = useState([]);
   const [catForm, setCatForm]             = useState(null); // null = fermé ; objet = formulaire ouvert
@@ -2109,11 +2208,130 @@ export default function App() {
   useEffect(()=>{ if(user) getOurRates().then(setOurRates).catch(()=>{}); },[user]);
   useEffect(()=>{ if(user) getOurPromotions().then(setOurPromotions).catch(()=>{}); },[user]);
   useEffect(()=>{ if(user && (screen==="benchmark"||screen==="promotions"||screen==="tarifs"||screen==="dashboard")) reloadOurPromotions(); /* eslint-disable-next-line */ },[user,screen]);
+  useEffect(()=>{ if(user && screen==="radar") reloadRadar(); /* eslint-disable-next-line */ },[user,screen]);
   useEffect(()=>{ if(user) getCompetitorCatalog().then(setCatalog).catch(()=>{}); },[user]);
   useEffect(()=>{ if(user) getCompetitorSources().then(setSources).catch(()=>{}); },[user]);
 
   async function reloadOurRates() { try { const d=await getOurRates(); setOurRates(d||[]); } catch {} }
   async function reloadOurPromotions() { try { const d=await getOurPromotions(); setOurPromotions(d||[]); } catch {} }
+
+  // ── Radar Marché Montagne ─────────────────────────────────────
+  async function reloadRadar() { try { const d=await getRadarResults(); setRadarResults(d||[]); } catch {} }
+  function radarContext() {
+    const p = ALL_PERIODS.find(x=>x.id===radarFilters.periodId);
+    const checkin = p ? (p.period_start||p.week_start) : null;
+    const nights = radarFilters.stay_nights || p?.stay_nights || 7;
+    const checkout = p ? (p.period_end || (checkin?addDaysStr(checkin, nights):null)) : null;
+    return { checkin, checkout, stayNights:nights, capacity:radarFilters.capacity, zone:radarFilters.zone, season:radarFilters.season, accType:radarFilters.accType };
+  }
+  // "Scan" = génère les entrées à analyser (URLs de recherche par source). N'invente aucun prix.
+  async function runRadarScan() {
+    const ctx = radarContext();
+    if (!ctx.checkin || !ctx.checkout) { setRadarMsg("err:Choisissez une période."); return; }
+    setRadarScanning(true); setRadarMsg(null);
+    try {
+      const picked = RADAR_SOURCES.filter(s=>radarSources.includes(s.key));
+      for (const s of picked) {
+        const url = s.build(ctx);
+        await saveRadarResult({
+          scan_date: dateObjToISO(new Date()),
+          period_start: ctx.checkin, period_end: ctx.checkout, stay_nights: ctx.stayNights, capacity: ctx.capacity,
+          source_name: s.name, source_url: url,
+          property_name: `Recherche ${s.name} · ${ctx.zone}`,
+          market_segment: s.segment==="mixte"?"non_comparable":s.segment,
+          confidence: "low", status: "à analyser",
+          ai_summary: "Ouvrez la recherche, repérez une offre, puis analysez-la avec Claude ou saisissez-la manuellement.",
+        });
+      }
+      await reloadRadar();
+      setRadarMsg("scanned");
+    } catch(e) { setRadarMsg("err:"+e.message); }
+    setRadarScanning(false);
+  }
+  // Analyse Claude : classe l'offre (segment, capacité, prix candidat, score, pression, reco)
+  async function analyzeRadarWithClaude(row) {
+    setRadarAnalyzing(row.id); setRadarMsg(null);
+    const ctx = radarContext();
+    const ourPrice = (()=>{ const r=getOurRateForContext(ourRates, { checkin:row.period_start, checkout:row.period_end, capacity:row.capacity, stayNights:row.stay_nights }, radarFilters.accType); return r?Number(r.price_total||r.price_week||0):0; })();
+    const prompt = `Tu es analyste marché location saisonnière montagne (La Foux d'Allos / Val d'Allos). Classe CETTE offre par rapport à la résidence Les Cimes du Val d'Allos 3*** (typologie ${radarFilters.accType}, ${row.capacity||ctx.capacity} personnes, ${row.stay_nights||7} nuits, tarif public ${ourPrice||"inconnu"}€/séjour).
+
+OFFRE À ANALYSER :
+- Titre : ${row.property_name||"(inconnu)"}
+- Source : ${row.source_name}
+- URL : ${row.source_url}
+- Texte récupéré : ${row.scraped_text||"(non disponible — déduis de la source et du titre)"}
+- Prix candidats : ${row.price_candidates||"(aucun)"}
+- Période : ${row.period_start} → ${row.period_end} (${row.stay_nights||7} nuits)
+- Capacité recherchée : ${row.capacity||ctx.capacity} personnes
+
+Réponds UNIQUEMENT en JSON strict, sans texte autour, avec ce format :
+{"market_segment":"residence|private|hotel|tour_operator|marketplace|non_comparable","detected_capacity":nombre ou null,"detected_price":nombre ou null,"price_night":nombre ou null,"comparability_score":0-100,"pressure":"forte|moyenne|faible","recommended_action":"texte court","ai_summary":"1-2 phrases"}
+
+Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a null. Le score de comparabilite est eleve si meme zone, meme capacite, meme type de bien que Les Cimes (residence avec services).`;
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:600, messages:[{ role:"user", content:prompt }] }),
+      });
+      if (!res.ok) { const d=await res.json().catch(()=>({})); throw new Error(d.error?.message||`HTTP ${res.status} — déployez api/ avec ANTHROPIC_API_KEY.`); }
+      const d = await res.json();
+      const raw = (d.content||[]).map(b=>b.text||"").join("").replace(/```json|```/g,"").trim();
+      const parsed = JSON.parse(raw);
+      await saveRadarResult({
+        ...row,
+        market_segment: parsed.market_segment || row.market_segment,
+        detected_capacity: parsed.detected_capacity ?? row.detected_capacity,
+        detected_price: parsed.detected_price ?? null,
+        price_night: parsed.price_night ?? (parsed.detected_price?Math.round(parsed.detected_price/(row.stay_nights||7)):null),
+        comparability_score: parsed.comparability_score ?? null,
+        ai_summary: parsed.ai_summary || row.ai_summary,
+        recommended_action: parsed.recommended_action || null,
+        confidence: parsed.detected_price ? "medium" : "low",
+        status: "analysé",
+      });
+      await reloadRadar();
+      setRadarMsg("analyzed");
+    } catch(e) { setRadarMsg("err:"+(e?.message||"analyse impossible")); }
+    setRadarAnalyzing(null);
+  }
+  // Transforme une offre radar en concurrent suivi (résidence ou particulier) — JAMAIS dans competitor_rates
+  async function radarToCompetitor(row, segment) {
+    try {
+      const isPriv = segment==="private";
+      await saveCompetitorCatalogItem({
+        name: row.property_name || `${row.source_name} ${row.market_segment}`,
+        market_segment: isPriv?"private":"residence",
+        is_private_rental: isPriv,
+        property_type: isPriv?"particulier":"résidence",
+        source_type: row.source_name?.toLowerCase().includes("booking")?"booking":isPriv?"marketplace":"tour_operator",
+        source_name: row.source_name,
+        source_url: row.source_url,
+        search_location: radarFilters.zone,
+        comparability_score: row.comparability_score || (isPriv?60:80),
+        notes: `Ajouté depuis Radar Marché · ${row.ai_summary||""}`.slice(0,300),
+      });
+      await updateRadarStatus(row.id, "ajouté");
+      await reloadRadar(); await reloadCatalog();
+      setRadarMsg("added");
+    } catch(e) { setRadarMsg("err:"+e.message); }
+  }
+  async function radarToOpportunity(row) {
+    try {
+      await savePromoOpportunity({
+        period_id: radarFilters.periodId||null, period_label: null,
+        period_start: row.period_start, period_end: row.period_end, stay_nights: row.stay_nights||7,
+        accommodation_type: radarFilters.accType, capacity: row.capacity,
+        our_price: null, market_median: row.detected_price||null,
+        recommended_price: row.detected_price?Math.round(Number(row.detected_price)*0.97):null, direct_price: null,
+        promo_type: "radar", promo_label: `Veille ${row.source_name}`, priority: "normal",
+        source_summary: row.source_name, suggested_message: row.ai_summary||null,
+        status: "à étudier", notes: row.recommended_action||null,
+      });
+      await updateRadarStatus(row.id, "opportunité");
+      await reloadRadar();
+      setRadarMsg("opp");
+    } catch(e) { setRadarMsg("err:"+e.message); }
+  }
   // Ouvre le formulaire promo (édition si promo fournie, sinon création préremplie depuis le contexte)
   function openPromoForm(existing, opts={}) {
     const period = ALL_PERIODS.find(p=>p.id===(existing?.period_id||opts.periodId));
@@ -3029,9 +3247,9 @@ export default function App() {
 
   const NAV=[{id:"dashboard",icon:"▣",l:"Dashboard"},{id:"benchmark",icon:"📊",l:"Benchmark"},{id:"track",icon:"💶",l:"Suivi prix"},{id:"promotions",icon:"🎯",l:"Promos"},{id:"weeks",icon:"📡",l:"Radar"},{id:"diag",icon:"🔬",l:"Diag"}];
   const NAV_GROUPS=[
-    { label:"Pilotage", items:[{id:"dashboard",icon:"▣",l:"Dashboard"},{id:"benchmark",icon:"📊",l:"Benchmark"},{id:"promotions",icon:"🎯",l:"Promos"},{id:"track",icon:"💶",l:"Suivi prix"}] },
+    { label:"Pilotage", items:[{id:"dashboard",icon:"▣",l:"Dashboard"},{id:"benchmark",icon:"📊",l:"Benchmark"},{id:"promotions",icon:"🎯",l:"Promos"},{id:"track",icon:"💶",l:"Suivi prix"},{id:"radar",icon:"🛰️",l:"Radar Marché"}] },
     { label:"Données", items:[{id:"tarifs",icon:"💰",l:"Tarifs Les Cimes"},{id:"competitors_residence",icon:"🏢",l:"Concurrents Résidences"},{id:"competitors_private",icon:"🏠",l:"Concurrents Particuliers"},{id:"import",icon:"🔗",l:"Sources & Import"}] },
-    { label:"Outils", items:[{id:"weeks",icon:"📡",l:"Radar"},{id:"collect",icon:"📥",l:"Import / Saisie"},{id:"diag",icon:"🔬",l:"Diagnostic"}] },
+    { label:"Outils", items:[{id:"weeks",icon:"📅",l:"Semaines"},{id:"collect",icon:"📥",l:"Import / Saisie"},{id:"diag",icon:"🔬",l:"Diagnostic"}] },
   ];
   const goScreen=id=>{ setScreen(id); setCM(null); setIaText(null); setPasteEdit(null); };
   const BNav=()=>isMobile?(
@@ -5242,6 +5460,134 @@ export default function App() {
     );
   };
 
+  // ── Radar Marché Montagne ─────────────────────────────────────
+  const RadarScreen=()=>{
+    const ctx = radarContext();
+    const datesOk = ctx.checkin && ctx.checkout;
+    const ourPrice = (()=>{ const r=getOurRateForContext(ourRates, ctx, radarFilters.accType); return r?Number(r.price_total||r.price_week||0):0; })();
+    // Résultats du contexte courant (dates + capacité)
+    const scoped = radarResults.filter(r=>
+      (!datesOk || (sameDate(r.period_start, ctx.checkin) && sameDate(r.period_end, ctx.checkout))) &&
+      (!radarFilters.capacity || Number(r.capacity)===Number(radarFilters.capacity))
+    );
+    const analyzed = scoped.filter(r=>r.detected_price>0 || r.status==="analysé");
+    const reco = radarMarketRecommendation(analyzed, ourPrice);
+    const recoColor = reco.level==="warning"?C.orange:reco.level==="good"?C.green:C.gray;
+    const recoBg = reco.level==="warning"?C.orangeL:reco.level==="good"?C.greenL:C.grayL;
+    const toggleSource = k => setRadarSources(s=>s.includes(k)?s.filter(x=>x!==k):[...s,k]);
+    return (
+      <div><SBar title="Radar Marché Montagne"/>
+        <div style={cnt}>
+          <div style={{ ...cd(11), padding:"11px 13px", background:"#EAF0FF", marginTop:8 }}>
+            <p style={{ margin:0, fontSize:13, fontWeight:700, color:C.blue }}>🛰️ Radar Marché Montagne</p>
+            <p style={{ margin:"3px 0 0", fontSize:11, color:C.blueL }}>Découvrez et analysez les offres du marché (Booking, Airbnb, TO, particuliers…). Le radar n'enregistre rien dans les concurrents suivis : seuls les prix que vous validez manuellement deviennent des relevés. Claude classe les offres, il ne scrape pas.</p>
+          </div>
+
+          {/* Filtres */}
+          <div style={{ display:"flex", gap:5, marginBottom:8, flexWrap:"wrap" }}>
+            <select value={radarFilters.season} onChange={e=>setRadarFilters(f=>({ ...f, season:e.target.value }))} style={{ ...inp(), flex:"1 1 90px", fontSize:13, padding:"7px 9px" }}><option value="ete">Été</option><option value="hiver">Hiver</option></select>
+            <select value={radarFilters.periodId} onChange={e=>setRadarFilters(f=>({ ...f, periodId:e.target.value }))} style={{ ...inp(), flex:"1 1 200px", fontSize:13, padding:"7px 9px" }}>
+              <option value="">Choisir une période…</option>
+              {ALL_PERIODS.filter(p=>p.season===radarFilters.season).map(p=><option key={p.id} value={p.id}>{periodOptionLabel(p)}</option>)}
+            </select>
+            <select value={radarFilters.stay_nights} onChange={e=>setRadarFilters(f=>({ ...f, stay_nights:parseInt(e.target.value) }))} style={{ ...inp(), flex:"1 1 80px", fontSize:13, padding:"7px 9px" }}>{[7,4,3,2].map(n=><option key={n} value={n}>{n} nuits</option>)}</select>
+            <select value={radarFilters.capacity} onChange={e=>setRadarFilters(f=>({ ...f, capacity:parseInt(e.target.value) }))} style={{ ...inp(), flex:"1 1 70px", fontSize:13, padding:"7px 9px" }}>{[2,4,6,8].map(n=><option key={n} value={n}>{n}P</option>)}</select>
+            <select value={radarFilters.accType} onChange={e=>setRadarFilters(f=>({ ...f, accType:e.target.value }))} style={{ ...inp(), flex:"1 1 90px", fontSize:13, padding:"7px 9px" }}>{ACCOMMODATION_ORDER.map(a=><option key={a} value={a}>{ACCOMMODATION_SHORT[a]}</option>)}</select>
+            <select value={radarFilters.zone} onChange={e=>setRadarFilters(f=>({ ...f, zone:e.target.value }))} style={{ ...inp(), flex:"1 1 140px", fontSize:13, padding:"7px 9px" }}><option>La Foux d'Allos</option><option>Val d'Allos</option></select>
+          </div>
+
+          {/* Sources à scanner */}
+          <p style={sml}>Sources à scanner</p>
+          <div style={{ display:"flex", gap:4, marginBottom:8, flexWrap:"wrap" }}>
+            {RADAR_SOURCES.map(s=>{ const on=radarSources.includes(s.key); const [c,bg]=RADAR_SEGMENT_COLOR[s.segment]||RADAR_SEGMENT_COLOR.mixte; return (
+              <button key={s.key} onClick={()=>toggleSource(s.key)} style={{ fontSize:11, fontWeight:on?700:500, color:on?C.white:c, background:on?c:bg, border:`1px solid ${on?c:"transparent"}`, borderRadius:7, padding:"5px 9px", cursor:"pointer" }}>{on?"✓ ":""}{s.name}</button>
+            ); })}
+          </div>
+
+          <div style={{ display:"flex", gap:5, marginBottom:6, flexWrap:"wrap" }}>
+            <button onClick={runRadarScan} disabled={radarScanning||!datesOk||radarSources.length===0} style={{ flex:"1 1 200px", padding:"9px 12px", fontSize:13, fontWeight:700, background:(radarScanning||!datesOk||radarSources.length===0)?C.grayL:C.blue, color:(radarScanning||!datesOk||radarSources.length===0)?C.gray:C.white, border:"none", borderRadius:9, cursor:(radarScanning||!datesOk)?"default":"pointer" }}>{radarScanning?"⏳ Génération des recherches…":"🛰️ Lancer le scan marché"}</button>
+            <button onClick={()=>setRadarManual({ source_name:"Autre", property_name:"", price_candidates:"", market_segment:"private", capacity:radarFilters.capacity })} style={{ fontSize:12, fontWeight:600, color:C.blue, background:C.white, border:`1px solid ${C.blueL}`, borderRadius:8, padding:"8px 11px", cursor:"pointer" }}>+ Saisir une offre</button>
+          </div>
+          {!datesOk&&<p style={{ margin:"0 0 6px", fontSize:11, color:C.orange }}>Choisissez une période pour générer les liens de recherche.</p>}
+          {radarMsg==="scanned"&&<p style={{ margin:"0 0 6px", fontSize:11, color:C.green, fontWeight:600 }}>✓ Recherches générées. Ouvrez chaque source, repérez une offre, puis « Analyser avec Claude ».</p>}
+          {radarMsg==="analyzed"&&<p style={{ margin:"0 0 6px", fontSize:11, color:C.green, fontWeight:600 }}>✓ Offre analysée par Claude.</p>}
+          {radarMsg==="added"&&<p style={{ margin:"0 0 6px", fontSize:11, color:C.green, fontWeight:600 }}>✓ Ajouté aux concurrents suivis.</p>}
+          {radarMsg==="opp"&&<p style={{ margin:"0 0 6px", fontSize:11, color:C.green, fontWeight:600 }}>✓ Opportunité créée.</p>}
+          {radarMsg?.startsWith("err")&&<p style={{ margin:"0 0 6px", fontSize:11, color:C.red }}>✗ {radarMsg.slice(4)}</p>}
+
+          {/* Recommandation marché */}
+          {analyzed.length>0&&(
+            <div style={{ ...cd(10), padding:"9px 12px", background:recoBg, marginBottom:8, borderLeft:`3px solid ${recoColor}` }}>
+              <p style={{ margin:0, fontSize:11, fontWeight:700, color:recoColor, textTransform:"uppercase" }}>Recommandation marché</p>
+              <p style={{ margin:"2px 0 0", fontSize:12, color:C.text }}>{reco.text}</p>
+            </div>
+          )}
+
+          {/* Saisie manuelle d'une offre repérée */}
+          {radarManual&&(
+            <div style={{ ...cd(11), padding:"11px 13px", border:`1px solid ${C.blue}`, marginBottom:8 }}>
+              <p style={{ margin:"0 0 6px", fontSize:12, fontWeight:700, color:C.blue }}>Saisir une offre repérée</p>
+              <input style={{ ...inp(), marginBottom:5 }} placeholder="Titre / nom de l'annonce" value={radarManual.property_name} onChange={e=>setRadarManual(m=>({ ...m, property_name:e.target.value }))}/>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:5, marginBottom:5 }}>
+                <select value={radarManual.source_name} onChange={e=>setRadarManual(m=>({ ...m, source_name:e.target.value }))} style={inp()}>{RADAR_SOURCES.map(s=><option key={s.key}>{s.name}</option>)}<option>Autre</option></select>
+                <select value={radarManual.market_segment} onChange={e=>setRadarManual(m=>({ ...m, market_segment:e.target.value }))} style={inp()}>{["residence","private","hotel","tour_operator","marketplace","non_comparable"].map(s=><option key={s} value={s}>{RADAR_SEGMENT_LABEL[s]}</option>)}</select>
+              </div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:5, marginBottom:5 }}>
+                <input style={inp()} placeholder="Prix candidats (ex 453,541)" value={radarManual.price_candidates} onChange={e=>setRadarManual(m=>({ ...m, price_candidates:e.target.value }))}/>
+                <input style={inp()} placeholder="URL (optionnel)" value={radarManual.source_url||""} onChange={e=>setRadarManual(m=>({ ...m, source_url:e.target.value }))}/>
+              </div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
+                <button onClick={()=>setRadarManual(null)} style={{ ...btn(false,C.white,C.text), margin:0, border:`1px solid ${C.grayM}` }}>Annuler</button>
+                <button onClick={async()=>{ const cands=(radarManual.price_candidates||"").split(",").map(x=>parseInt(x.trim())).filter(Boolean); await saveRadarResult({ scan_date:dateObjToISO(new Date()), period_start:ctx.checkin, period_end:ctx.checkout, stay_nights:ctx.stayNights, capacity:radarManual.capacity||ctx.capacity, source_name:radarManual.source_name, source_url:radarManual.source_url||null, property_name:radarManual.property_name||"Offre saisie", market_segment:radarManual.market_segment, detected_price:cands[0]||null, price_candidates:cands, confidence:"low", status:"à analyser" }); await reloadRadar(); setRadarManual(null); setRadarMsg("scanned"); }} style={{ ...btn(false,C.blue), margin:0 }}>Ajouter au radar</button>
+              </div>
+            </div>
+          )}
+
+          {/* Tableau des résultats */}
+          <p style={sml}>Offres détectées ({scoped.length})</p>
+          {scoped.length===0
+            ? <p style={{ textAlign:"center", padding:16, color:C.gray, fontSize:12, fontStyle:"italic" }}>Aucune offre. Lancez un scan ou saisissez une offre repérée.</p>
+            : (
+              <div style={{ ...card({ padding:0 }), overflow:"auto", marginBottom:10 }}>
+                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+                  <thead><tr style={{ background:C.grayL }}>
+                    {["Offre","Source","Segment","Prix","Cap.","Score","Statut","Actions"].map(h=><th key={h} style={{ textAlign:"left", padding:"7px 8px", fontSize:10, fontWeight:700, color:C.gray, textTransform:"uppercase", whiteSpace:"nowrap" }}>{h}</th>)}
+                  </tr></thead>
+                  <tbody>
+                    {scoped.map((r,i)=>{ const [sc,sbg]=RADAR_SEGMENT_COLOR[r.market_segment]||RADAR_SEGMENT_COLOR.non_comparable; const analyzing=radarAnalyzing===r.id; return (
+                      <tr key={r.id||i} style={{ borderTop:`0.5px solid ${C.grayL}`, verticalAlign:"top" }}>
+                        <td style={{ padding:"7px 8px", maxWidth:200 }}>
+                          <p style={{ margin:0, fontWeight:600, color:C.text }}>{r.property_name||"—"}</p>
+                          {r.ai_summary&&<p style={{ margin:"1px 0 0", fontSize:10, color:C.gray }}>{r.ai_summary}</p>}
+                          {r.recommended_action&&<p style={{ margin:"1px 0 0", fontSize:10, color:C.orange }}>→ {r.recommended_action}</p>}
+                        </td>
+                        <td style={{ padding:"7px 8px", color:C.gray, whiteSpace:"nowrap" }}>{r.source_name}{r.source_url&&<a href={r.source_url} target="_blank" rel="noreferrer" style={{ display:"block", fontSize:10, color:C.blue, textDecoration:"none" }}>↗ Ouvrir</a>}</td>
+                        <td style={{ padding:"7px 8px" }}><Badge label={RADAR_SEGMENT_LABEL[r.market_segment]||r.market_segment} color={sc} bg={sbg} size={10}/></td>
+                        <td style={{ padding:"7px 8px", whiteSpace:"nowrap" }}>{r.detected_price>0?<><strong style={{ color:C.text }}>{fmt(r.detected_price)}€</strong>{r.price_night?<span style={{ color:C.gray, fontSize:10 }}> · {fmt(r.price_night)}€/n</span>:null}</>:<span style={{ color:C.grayM }}>{r.price_candidates?`cand: ${r.price_candidates}`:"—"}</span>}</td>
+                        <td style={{ padding:"7px 8px", color:C.gray }}>{r.detected_capacity||r.capacity||"?"}P</td>
+                        <td style={{ padding:"7px 8px", color:C.gray }}>{r.comparability_score!=null?`${r.comparability_score}`:"—"}</td>
+                        <td style={{ padding:"7px 8px" }}><Badge label={r.status||"nouveau"} color={r.status==="analysé"?C.green:r.status==="ajouté"?C.blue:r.status==="ignoré"?C.gray:C.orange} bg={r.status==="analysé"?C.greenL:r.status==="ajouté"?C.bluePale:C.grayL} size={10}/></td>
+                        <td style={{ padding:"7px 8px", whiteSpace:"nowrap" }}>
+                          <div style={{ display:"flex", gap:3, flexWrap:"wrap" }}>
+                            <button onClick={()=>analyzeRadarWithClaude(r)} disabled={analyzing} style={{ fontSize:10, fontWeight:700, color:C.white, background:analyzing?C.grayL:C.purple, border:"none", borderRadius:5, padding:"4px 7px", cursor:analyzing?"default":"pointer" }}>{analyzing?"⏳":"Analyser IA"}</button>
+                            <button onClick={()=>radarToCompetitor(r,"residence")} style={{ fontSize:10, fontWeight:600, color:C.blue, background:C.bluePale, border:"none", borderRadius:5, padding:"4px 7px", cursor:"pointer" }}>+ Pro</button>
+                            <button onClick={()=>radarToCompetitor(r,"private")} style={{ fontSize:10, fontWeight:600, color:"#FF5A5F", background:"#FFE9EA", border:"none", borderRadius:5, padding:"4px 7px", cursor:"pointer" }}>+ Particulier</button>
+                            <button onClick={()=>radarToOpportunity(r)} style={{ fontSize:10, fontWeight:600, color:C.green, background:C.greenL, border:"none", borderRadius:5, padding:"4px 7px", cursor:"pointer" }}>Opportunité</button>
+                            <button onClick={async()=>{ await updateRadarStatus(r.id,"ignoré"); await reloadRadar(); }} style={{ fontSize:10, fontWeight:600, color:C.gray, background:C.grayL, border:"none", borderRadius:5, padding:"4px 7px", cursor:"pointer" }}>Ignorer</button>
+                          </div>
+                        </td>
+                      </tr>
+                    ); })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          <p style={{ margin:"0 0 10px", fontSize:10, color:C.gray, fontStyle:"italic" }}>Les résultats radar restent dans market_radar_results. Pour créer un relevé de prix, ajoutez l'offre aux concurrents suivis puis saisissez le prix vérifié dans le module de relevé.</p>
+        </div><BNav/>
+      </div>
+    );
+  };
+
   const BenchmarkDecision=()=>{
     const baseCtx = getTrackedPeriodContext();
     const acc = ACCOMMODATION_TYPES[benchAccType] || ACCOMMODATION_TYPES["2P6"];
@@ -5981,6 +6327,7 @@ export default function App() {
             {screen === "competitors_residence" && CompetitorsSegmentScreen({ segment: "residence" })}
             {screen === "competitors_private" && CompetitorsSegmentScreen({ segment: "private" })}
             {screen === "track" && TrackPrices()}
+            {screen === "radar" && RadarScreen()}
             {screen === "import" && ImportScreen()}
             {screen === "diag" && Diagnostic()}
           </div>
@@ -5999,6 +6346,7 @@ export default function App() {
             {screen === "competitors_residence" && CompetitorsSegmentScreen({ segment: "residence" })}
             {screen === "competitors_private" && CompetitorsSegmentScreen({ segment: "private" })}
             {screen === "track" && TrackPrices()}
+          {screen === "radar" && RadarScreen()}
           {screen === "import" && ImportScreen()}
           {screen === "diag" && Diagnostic()}
         </div>
