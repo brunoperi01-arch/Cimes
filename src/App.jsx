@@ -468,6 +468,61 @@ function periodOptionLabel(p) {
   return `${fmtDateShort(start)} → ${fmtDateShort(end)} · ${nights} nuits`;
 }
 
+// ══ TIMELINE PRIX (historique) ══════════════════════════════════
+function formatRatePeriod(row) {
+  const start = row.period_start, end = row.period_end;
+  const nights = Number(row.stay_nights || 7);
+  if (!start || !end) return "Période inconnue";
+  return `${fmtDateShort(start)} → ${fmtDateShort(end)} · ${nights} nuits`;
+}
+function fmtCollected(s) {
+  if (!s) return "—";
+  const d = String(s).slice(0, 10).split("-");
+  return d.length === 3 ? `${d[2]}/${d[1]}/${d[0]}` : String(s).slice(0, 10);
+}
+// Filtre les lignes pour la timeline (uniquement les relevés validés)
+function getTimelineRows({ rates, filters }) {
+  const norm = v => String(v || "").trim().toLowerCase();
+  const f = filters || {};
+  const rows = (rates || []).filter(r => {
+    if (String(r.reliability_status || "").toLowerCase() !== "validé") return false;
+    if (f.segment && f.segment !== "all") {
+      const priv = r.market_segment === "private" || r.is_private_rental === true || r.property_type === "particulier";
+      if (f.segment === "residence" && priv) return false;
+      if (f.segment === "private" && !priv) return false;
+    }
+    if (f.competitor && norm(r.competitor || r.property_name) !== norm(f.competitor)) return false;
+    if (f.source && f.source !== "all") {
+      const sl = norm(r.source_label || r.source), sc = norm(r.source_channel), w = norm(f.source);
+      if (sl !== w && sc !== w && !sl.includes(w)) return false;
+    }
+    if (f.period_start && f.period_end) {
+      if (String(r.period_start || "").slice(0, 10) !== String(f.period_start).slice(0, 10)) return false;
+      if (String(r.period_end || "").slice(0, 10) !== String(f.period_end).slice(0, 10)) return false;
+    }
+    if (f.stay_nights && Number(r.stay_nights || 7) !== Number(f.stay_nights)) return false;
+    if (f.capacity && Number(r.capacity) !== Number(f.capacity)) return false;
+    if (f.accommodation_type && f.accommodation_type !== "all" && String(r.accommodation_type || "") !== String(f.accommodation_type)) return false;
+    return true;
+  });
+  return rows.sort((a, b) => String(a.collected_at || a.created_at || "").localeCompare(String(b.collected_at || b.created_at || "")));
+}
+// Calcule l'évolution prix vs relevé précédent du même groupe (concurrent/source/période/durée/capacité)
+function addPriceEvolution(rows) {
+  const keyOf = r => [r.competitor || r.property_name, r.source_label || r.source, r.period_start, r.period_end, r.stay_nights || 7, r.capacity].join("|");
+  const groups = {};
+  rows.forEach(r => { const k = keyOf(r); (groups[k] = groups[k] || []).push(r); });
+  Object.values(groups).forEach(g => g.sort((a, b) => String(a.collected_at || a.created_at || "").localeCompare(String(b.collected_at || b.created_at || ""))));
+  return rows.map(r => {
+    const g = groups[keyOf(r)];
+    const idx = g.findIndex(x => (x.id && r.id) ? x.id === r.id : x === r);
+    const prev = idx > 0 ? g[idx - 1] : null;
+    const cur = Number(r.price_total || r.price || r.price_week || 0);
+    const prevPrice = prev ? Number(prev.price_total || prev.price || prev.price_week || 0) : null;
+    return { ...r, previous_price: prevPrice, price_delta: prevPrice != null ? cur - prevPrice : null };
+  });
+}
+
 // Contexte de travail partagé (relevé / promotions / benchmark)
 function getWorkContext({ mode, selectedPeriodId, customCheckin, customCheckout, stayNights, capacity, accommodationType, season }) {
   const n = Number(stayNights || 7);
@@ -1606,6 +1661,34 @@ const daysSince=d=>d?Math.floor((Date.now()-new Date(d))/864e5):999;
 const CAT_C={ haute:"#D45400", moyenne:C.blueL, basse:C.green };
 const CAT_L={ haute:"Haute saison", moyenne:"Moy. saison", basse:"Basse saison" };
 
+function MiniPriceChart({ rows, color = "#2563EB" }) {
+  if (!rows || rows.length < 2) {
+    return <p style={{ margin:"4px 0", fontSize:12, color:"#8E8E93", fontStyle:"italic" }}>Pas assez de points pour afficher une tendance.</p>;
+  }
+  const prices = rows.map(r => Number(r.price_total || r.price || r.price_week || 0));
+  const min = Math.min(...prices), max = Math.max(...prices), last = prices[prices.length - 1];
+  const W = 280, H = 70, pad = 6;
+  const span = max - min || 1;
+  const pts = prices.map((p, i) => {
+    const x = pad + (i * (W - 2 * pad)) / (prices.length - 1);
+    const y = pad + (H - 2 * pad) * (1 - (p - min) / span);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  return (
+    <div>
+      <div style={{ display:"flex", gap:14, flexWrap:"wrap", marginBottom:4 }}>
+        <span style={{ fontSize:12, color:"#8E8E93" }}>Min : <strong style={{ color:"#1C1C1E" }}>{min.toLocaleString("fr-FR")}€</strong></span>
+        <span style={{ fontSize:12, color:"#8E8E93" }}>Max : <strong style={{ color:"#1C1C1E" }}>{max.toLocaleString("fr-FR")}€</strong></span>
+        <span style={{ fontSize:12, color:"#8E8E93" }}>Dernier : <strong style={{ color }}>{last.toLocaleString("fr-FR")}€</strong></span>
+        <span style={{ fontSize:12, color:"#8E8E93" }}>Évolution : <strong style={{ color:(last-prices[0])>0?"#D70015":(last-prices[0])<0?"#1C8C4A":"#8E8E93" }}>{(last-prices[0])>0?"+":""}{(last-prices[0]).toLocaleString("fr-FR")}€</strong></span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width:"100%", height:70, display:"block" }} preserveAspectRatio="none">
+        <polyline points={pts.join(" ")} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round"/>
+        {pts.map((pt,i)=>{ const [x,y]=pt.split(","); return <circle key={i} cx={x} cy={y} r="2.5" fill={color}/>; })}
+      </svg>
+    </div>
+  );
+}
 function Badge({ label, color, bg, size=10 }) { return <span style={{ fontSize:size, fontWeight:700, background:bg, color, padding:"2px 6px", borderRadius:4, whiteSpace:"nowrap" }}>{label}</span>; }
 function ReliaBadge({ status }) { const m={ réel:{bg:C.greenL,c:C.green}, "validé":{bg:C.greenL,c:C.green}, "saisi manuellement":{bg:C.bluePale,c:C.blue}, "importé CSV":{bg:C.purpleL,c:C.purple}, "copier-coller":{bg:"#F3E8FF",c:C.purple}, "à vérifier":{bg:C.goldL,c:C.orange}, "rejeté":{bg:C.redL,c:C.red}, estimé:{bg:C.goldL,c:C.gold}, "scraping-auto":{bg:"#F0FDF4",c:"#166534"}, "scraping-batch":{bg:"#F0FDF4",c:"#166534"} }[status]||{bg:C.grayL,c:C.gray}; return <span style={{ fontSize:12, fontWeight:600, background:m.bg, color:m.c, padding:"1px 5px", borderRadius:4 }}>{status}</span>; }
 function PromoBadge({ label }) { if(!label) return null; const m={ "Genius -10%":{bg:"#DBEAFE",c:"#1D40AE"}, "Last minute":{bg:C.redL,c:C.red}, "Early booking":{bg:C.greenL,c:C.green}, "PDJ inclus":{bg:C.purpleL,c:C.purple}, "Annulation gratuite":{bg:C.greenL,c:C.green} }[label]||{bg:C.orangeL,c:C.orange}; const short=label.replace("Genius -10%","GENIUS").replace("Last minute","LAST MIN").replace("Early booking","EARLY").replace("PDJ inclus","PDJ").replace("Annulation gratuite","ANNUL.").slice(0,12); return <span style={{ fontSize:12, fontWeight:700, background:m.bg, color:m.c, padding:"2px 5px", borderRadius:4 }}>{short}</span>; }
@@ -1738,6 +1821,8 @@ export default function App() {
   const [histAll, setHistAll]             = useState([]);
   const [histLoading, setHistLoading]     = useState(false);
   const [histFilters, setHistFilters]     = useState({ competitor:"", source:"", capacity:0, status:"", segment:"" });
+  const [trackTab, setTrackTab]           = useState("table"); // table | timeline
+  const [tlFilters, setTlFilters]         = useState({ segment:"all", competitor:"", source:"all", periodId:"", stay_nights:0, capacity:0, accommodation_type:"all" });
   // ── Décisions commerciales ────────────────────────────────────
   const [decisions, setDecisions]         = useState([]);
   const [decForm, setDecForm]             = useState({ action_type:"maintain", our_price_after:"", direct_price:"", decision_status:"à faire", notes:"" });
@@ -3501,7 +3586,10 @@ export default function App() {
                                   const per=(h.period_start&&h.period_end)?`${fmtDateShort(h.period_start)} → ${fmtDateShort(h.period_end)} · ${nights}n`:"Période inconnue";
                                   return <p key={h.id||hi} style={{ margin:"3px 0 0", fontSize:12, color:C.text }}><span style={{ color:C.gray }}>{h.collected_at}</span> · <strong>{per}</strong> · <strong>{fmt(pt)}€</strong> · {fmt(pn)}€/n · {h.reliability_status}{h.edited_at?" · modifié":""}{ev!=null?<span style={{ color:ev>0?C.green:ev<0?C.red:C.gray, fontWeight:700 }}> · {ev>0?"+":""}{fmt(ev)}€</span>:""}</p>;
                                 })}
-                                <button onClick={closeRateEdit} style={{ ...btn(false,C.white,C.text), margin:"5px 0 0", fontSize:12, padding:"5px", border:`1px solid ${C.grayM}` }}>Fermer</button>
+                                <div style={{ display:"flex", gap:5, marginTop:6, flexWrap:"wrap" }}>
+                                  <button onClick={()=>{ setTlFilters({ segment:isPrivateCompetitor(c)?"private":"residence", competitor:c.name, source:s.source_name, periodId:"", stay_nights:ctx.stayNights||0, capacity:ctx.capacity||0, accommodation_type:"all" }); setTrackTab("timeline"); closeRateEdit(); setScreen("track"); }} style={{ fontSize:12, fontWeight:700, color:C.white, background:C.blue, border:"none", borderRadius:6, padding:"5px 10px", cursor:"pointer" }}>Voir dans Timeline prix →</button>
+                                  <button onClick={closeRateEdit} style={{ fontSize:12, fontWeight:600, color:C.gray, background:C.white, border:`1px solid ${C.grayM}`, borderRadius:6, padding:"5px 10px", cursor:"pointer" }}>Fermer</button>
+                                </div>
                               </div>
                             )}
                             {/* Détails scraping (debug) */}
@@ -4837,6 +4925,86 @@ export default function App() {
             <button onClick={()=>setScreen("dashboard")} style={{ ...btn(false,C.blue), marginTop:8, marginBottom:0 }}>→ Aller au relevé rapide</button>
           </div>
 
+          {/* Onglets Tableau global / Timeline prix */}
+          <div style={{ display:"flex", background:C.grayM, padding:2, borderRadius:9, margin:"8px 0" }}>
+            {[["table","Tableau global"],["timeline","Timeline prix"]].map(([id,lbl])=>(
+              <button key={id} style={tabB(trackTab===id)} onClick={()=>setTrackTab(id)}>{lbl}</button>
+            ))}
+          </div>
+
+          {trackTab==="timeline" && (()=>{
+            const periodsForFilter = ALL_PERIODS.filter(p=>!tlFilters.stay_nights||Number(p.stay_nights||7)===Number(tlFilters.stay_nights));
+            const selPeriod = ALL_PERIODS.find(p=>p.id===tlFilters.periodId);
+            const filters = {
+              segment: tlFilters.segment,
+              competitor: tlFilters.competitor,
+              source: tlFilters.source,
+              period_start: selPeriod ? (selPeriod.period_start||selPeriod.week_start) : null,
+              period_end: selPeriod ? (selPeriod.period_end||addDaysStr(selPeriod.period_start||selPeriod.week_start, selPeriod.stay_nights||7)) : null,
+              stay_nights: tlFilters.stay_nights||0,
+              capacity: tlFilters.capacity||0,
+              accommodation_type: tlFilters.accommodation_type,
+            };
+            const tlRows = addPriceEvolution(getTimelineRows({ rates:histAll, filters }));
+            const tlCompetitors = Array.from(new Set((catalog||[]).map(c=>c.name))).sort();
+            return (
+              <div>
+                <div style={{ display:"flex", gap:4, marginBottom:6, flexWrap:"wrap" }}>
+                  <select value={tlFilters.segment} onChange={e=>setTlFilters(f=>({ ...f, segment:e.target.value }))} style={{ ...inp(), flex:"1 1 30%", fontSize:13, padding:"6px 8px" }}><option value="all">Tous segments</option><option value="residence">Résidences / Pros</option><option value="private">Particuliers</option></select>
+                  <select value={tlFilters.competitor} onChange={e=>setTlFilters(f=>({ ...f, competitor:e.target.value }))} style={{ ...inp(), flex:"1 1 30%", fontSize:13, padding:"6px 8px" }}><option value="">Tous concurrents</option>{tlCompetitors.map(n=><option key={n} value={n}>{n}</option>)}</select>
+                  <select value={tlFilters.source} onChange={e=>setTlFilters(f=>({ ...f, source:e.target.value }))} style={{ ...inp(), flex:"1 1 30%", fontSize:13, padding:"6px 8px" }}><option value="all">Toutes sources</option>{["Booking.com","Site direct","La France du Nord au Sud","Maeva","Airbnb","Abritel","Booking particulier","PAP vacances","Leboncoin"].map(n=><option key={n} value={n}>{n}</option>)}</select>
+                  <select value={tlFilters.periodId} onChange={e=>setTlFilters(f=>({ ...f, periodId:e.target.value }))} style={{ ...inp(), flex:"1 1 45%", fontSize:13, padding:"6px 8px" }}><option value="">Toutes périodes</option>{periodsForFilter.map(p=><option key={p.id} value={p.id}>{periodOptionLabel(p)}</option>)}</select>
+                  <select value={tlFilters.stay_nights} onChange={e=>setTlFilters(f=>({ ...f, stay_nights:parseInt(e.target.value)||0 }))} style={{ ...inp(), flex:"1 1 22%", fontSize:13, padding:"6px 8px" }}><option value="0">Toutes durées</option>{[2,3,4,7].map(n=><option key={n} value={n}>{n} nuits</option>)}</select>
+                  <select value={tlFilters.capacity} onChange={e=>setTlFilters(f=>({ ...f, capacity:parseInt(e.target.value)||0 }))} style={{ ...inp(), flex:"1 1 22%", fontSize:13, padding:"6px 8px" }}><option value="0">Toutes cap.</option>{[2,4,6,8].map(n=><option key={n} value={n}>{n}P</option>)}</select>
+                  <select value={tlFilters.accommodation_type} onChange={e=>setTlFilters(f=>({ ...f, accommodation_type:e.target.value }))} style={{ ...inp(), flex:"1 1 22%", fontSize:13, padding:"6px 8px" }}><option value="all">Toutes typo.</option>{ACCOMMODATION_ORDER.map(a=><option key={a} value={a}>{ACCOMMODATION_SHORT[a]}</option>)}</select>
+                </div>
+
+                {/* Mini graphique */}
+                <div style={card({ marginBottom:8 })}>
+                  <p style={{ margin:"0 0 4px", fontSize:13, fontWeight:700, color:C.text }}>{tlFilters.competitor||"Tous concurrents"} · {tlFilters.source==="all"?"Toutes sources":tlFilters.source}</p>
+                  <MiniPriceChart rows={tlRows} color={C.blue}/>
+                </div>
+
+                <p style={{ ...sml, marginTop:4 }}>{tlRows.length} relevé(s) validé(s)</p>
+                {tlRows.length===0&&<p style={{ textAlign:"center", padding:16, color:C.gray, fontSize:12, fontStyle:"italic" }}>Aucun relevé validé pour ces filtres.</p>}
+
+                {/* Tableau timeline détaillé */}
+                {tlRows.length>0&&(
+                  <div style={{ ...card({ padding:0 }), overflow:"auto" }}>
+                    <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
+                      <thead><tr style={{ background:C.grayL }}>
+                        {["Date relevé","Période séjour","Cap.","Source","Prix","Évol.","Actions"].map(h=><th key={h} style={{ textAlign:"left", padding:"8px 9px", fontSize:11, fontWeight:700, color:C.gray, textTransform:"uppercase", whiteSpace:"nowrap" }}>{h}</th>)}
+                      </tr></thead>
+                      <tbody>
+                        {tlRows.slice().reverse().map((r,i)=>{
+                          const pt=Number(r.price_total||r.price||r.price_week||0);
+                          const nights=Number(r.stay_nights||7);
+                          const pn=r.price_night||Math.round(pt/nights);
+                          const d=r.price_delta;
+                          return (
+                            <tr key={r.id||i} style={{ borderTop:`0.5px solid ${C.grayL}` }}>
+                              <td style={{ padding:"7px 9px", whiteSpace:"nowrap", color:C.gray }}>{fmtCollected(r.collected_at)}</td>
+                              <td style={{ padding:"7px 9px", whiteSpace:"nowrap", fontWeight:600, color:C.text }}>{formatRatePeriod(r)}</td>
+                              <td style={{ padding:"7px 9px", color:C.gray }}>{r.capacity}P</td>
+                              <td style={{ padding:"7px 9px" }}>{(()=>{ const m=sourceBadgeMeta(r.source_channel||r.source_type); return <Badge label={r.source_label||r.source||"?"} color={m.c} bg={m.bg} size={10}/>; })()}</td>
+                              <td style={{ padding:"7px 9px", whiteSpace:"nowrap" }}><strong style={{ color:C.text }}>{fmt(pt)}€</strong> <span style={{ color:C.gray, fontSize:11 }}>· {fmt(pn)}€/n</span></td>
+                              <td style={{ padding:"7px 9px", whiteSpace:"nowrap", fontWeight:700, color:d==null?C.gray:d>0?C.red:d<0?C.green:C.gray }}>{d==null?"—":`${d>0?"+":""}${fmt(d)}€`}</td>
+                              <td style={{ padding:"7px 9px", whiteSpace:"nowrap" }}>
+                                {(r.source_url||r.source_search_url)&&<a href={r.source_url||r.source_search_url} target="_blank" rel="noreferrer" style={{ fontSize:11, color:C.blue, textDecoration:"none", marginRight:6 }}>↗ source</a>}
+                                <button onClick={()=>{ const np=prompt("Nouveau prix séjour (€)", String(pt)); if(np&&!isNaN(Number(np))){ correctCompetitorRate(r, Number(np), "Correction depuis timeline").then(()=>loadHistAll()); } }} style={{ fontSize:11, fontWeight:600, color:C.orange, background:"none", border:"none", cursor:"pointer", padding:0 }}>Modifier</button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {trackTab==="table" && (<>
           {/* B. Historique */}
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
             <p style={sml}>Historique des relevés</p>
@@ -4887,6 +5055,7 @@ export default function App() {
               );
             })}
           </div>
+          </>)}
         </div><BNav/>
       </div>
     );
