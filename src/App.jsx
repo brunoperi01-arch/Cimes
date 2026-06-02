@@ -3642,37 +3642,40 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
             </div>
           </div>
         </div>
-        {/* Résumé décisions commerciales */}
-        <div style={{ ...cd(11), padding:"10px 13px", background:C.bluePale, marginTop:8 }}>
-          <p style={{ margin:"0 0 3px", fontSize:11, fontWeight:700, color:C.blue }}>Décisions commerciales</p>
-          <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
-            <span style={{ fontSize:10, color:C.orange, fontWeight:600 }}>{decisions.filter(d=>d.decision_status==="à faire").length} à faire</span>
-            <span style={{ fontSize:10, color:C.green, fontWeight:600 }}>{decisions.filter(d=>d.decision_status==="appliqué").length} appliquées</span>
+        {/* 3 cartes de synthèse compactes (remplacent les gros boutons) */}
+        <div style={{ ...responsiveGrid(3), marginTop:8 }}>
+          {/* Carte 1 : Décisions commerciales */}
+          <div style={{ ...cd(11,0), padding:"10px 13px", background:C.bluePale }}>
+            <p style={{ margin:"0 0 4px", fontSize:11, fontWeight:700, color:C.blue }}>🧭 Décisions commerciales</p>
+            <div style={{ display:"flex", gap:10, flexWrap:"wrap", marginBottom:3 }}>
+              <span style={{ fontSize:13, fontWeight:700, color:C.orange }}>{decisions.filter(d=>d.decision_status==="à faire").length}<span style={{ fontSize:9, fontWeight:500, color:C.gray }}> à faire</span></span>
+              <span style={{ fontSize:13, fontWeight:700, color:C.green }}>{decisions.filter(d=>d.decision_status==="appliqué").length}<span style={{ fontSize:9, fontWeight:500, color:C.gray }}> appliquées</span></span>
+            </div>
+            {decisions[0]&&<p style={{ margin:"0 0 6px", fontSize:10, color:C.blueL, lineHeight:1.35 }}>Dernière : {decisions[0].action_label||decisions[0].action_type} · {(decisions[0].created_at||"").slice(0,10)}</p>}
+            <button onClick={()=>setScreen("benchmark")} style={{ fontSize:10, fontWeight:700, color:C.white, background:C.blue, border:"none", borderRadius:7, padding:"5px 11px", cursor:"pointer" }}>Voir</button>
           </div>
-          {decisions[0]&&<p style={{ margin:"2px 0 0", fontSize:12, color:C.blueL }}>Dernière : {decisions[0].action_label||decisions[0].action_type} · {decisions[0].period_label||decisions[0].period_id} ({(decisions[0].created_at||"").slice(0,10)})</p>}
-          <button onClick={()=>setScreen("benchmark")} style={{ ...btn(false,C.blue), marginTop:8, marginBottom:0 }}>Ouvrir Benchmark &amp; décisions</button>
-        </div>
 
-        {/* Résumé promotions */}
-        <div style={{ ...cd(11), padding:"10px 13px", background:C.purpleL, marginTop:8 }}>
-          <p style={{ margin:"0 0 3px", fontSize:11, fontWeight:700, color:C.purple }}>🎯 Promotions & courts séjours</p>
-          <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
-            <span style={{ fontSize:10, color:C.orange, fontWeight:600 }}>{promoOpps.filter(o=>o.status==="à étudier").length} à étudier</span>
-            <span style={{ fontSize:10, color:C.blue, fontWeight:600 }}>{promoOpps.filter(o=>o.status==="à publier").length} à publier</span>
+          {/* Carte 2 : Promos actives */}
+          <div style={{ ...cd(11,0), padding:"10px 13px", background:C.purpleL }}>
+            <p style={{ margin:"0 0 4px", fontSize:11, fontWeight:700, color:C.purple }}>🎯 Promos actives</p>
+            <div style={{ display:"flex", gap:10, flexWrap:"wrap", marginBottom:3 }}>
+              <span style={{ fontSize:13, fontWeight:700, color:C.green }}>{ourPromotions.filter(p=>(p.status||"active")==="active").length}<span style={{ fontSize:9, fontWeight:500, color:C.gray }}> actives</span></span>
+              <span style={{ fontSize:13, fontWeight:700, color:C.orange }}>{promoOpps.filter(o=>o.status==="à publier").length}<span style={{ fontSize:9, fontWeight:500, color:C.gray }}> à publier</span></span>
+            </div>
+            {(()=>{ const next=ourPromotions.filter(p=>(p.status||"active")==="active").sort((a,b)=>String(a.period_start||"").localeCompare(String(b.period_start||"")))[0]; return next?<p style={{ margin:"0 0 6px", fontSize:10, color:C.purple, lineHeight:1.35 }}>Prochaine : {(next.period_start&&next.period_end)?`${fmtDateShort(next.period_start)} → ${fmtDateShort(next.period_end)}`:next.promo_label||"—"} · {fmt(Number(next.price_promo||next.promo_price||0))}€</p>:<p style={{ margin:"0 0 6px", fontSize:10, color:C.gray, fontStyle:"italic", lineHeight:1.35 }}>Aucune promo active.</p>; })()}
+            <button onClick={()=>setScreen("promotions")} style={{ fontSize:10, fontWeight:700, color:C.white, background:C.purple, border:"none", borderRadius:7, padding:"5px 11px", cursor:"pointer" }}>Voir</button>
           </div>
-          {(()=>{ const cs=promoOpps.find(o=>o.promo_type==="court_sejour"||o.promo_type==="weekend"); return cs?<p style={{ margin:"2px 0 0", fontSize:12, color:C.purple }}>Prochaine offre : {cs.promo_label} · {cs.period_label||cs.period_id}</p>:null; })()}
-          <button onClick={()=>setScreen("promotions")} style={{ ...btn(false,C.purple), marginTop:8, marginBottom:0 }}>Ouvrir Promotions</button>
-        </div>
 
-        {/* Résumé courts séjours */}
-        <div style={{ ...cd(11), padding:"10px 13px", background:C.orangeL, marginTop:8 }}>
-          <p style={{ margin:"0 0 3px", fontSize:11, fontWeight:700, color:C.orange }}>🗓️ Courts séjours</p>
-          {(()=>{ const we=promoOpps.find(o=>(o.promo_type==="week_end"||o.promo_type==="weekend")); const cs=promoOpps.find(o=>o.promo_type==="court_sejour"); return (<>
-            <p style={{ margin:0, fontSize:12, color:C.text }}>Prochaine offre 2 nuits : {we?`${we.period_label||we.period_id} · ${fmt(Number(we.direct_price||0))}€ direct`:"à étudier"}</p>
-            <p style={{ margin:"1px 0 0", fontSize:12, color:C.text }}>Prochaine offre 3 nuits : {cs?`${cs.period_label||cs.period_id} · ${fmt(Number(cs.direct_price||0))}€ direct`:"à étudier"}</p>
-          </>); })()}
-          {(()=>{ const shortRates=(histAll||[]).filter(r=>[2,3,4].includes(Number(r.stay_nights))); return <p style={{ margin:"2px 0 0", fontSize:11, color:C.gray }}>{shortRates.length===0?"Aucun relevé court séjour pour l'instant — lancez un relevé 2/3/4 nuits.":`${shortRates.length} relevés courts séjours en base.`}</p>; })()}
-          <button onClick={()=>{ setPromoStayNights(3); setScreen("promotions"); }} style={{ ...btn(false,C.orange), marginTop:8, marginBottom:0 }}>Ouvrir Promotions courts séjours</button>
+          {/* Carte 3 : Courts séjours */}
+          <div style={{ ...cd(11,0), padding:"10px 13px", background:C.orangeL }}>
+            <p style={{ margin:"0 0 4px", fontSize:11, fontWeight:700, color:C.orange }}>🗓️ Courts séjours</p>
+            {(()=>{ const shortRates=(histAll||[]).filter(r=>[2,3,4].includes(Number(r.stay_nights))); const we=promoOpps.find(o=>(o.promo_type==="week_end"||o.promo_type==="weekend")); const cs=promoOpps.find(o=>o.promo_type==="court_sejour"); return (<>
+              <p style={{ margin:"0 0 3px", fontSize:13, fontWeight:700, color:C.text }}>{shortRates.length}<span style={{ fontSize:9, fontWeight:500, color:C.gray }}> relevés 2/3/4n</span></p>
+              <p style={{ margin:0, fontSize:10, color:C.text, lineHeight:1.35 }}>2 nuits : {we?`${fmt(Number(we.direct_price||0))}€ direct`:"à étudier"}</p>
+              <p style={{ margin:"0 0 6px", fontSize:10, color:C.text, lineHeight:1.35 }}>3 nuits : {cs?`${fmt(Number(cs.direct_price||0))}€ direct`:"à étudier"}</p>
+            </>); })()}
+            <button onClick={()=>{ setPromoStayNights(3); setScreen("promotions"); }} style={{ fontSize:10, fontWeight:700, color:C.white, background:C.orange, border:"none", borderRadius:7, padding:"5px 11px", cursor:"pointer" }}>Analyser</button>
+          </div>
         </div>
 
         <div style={{ ...responsiveGrid(3), marginTop:8 }}>
