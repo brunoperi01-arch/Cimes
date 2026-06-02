@@ -1287,6 +1287,9 @@ async function saveRadarResult(r) {
     source_name:         r.source_name || null,
     source_url:          r.source_url || null,
     property_name:       r.property_name || null,
+    offer_title:         r.offer_title || null,
+    offer_text:          r.offer_text || null,
+    location:            r.location || null,
     market_segment:      r.market_segment || "non_comparable",
     property_type:       r.property_type || null,
     detected_price:      r.detected_price != null ? Number(r.detected_price) : null,
@@ -2250,24 +2253,30 @@ export default function App() {
   }
   // Analyse Claude : classe l'offre (segment, capacité, prix candidat, score, pression, reco)
   async function analyzeRadarWithClaude(row) {
+    // Exige une vraie offre (texte/titre/prix), pas une simple ligne de recherche
+    const hasRealOffer = (row.offer_text && row.offer_text.trim()) || (row.offer_title && row.offer_title.trim())
+      || row.detected_price > 0 || (row.price_candidates && String(row.price_candidates).trim())
+      || (row.property_name && !/^Recherche /i.test(row.property_name));
+    if (!hasRealOffer) { setRadarMsg("err:Collez d'abord une offre ou un lien à analyser (bouton « Saisir offre trouvée »)."); return; }
     setRadarAnalyzing(row.id); setRadarMsg(null);
     const ctx = radarContext();
     const ourPrice = (()=>{ const r=getOurRateForContext(ourRates, { checkin:row.period_start, checkout:row.period_end, capacity:row.capacity, stayNights:row.stay_nights }, radarFilters.accType); return r?Number(r.price_total||r.price_week||0):0; })();
-    const prompt = `Tu es analyste marché location saisonnière montagne (La Foux d'Allos / Val d'Allos). Classe CETTE offre par rapport à la résidence Les Cimes du Val d'Allos 3*** (typologie ${radarFilters.accType}, ${row.capacity||ctx.capacity} personnes, ${row.stay_nights||7} nuits, tarif public ${ourPrice||"inconnu"}€/séjour).
+    const prompt = `Tu es analyste marché location saisonnière montagne (La Foux d'Allos / Val d'Allos). Classe CETTE offre réelle par rapport à la résidence Les Cimes du Val d'Allos 3*** (typologie ${radarFilters.accType}, ${row.capacity||ctx.capacity} personnes, ${row.stay_nights||7} nuits, tarif public ${ourPrice||"inconnu"}€/séjour).
 
 OFFRE À ANALYSER :
-- Titre : ${row.property_name||"(inconnu)"}
+- Titre : ${row.offer_title||row.property_name||"(inconnu)"}
 - Source : ${row.source_name}
-- URL : ${row.source_url}
-- Texte récupéré : ${row.scraped_text||"(non disponible — déduis de la source et du titre)"}
-- Prix candidats : ${row.price_candidates||"(aucun)"}
+- URL : ${row.source_url||"(aucune)"}
+- Texte / extrait : ${row.offer_text||"(non fourni — déduis du titre, de la source et du prix)"}
+- Prix indiqué : ${row.detected_price||row.price_candidates||"(aucun)"}
 - Période : ${row.period_start} → ${row.period_end} (${row.stay_nights||7} nuits)
-- Capacité recherchée : ${row.capacity||ctx.capacity} personnes
+- Capacité : ${row.detected_capacity||row.capacity||ctx.capacity} personnes
+- Localisation : ${row.location||radarFilters.zone}
 
-Réponds UNIQUEMENT en JSON strict, sans texte autour, avec ce format :
-{"market_segment":"residence|private|hotel|tour_operator|marketplace|non_comparable","detected_capacity":nombre ou null,"detected_price":nombre ou null,"price_night":nombre ou null,"comparability_score":0-100,"pressure":"forte|moyenne|faible","recommended_action":"texte court","ai_summary":"1-2 phrases"}
+Réponds UNIQUEMENT en JSON strict, sans texte autour :
+{"property_name":"nom court du bien","market_segment":"private|residence|hotel|tour_operator|other","property_type":"particulier|résidence|hôtel|autre","detected_capacity":nombre ou null,"detected_price":nombre ou null,"price_night":nombre ou null,"comparability_score":0-100,"confidence":"low|medium|high","pressure_level":"faible|moyenne|forte","ai_summary":"1-2 phrases","recommended_action":"texte court"}
 
-Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a null. Le score de comparabilite est eleve si meme zone, meme capacite, meme type de bien que Les Cimes (residence avec services).`;
+Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a null. Score de comparabilite eleve si meme zone, meme capacite, meme type de bien que Les Cimes (residence avec services).`;
     try {
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method:"POST", headers:{"Content-Type":"application/json"},
@@ -2277,40 +2286,95 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
       const d = await res.json();
       const raw = (d.content||[]).map(b=>b.text||"").join("").replace(/```json|```/g,"").trim();
       const parsed = JSON.parse(raw);
+      const segMap = { other:"non_comparable" };
       await saveRadarResult({
         ...row,
-        market_segment: parsed.market_segment || row.market_segment,
+        property_name: parsed.property_name || row.offer_title || row.property_name,
+        market_segment: segMap[parsed.market_segment] || parsed.market_segment || row.market_segment,
+        property_type: parsed.property_type || row.property_type,
         detected_capacity: parsed.detected_capacity ?? row.detected_capacity,
-        detected_price: parsed.detected_price ?? null,
-        price_night: parsed.price_night ?? (parsed.detected_price?Math.round(parsed.detected_price/(row.stay_nights||7)):null),
+        detected_price: parsed.detected_price ?? row.detected_price ?? null,
+        price_night: parsed.price_night ?? (parsed.detected_price?Math.round(parsed.detected_price/(row.stay_nights||7)):row.price_night),
         comparability_score: parsed.comparability_score ?? null,
+        confidence: parsed.confidence || (parsed.detected_price ? "medium" : "low"),
         ai_summary: parsed.ai_summary || row.ai_summary,
-        recommended_action: parsed.recommended_action || null,
-        confidence: parsed.detected_price ? "medium" : "low",
-        status: "analysé",
+        recommended_action: parsed.recommended_action || (parsed.pressure_level?`Pression ${parsed.pressure_level}`:null),
+        status: "analysée",
       });
       await reloadRadar();
       setRadarMsg("analyzed");
     } catch(e) { setRadarMsg("err:"+(e?.message||"analyse impossible")); }
     setRadarAnalyzing(null);
   }
+  // Ouvre le formulaire de saisie d'une offre trouvée, prérempli depuis la ligne radar
+  function openRadarOffer(row) {
+    const ctx = radarContext();
+    setRadarManual({
+      id: row?.id || null,
+      source_name: row?.source_name || "Autre",
+      source_url: row?.source_url || "",
+      property_name: (row && !/^Recherche /i.test(row.property_name||"")) ? row.property_name : "",
+      offer_title: row?.offer_title || "",
+      offer_text: row?.offer_text || "",
+      detected_price: row?.detected_price ? String(row.detected_price) : "",
+      detected_capacity: row?.detected_capacity ? String(row.detected_capacity) : String(row?.capacity || ctx.capacity || ""),
+      stay_nights: row?.stay_nights || ctx.stayNights || 7,
+      period_start: row?.period_start || ctx.checkin || "",
+      period_end: row?.period_end || ctx.checkout || "",
+      capacity: row?.capacity || ctx.capacity,
+      location: row?.location || ctx.zone,
+      market_segment: row?.market_segment && row.market_segment!=="non_comparable" ? row.market_segment : "private",
+      notes: row?.notes || "",
+    });
+  }
+  async function saveRadarOffer() {
+    if (!radarManual) return;
+    const price = parseFloat(radarManual.detected_price)||0;
+    try {
+      await saveRadarResult({
+        id: radarManual.id || null,
+        scan_date: dateObjToISO(new Date()),
+        period_start: radarManual.period_start, period_end: radarManual.period_end,
+        stay_nights: Number(radarManual.stay_nights)||7, capacity: Number(radarManual.capacity)||radarFilters.capacity,
+        source_name: radarManual.source_name, source_url: radarManual.source_url||null,
+        property_name: radarManual.property_name || radarManual.offer_title || "Offre saisie",
+        offer_title: radarManual.offer_title || null,
+        offer_text: radarManual.offer_text || null,
+        location: radarManual.location || radarFilters.zone,
+        market_segment: radarManual.market_segment || "private",
+        detected_price: price || null,
+        price_night: price ? Math.round(price/(Number(radarManual.stay_nights)||7)) : null,
+        detected_capacity: parseInt(radarManual.detected_capacity)||null,
+        notes: radarManual.notes || null,
+        confidence: "low",
+        status: "offre saisie",
+      });
+      await reloadRadar(); setRadarManual(null); setRadarMsg("saved_offer");
+    } catch(e) { setRadarMsg("err:"+e.message); }
+  }
   // Transforme une offre radar en concurrent suivi (résidence ou particulier) — JAMAIS dans competitor_rates
   async function radarToCompetitor(row, segment) {
     try {
       const isPriv = segment==="private";
-      await saveCompetitorCatalogItem({
+      const sourceType = row.source_name?.toLowerCase().includes("booking")?"booking":isPriv?"marketplace":"tour_operator";
+      const saved = await saveCompetitorCatalogItem({
         name: row.property_name || `${row.source_name} ${row.market_segment}`,
         market_segment: isPriv?"private":"residence",
         is_private_rental: isPriv,
         property_type: isPriv?"particulier":"résidence",
-        source_type: row.source_name?.toLowerCase().includes("booking")?"booking":isPriv?"marketplace":"tour_operator",
+        source_type: sourceType,
         source_name: row.source_name,
         source_url: row.source_url,
         search_location: radarFilters.zone,
         comparability_score: row.comparability_score || (isPriv?60:80),
         notes: `Ajouté depuis Radar Marché · ${row.ai_summary||""}`.slice(0,300),
       });
-      await updateRadarStatus(row.id, "ajouté");
+      // Créer la source associée dans competitor_sources
+      const compId = saved?.id || saved?.[0]?.id;
+      if (compId && row.source_url) {
+        try { await saveCompetitorSource({ competitor_id:compId, source_type:sourceType, source_name:row.source_name||sourceType, source_url:row.source_url, notes:"Source depuis Radar Marché", is_active:true }); } catch(e) { console.warn("source radar:", e?.message); }
+      }
+      await updateRadarStatus(row.id, "suivie");
       await reloadRadar(); await reloadCatalog();
       setRadarMsg("added");
     } catch(e) { setRadarMsg("err:"+e.message); }
@@ -5470,7 +5534,7 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
       (!datesOk || (sameDate(r.period_start, ctx.checkin) && sameDate(r.period_end, ctx.checkout))) &&
       (!radarFilters.capacity || Number(r.capacity)===Number(radarFilters.capacity))
     );
-    const analyzed = scoped.filter(r=>r.detected_price>0 || r.status==="analysé");
+    const analyzed = scoped.filter(r=>r.detected_price>0 || r.status==="analysée" || r.status==="analysé");
     const reco = radarMarketRecommendation(analyzed, ourPrice);
     const recoColor = reco.level==="warning"?C.orange:reco.level==="good"?C.green:C.gray;
     const recoBg = reco.level==="warning"?C.orangeL:reco.level==="good"?C.greenL:C.grayL;
@@ -5506,11 +5570,12 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
 
           <div style={{ display:"flex", gap:5, marginBottom:6, flexWrap:"wrap" }}>
             <button onClick={runRadarScan} disabled={radarScanning||!datesOk||radarSources.length===0} style={{ flex:"1 1 200px", padding:"9px 12px", fontSize:13, fontWeight:700, background:(radarScanning||!datesOk||radarSources.length===0)?C.grayL:C.blue, color:(radarScanning||!datesOk||radarSources.length===0)?C.gray:C.white, border:"none", borderRadius:9, cursor:(radarScanning||!datesOk)?"default":"pointer" }}>{radarScanning?"⏳ Génération des recherches…":"🛰️ Lancer le scan marché"}</button>
-            <button onClick={()=>setRadarManual({ source_name:"Autre", property_name:"", price_candidates:"", market_segment:"private", capacity:radarFilters.capacity })} style={{ fontSize:12, fontWeight:600, color:C.blue, background:C.white, border:`1px solid ${C.blueL}`, borderRadius:8, padding:"8px 11px", cursor:"pointer" }}>+ Saisir une offre</button>
+            <button onClick={()=>openRadarOffer(null)} style={{ fontSize:12, fontWeight:600, color:C.blue, background:C.white, border:`1px solid ${C.blueL}`, borderRadius:8, padding:"8px 11px", cursor:"pointer" }}>+ Saisir une offre</button>
           </div>
           {!datesOk&&<p style={{ margin:"0 0 6px", fontSize:11, color:C.orange }}>Choisissez une période pour générer les liens de recherche.</p>}
-          {radarMsg==="scanned"&&<p style={{ margin:"0 0 6px", fontSize:11, color:C.green, fontWeight:600 }}>✓ Recherches générées. Ouvrez chaque source, repérez une offre, puis « Analyser avec Claude ».</p>}
-          {radarMsg==="analyzed"&&<p style={{ margin:"0 0 6px", fontSize:11, color:C.green, fontWeight:600 }}>✓ Offre analysée par Claude.</p>}
+          {radarMsg==="scanned"&&<p style={{ margin:"0 0 6px", fontSize:11, color:C.green, fontWeight:600 }}>✓ Recherches générées. Ouvrez chaque source, repérez une offre, puis « Saisir offre trouvée ».</p>}
+          {radarMsg==="saved_offer"&&<p style={{ margin:"0 0 6px", fontSize:11, color:C.green, fontWeight:600 }}>✓ Offre enregistrée. Vous pouvez l'analyser avec Claude.</p>}
+          {radarMsg==="analyzed"&&<p style={{ margin:"0 0 6px", fontSize:11, color:C.green, fontWeight:600 }}>✓ Offre analysée et classée par Claude.</p>}
           {radarMsg==="added"&&<p style={{ margin:"0 0 6px", fontSize:11, color:C.green, fontWeight:600 }}>✓ Ajouté aux concurrents suivis.</p>}
           {radarMsg==="opp"&&<p style={{ margin:"0 0 6px", fontSize:11, color:C.green, fontWeight:600 }}>✓ Opportunité créée.</p>}
           {radarMsg?.startsWith("err")&&<p style={{ margin:"0 0 6px", fontSize:11, color:C.red }}>✗ {radarMsg.slice(4)}</p>}
@@ -5523,22 +5588,33 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
             </div>
           )}
 
-          {/* Saisie manuelle d'une offre repérée */}
+          {/* Saisie d'une offre trouvée */}
           {radarManual&&(
             <div style={{ ...cd(11), padding:"11px 13px", border:`1px solid ${C.blue}`, marginBottom:8 }}>
-              <p style={{ margin:"0 0 6px", fontSize:12, fontWeight:700, color:C.blue }}>Saisir une offre repérée</p>
-              <input style={{ ...inp(), marginBottom:5 }} placeholder="Titre / nom de l'annonce" value={radarManual.property_name} onChange={e=>setRadarManual(m=>({ ...m, property_name:e.target.value }))}/>
+              <p style={{ margin:"0 0 6px", fontSize:12, fontWeight:700, color:C.blue }}>Saisir une offre trouvée</p>
+              <p style={{ margin:"0 0 6px", fontSize:10, color:C.gray, fontStyle:"italic" }}>Collez les infos de l'annonce repérée sur la source. Claude l'analysera ensuite.</p>
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:5, marginBottom:5 }}>
                 <select value={radarManual.source_name} onChange={e=>setRadarManual(m=>({ ...m, source_name:e.target.value }))} style={inp()}>{RADAR_SOURCES.map(s=><option key={s.key}>{s.name}</option>)}<option>Autre</option></select>
                 <select value={radarManual.market_segment} onChange={e=>setRadarManual(m=>({ ...m, market_segment:e.target.value }))} style={inp()}>{["residence","private","hotel","tour_operator","marketplace","non_comparable"].map(s=><option key={s} value={s}>{RADAR_SEGMENT_LABEL[s]}</option>)}</select>
               </div>
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:5, marginBottom:5 }}>
-                <input style={inp()} placeholder="Prix candidats (ex 453,541)" value={radarManual.price_candidates} onChange={e=>setRadarManual(m=>({ ...m, price_candidates:e.target.value }))}/>
-                <input style={inp()} placeholder="URL (optionnel)" value={radarManual.source_url||""} onChange={e=>setRadarManual(m=>({ ...m, source_url:e.target.value }))}/>
+              <input style={{ ...inp(), marginBottom:5 }} placeholder="Nom du bien / résidence" value={radarManual.property_name} onChange={e=>setRadarManual(m=>({ ...m, property_name:e.target.value }))}/>
+              <input style={{ ...inp(), marginBottom:5 }} placeholder="Titre de l'annonce" value={radarManual.offer_title} onChange={e=>setRadarManual(m=>({ ...m, offer_title:e.target.value }))}/>
+              <textarea style={{ ...inp(), marginBottom:5, minHeight:54, resize:"vertical" }} placeholder="Texte / extrait de l'annonce (description, équipements, conditions…)" value={radarManual.offer_text} onChange={e=>setRadarManual(m=>({ ...m, offer_text:e.target.value }))}/>
+              <input style={{ ...inp(), marginBottom:5 }} placeholder="URL de l'annonce" value={radarManual.source_url||""} onChange={e=>setRadarManual(m=>({ ...m, source_url:e.target.value }))}/>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:5, marginBottom:5 }}>
+                <input type="number" style={inp()} placeholder="Prix €" value={radarManual.detected_price} onChange={e=>setRadarManual(m=>({ ...m, detected_price:e.target.value }))}/>
+                <input type="number" style={inp()} placeholder="Capacité" value={radarManual.detected_capacity} onChange={e=>setRadarManual(m=>({ ...m, detected_capacity:e.target.value }))}/>
+                <select value={radarManual.stay_nights} onChange={e=>setRadarManual(m=>({ ...m, stay_nights:parseInt(e.target.value) }))} style={inp()}>{[7,4,3,2].map(n=><option key={n} value={n}>{n} nuits</option>)}</select>
               </div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:5, marginBottom:5 }}>
+                <input style={inp()} placeholder="Période début (AAAA-MM-JJ)" value={radarManual.period_start||""} onChange={e=>setRadarManual(m=>({ ...m, period_start:e.target.value }))}/>
+                <input style={inp()} placeholder="Période fin (AAAA-MM-JJ)" value={radarManual.period_end||""} onChange={e=>setRadarManual(m=>({ ...m, period_end:e.target.value }))}/>
+              </div>
+              <input style={{ ...inp(), marginBottom:5 }} placeholder="Localisation" value={radarManual.location||""} onChange={e=>setRadarManual(m=>({ ...m, location:e.target.value }))}/>
+              <input style={{ ...inp(), marginBottom:8 }} placeholder="Notes" value={radarManual.notes||""} onChange={e=>setRadarManual(m=>({ ...m, notes:e.target.value }))}/>
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
                 <button onClick={()=>setRadarManual(null)} style={{ ...btn(false,C.white,C.text), margin:0, border:`1px solid ${C.grayM}` }}>Annuler</button>
-                <button onClick={async()=>{ const cands=(radarManual.price_candidates||"").split(",").map(x=>parseInt(x.trim())).filter(Boolean); await saveRadarResult({ scan_date:dateObjToISO(new Date()), period_start:ctx.checkin, period_end:ctx.checkout, stay_nights:ctx.stayNights, capacity:radarManual.capacity||ctx.capacity, source_name:radarManual.source_name, source_url:radarManual.source_url||null, property_name:radarManual.property_name||"Offre saisie", market_segment:radarManual.market_segment, detected_price:cands[0]||null, price_candidates:cands, confidence:"low", status:"à analyser" }); await reloadRadar(); setRadarManual(null); setRadarMsg("scanned"); }} style={{ ...btn(false,C.blue), margin:0 }}>Ajouter au radar</button>
+                <button onClick={saveRadarOffer} style={{ ...btn(false,C.blue), margin:0 }}>Enregistrer l'offre</button>
               </div>
             </div>
           )}
@@ -5551,10 +5627,16 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
               <div style={{ ...card({ padding:0 }), overflow:"auto", marginBottom:10 }}>
                 <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
                   <thead><tr style={{ background:C.grayL }}>
-                    {["Offre","Source","Segment","Prix","Cap.","Score","Statut","Actions"].map(h=><th key={h} style={{ textAlign:"left", padding:"7px 8px", fontSize:10, fontWeight:700, color:C.gray, textTransform:"uppercase", whiteSpace:"nowrap" }}>{h}</th>)}
+                    {["Offre","Source","Segment","Prix","Cap.","Score","Pression","Statut","Actions"].map(h=><th key={h} style={{ textAlign:"left", padding:"7px 8px", fontSize:10, fontWeight:700, color:C.gray, textTransform:"uppercase", whiteSpace:"nowrap" }}>{h}</th>)}
                   </tr></thead>
                   <tbody>
-                    {scoped.map((r,i)=>{ const [sc,sbg]=RADAR_SEGMENT_COLOR[r.market_segment]||RADAR_SEGMENT_COLOR.non_comparable; const analyzing=radarAnalyzing===r.id; return (
+                    {scoped.map((r,i)=>{ const [sc,sbg]=RADAR_SEGMENT_COLOR[r.market_segment]||RADAR_SEGMENT_COLOR.non_comparable; const analyzing=radarAnalyzing===r.id;
+                      const statusMap = { "à analyser":"recherche à ouvrir", "offre saisie":"offre saisie", "analysée":"analysée", "analysé":"analysée", "ajouté":"suivie", "suivie":"suivie", "ignoré":"ignoré", "opportunité":"opportunité" };
+                      const stLabel = statusMap[r.status] || r.status || "recherche à ouvrir";
+                      const stColor = (stLabel==="analysée")?C.green:(stLabel==="suivie")?C.blue:(stLabel==="ignoré")?C.gray:(stLabel==="offre saisie")?C.purple:(stLabel==="opportunité")?"#0EA5E9":C.orange;
+                      const stBg = (stLabel==="analysée")?C.greenL:(stLabel==="suivie")?C.bluePale:(stLabel==="offre saisie")?C.purpleL:(stLabel==="opportunité")?"#E0F2FE":C.grayL;
+                      const pressure = (()=>{ const a=String(r.recommended_action||"").toLowerCase(); if(a.includes("forte"))return["Forte",C.red,C.redL]; if(a.includes("moyenne"))return["Moyenne",C.orange,C.orangeL]; if(a.includes("faible"))return["Faible",C.green,C.greenL]; return null; })();
+                      return (
                       <tr key={r.id||i} style={{ borderTop:`0.5px solid ${C.grayL}`, verticalAlign:"top" }}>
                         <td style={{ padding:"7px 8px", maxWidth:200 }}>
                           <p style={{ margin:0, fontWeight:600, color:C.text }}>{r.property_name||"—"}</p>
@@ -5566,14 +5648,22 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
                         <td style={{ padding:"7px 8px", whiteSpace:"nowrap" }}>{r.detected_price>0?<><strong style={{ color:C.text }}>{fmt(r.detected_price)}€</strong>{r.price_night?<span style={{ color:C.gray, fontSize:10 }}> · {fmt(r.price_night)}€/n</span>:null}</>:<span style={{ color:C.grayM }}>{r.price_candidates?`cand: ${r.price_candidates}`:"—"}</span>}</td>
                         <td style={{ padding:"7px 8px", color:C.gray }}>{r.detected_capacity||r.capacity||"?"}P</td>
                         <td style={{ padding:"7px 8px", color:C.gray }}>{r.comparability_score!=null?`${r.comparability_score}`:"—"}</td>
-                        <td style={{ padding:"7px 8px" }}><Badge label={r.status||"nouveau"} color={r.status==="analysé"?C.green:r.status==="ajouté"?C.blue:r.status==="ignoré"?C.gray:C.orange} bg={r.status==="analysé"?C.greenL:r.status==="ajouté"?C.bluePale:C.grayL} size={10}/></td>
+                        <td style={{ padding:"7px 8px" }}>{pressure?<Badge label={pressure[0]} color={pressure[1]} bg={pressure[2]} size={10}/>:<span style={{ color:C.grayM }}>—</span>}</td>
+                        <td style={{ padding:"7px 8px" }}><Badge label={stLabel} color={stColor} bg={stBg} size={10}/></td>
                         <td style={{ padding:"7px 8px", whiteSpace:"nowrap" }}>
                           <div style={{ display:"flex", gap:3, flexWrap:"wrap" }}>
-                            <button onClick={()=>analyzeRadarWithClaude(r)} disabled={analyzing} style={{ fontSize:10, fontWeight:700, color:C.white, background:analyzing?C.grayL:C.purple, border:"none", borderRadius:5, padding:"4px 7px", cursor:analyzing?"default":"pointer" }}>{analyzing?"⏳":"Analyser IA"}</button>
-                            <button onClick={()=>radarToCompetitor(r,"residence")} style={{ fontSize:10, fontWeight:600, color:C.blue, background:C.bluePale, border:"none", borderRadius:5, padding:"4px 7px", cursor:"pointer" }}>+ Pro</button>
-                            <button onClick={()=>radarToCompetitor(r,"private")} style={{ fontSize:10, fontWeight:600, color:"#FF5A5F", background:"#FFE9EA", border:"none", borderRadius:5, padding:"4px 7px", cursor:"pointer" }}>+ Particulier</button>
-                            <button onClick={()=>radarToOpportunity(r)} style={{ fontSize:10, fontWeight:600, color:C.green, background:C.greenL, border:"none", borderRadius:5, padding:"4px 7px", cursor:"pointer" }}>Opportunité</button>
-                            <button onClick={async()=>{ await updateRadarStatus(r.id,"ignoré"); await reloadRadar(); }} style={{ fontSize:10, fontWeight:600, color:C.gray, background:C.grayL, border:"none", borderRadius:5, padding:"4px 7px", cursor:"pointer" }}>Ignorer</button>
+                            {(r.status==="analysée"||r.status==="analysé"||r.status==="suivie"||r.status==="opportunité") ? (<>
+                              <button onClick={()=>radarToCompetitor(r,"residence")} style={{ fontSize:10, fontWeight:600, color:C.blue, background:C.bluePale, border:"none", borderRadius:5, padding:"4px 7px", cursor:"pointer" }}>+ Résidence</button>
+                              <button onClick={()=>radarToCompetitor(r,"private")} style={{ fontSize:10, fontWeight:600, color:"#FF5A5F", background:"#FFE9EA", border:"none", borderRadius:5, padding:"4px 7px", cursor:"pointer" }}>+ Particulier</button>
+                              <button onClick={()=>radarToOpportunity(r)} style={{ fontSize:10, fontWeight:600, color:C.green, background:C.greenL, border:"none", borderRadius:5, padding:"4px 7px", cursor:"pointer" }}>Opportunité</button>
+                              <button onClick={()=>openRadarOffer(r)} style={{ fontSize:10, fontWeight:600, color:C.orange, background:C.orangeL, border:"none", borderRadius:5, padding:"4px 7px", cursor:"pointer" }}>Éditer</button>
+                              <button onClick={async()=>{ await updateRadarStatus(r.id,"ignoré"); await reloadRadar(); }} style={{ fontSize:10, fontWeight:600, color:C.gray, background:C.grayL, border:"none", borderRadius:5, padding:"4px 7px", cursor:"pointer" }}>Ignorer</button>
+                            </>):(<>
+                              {r.source_url&&<a href={r.source_url} target="_blank" rel="noreferrer" style={{ fontSize:10, fontWeight:600, color:C.blue, background:C.bluePale, borderRadius:5, padding:"4px 7px", textDecoration:"none" }}>Ouvrir</a>}
+                              <button onClick={()=>openRadarOffer(r)} style={{ fontSize:10, fontWeight:600, color:C.blue, background:C.white, border:`1px solid ${C.blueL}`, borderRadius:5, padding:"4px 7px", cursor:"pointer" }}>Saisir offre trouvée</button>
+                              <button onClick={()=>analyzeRadarWithClaude(r)} disabled={analyzing} style={{ fontSize:10, fontWeight:700, color:C.white, background:analyzing?C.grayL:C.purple, border:"none", borderRadius:5, padding:"4px 7px", cursor:analyzing?"default":"pointer" }}>{analyzing?"⏳":"Analyser IA"}</button>
+                              <button onClick={async()=>{ await updateRadarStatus(r.id,"ignoré"); await reloadRadar(); }} style={{ fontSize:10, fontWeight:600, color:C.gray, background:C.grayL, border:"none", borderRadius:5, padding:"4px 7px", cursor:"pointer" }}>Ignorer</button>
+                            </>)}
                           </div>
                         </td>
                       </tr>
