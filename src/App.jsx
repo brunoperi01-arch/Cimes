@@ -861,12 +861,37 @@ const OUR_PROMOTIONS_LS = "lescimes_our_promotions";
 const PROMO_CHANNELS = { direct:"Direct", booking:"Booking", tour_operator:"Tour-opérateur", marketplace:"Marketplace", other:"Autre" };
 const PROMO_TYPES = { promo_directe:"Promo directe", derniere_minute:"Dernière minute", court_sejour:"Court séjour", early_booking:"Early booking", other:"Autre" };
 
+// Normalise une promo lue (accepte public_price/promo_price OU price_public/price_promo, etc.)
+function normalizePromotion(p) {
+  if (!p) return p;
+  const price_public = p.price_public ?? p.public_price ?? null;
+  const price_promo  = p.price_promo ?? p.promo_price ?? null;
+  const channel      = p.channel ?? p.promo_channel ?? "direct";
+  const date_start   = p.date_start ?? p.start_date ?? null;
+  const date_end     = p.date_end ?? p.end_date ?? null;
+  const pub = Number(price_public || 0), pp = Number(price_promo || 0);
+  const discount_pct = p.discount_pct != null ? p.discount_pct : (pub > 0 && pp > 0 ? Math.round((1 - pp / pub) * 100) : 0);
+  return {
+    ...p,
+    price_public, public_price: price_public,
+    price_promo, promo_price: price_promo,
+    channel, promo_channel: channel,
+    date_start, start_date: date_start,
+    date_end, end_date: date_end,
+    discount_pct,
+    promo_type: p.promo_type || "promo",
+    promo_label: p.promo_label || p.period_label || null,
+    status: p.status || "active",
+  };
+}
 async function getOurPromotions() {
   if (SB_READY) {
-    try { return await sb.select("our_promotions", "order=updated_at.desc&select=*"); }
-    catch { return ls.get(OUR_PROMOTIONS_LS); }
+    try {
+      const rows = await sb.select("our_promotions", "select=*&order=period_start.asc");
+      return (rows || []).map(normalizePromotion);
+    } catch (e) { console.warn("getOurPromotions Supabase:", e?.message); return (ls.get(OUR_PROMOTIONS_LS)||[]).map(normalizePromotion); }
   }
-  return ls.get(OUR_PROMOTIONS_LS);
+  return (ls.get(OUR_PROMOTIONS_LS)||[]).map(normalizePromotion);
 }
 // Promo active correspondant au contexte (dates + durée + capacité + typologie), statut "active"
 function getActivePromoForContext(promotions, ctx, accommodationType) {
@@ -875,10 +900,11 @@ function getActivePromoForContext(promotions, ctx, accommodationType) {
   const stayNights = Number(ctx.stayNights || ctx.stay_nights || 7);
   const start = ctx.checkin || ctx.period_start || ctx.week_start;
   const end = ctx.checkout || ctx.period_end;
-  const accType = String(accommodationType || "");
+  const accType = String(accommodationType || ctx.accommodationType || "");
   const today = dateObjToISO(new Date());
-  const active = promotions.filter(p => {
-    if (p.status !== "active") return false;
+  const sameDate = (a,b) => String(a||"").slice(0,10) === String(b||"").slice(0,10);
+  const active = promotions.map(normalizePromotion).filter(p => {
+    if ((p.status || "active") !== "active") return false;
     if (p.date_start && String(p.date_start).slice(0,10) > today) return false; // pas encore commencée
     if (p.date_end && String(p.date_end).slice(0,10) < today) return false;     // expirée
     return true;
@@ -886,66 +912,53 @@ function getActivePromoForContext(promotions, ctx, accommodationType) {
   // 1. dates + durée + capacité + typologie
   if (accType) {
     const m = active.find(p =>
-      String(p.period_start||"")===String(start||"") && String(p.period_end||"")===String(end||"") &&
+      sameDate(p.period_start, start) && sameDate(p.period_end, end) &&
       Number(p.capacity)===capacity && Number(p.stay_nights||7)===stayNights &&
-      String(p.accommodation_type||"")===accType
+      (!p.accommodation_type || String(p.accommodation_type)===accType)
     );
     if (m) return m;
   }
   // 2. dates + durée + capacité (sans typologie)
   const byDates = active.find(p =>
-    String(p.period_start||"")===String(start||"") && String(p.period_end||"")===String(end||"") &&
+    sameDate(p.period_start, start) && sameDate(p.period_end, end) &&
     Number(p.capacity)===capacity && Number(p.stay_nights||7)===stayNights
   );
-  if (byDates) return byDates;
-  // 3. period_id + capacité + durée
-  const byPeriod = active.find(p =>
-    String(p.period_id||"")===String(ctx.periodId||ctx.period_id||"") &&
-    Number(p.capacity)===capacity && Number(p.stay_nights||7)===stayNights
-  );
-  return byPeriod || null;
+  return byDates || null;
 }
 async function saveOurPromotion(promo) {
-  const pricePromo = Number(promo.price_promo || 0);
-  const pricePublic = Number(promo.price_public || 0);
+  const pricePromo = Number(promo.price_promo ?? promo.promo_price ?? 0);
+  const pricePublic = Number(promo.price_public ?? promo.public_price ?? 0);
   if (!pricePromo) throw new Error("Prix promo manquant.");
-  if (!promo.period_id || !promo.capacity) throw new Error("Période et capacité requises.");
   const stayNights = Number(promo.stay_nights || 7);
   const discountPct = pricePublic > 0 ? Math.round((1 - pricePromo / pricePublic) * 100) : 0;
+  // Payload aligné sur le schéma SQL public.our_promotions (public_price/promo_price/promo_channel/start_date/end_date)
   const payload = {
-    period_id:          promo.period_id,
-    period_label:       promo.period_label || null,
     period_start:       promo.period_start || null,
     period_end:         promo.period_end || null,
-    season:             promo.season || "ete",
     stay_nights:        stayNights,
-    capacity:           Number(promo.capacity),
     accommodation_type: promo.accommodation_type || null,
-    price_public:       pricePublic || null,
-    price_promo:        pricePromo,
-    price_promo_night:  Math.round(pricePromo / stayNights),
+    capacity:           promo.capacity != null ? Number(promo.capacity) : null,
+    public_price:       pricePublic || null,
+    promo_price:        pricePromo,
     discount_pct:       discountPct,
-    channel:            promo.channel || "direct",
-    promo_type:         promo.promo_type || "promo_directe",
-    date_start:         promo.date_start || null,
-    date_end:           promo.date_end || null,
-    notes:              promo.notes || null,
+    promo_type:         promo.promo_type || "promo",
+    promo_label:        promo.promo_label || promo.period_label || null,
+    promo_channel:      promo.promo_channel || promo.channel || "direct",
+    start_date:         promo.start_date || promo.date_start || null,
+    end_date:           promo.end_date || promo.date_end || null,
     status:             promo.status || "active",
-    updated_at:         new Date().toISOString(),
+    notes:              promo.notes || null,
   };
+  if (!payload.period_start || !payload.period_end) throw new Error("Période (dates) requise.");
   if (SB_READY) {
-    try {
-      if (promo.id) { await sb.update("our_promotions", `id=eq.${promo.id}`, payload); return { ...payload, id: promo.id }; }
-      const ins = await sb.insert("our_promotions", payload); return Array.isArray(ins) ? ins[0] : ins;
-    } catch (e) {
-      // Fallback localStorage si table absente
-      const all = ls.get(OUR_PROMOTIONS_LS);
-      if (promo.id) { const i = all.findIndex(x=>x.id===promo.id); if (i>=0) all[i] = { ...all[i], ...payload }; }
-      else all.unshift({ ...payload, id: "local_"+Date.now() });
-      ls.set(OUR_PROMOTIONS_LS, all);
-      return payload;
+    if (promo.id && !String(promo.id).startsWith("local_")) {
+      await sb.update("our_promotions", `id=eq.${promo.id}`, payload);
+      return { ...payload, id: promo.id };
     }
+    const ins = await sb.insert("our_promotions", payload);
+    return Array.isArray(ins) ? ins[0] : ins;
   }
+  // Hors Supabase : localStorage
   const all = ls.get(OUR_PROMOTIONS_LS);
   if (promo.id) { const i = all.findIndex(x=>x.id===promo.id); if (i>=0) all[i] = { ...all[i], ...payload }; }
   else all.unshift({ ...payload, id: "local_"+Date.now() });
@@ -953,7 +966,7 @@ async function saveOurPromotion(promo) {
   return payload;
 }
 async function deleteOurPromotion(id) {
-  if (SB_READY) { try { await sb.update("our_promotions", `id=eq.${id}`, { status: "expiree" }); return; } catch {} }
+  if (SB_READY && !String(id).startsWith("local_")) { await sb.update("our_promotions", `id=eq.${id}`, { status: "expiree" }); return; }
   const all = ls.get(OUR_PROMOTIONS_LS);
   const i = all.findIndex(x=>x.id===id);
   if (i>=0) { all[i].status = "expiree"; ls.set(OUR_PROMOTIONS_LS, all); }
@@ -2135,13 +2148,13 @@ export default function App() {
   async function handleSavePromo() {
     if (!promoForm) return;
     const pricePromo = parseFloat(promoForm.price_promo)||0;
-    if (!pricePromo || !promoForm.period_id) { setPromoSaved("err"); return; }
+    if (!pricePromo || !promoForm.period_start || !promoForm.period_end) { setPromoSaved("err:Prix promo et période requis"); return; }
     try {
       await saveOurPromotion({ ...promoForm, price_public: parseFloat(promoForm.price_public)||0, price_promo: pricePromo });
       await reloadOurPromotions();
       setPromoSaved("ok");
-      setTimeout(()=>{ setPromoForm(null); setPromoSaved(null); }, 900);
-    } catch(e) { setPromoSaved("err"); }
+      setTimeout(()=>{ setPromoForm(null); setPromoSaved(null); }, 1100);
+    } catch(e) { console.error("savePromo:", e); setPromoSaved("err:"+(e?.message||"insertion échouée")); }
   }
   async function handleDeletePromo(id) {
     try { await deleteOurPromotion(id); await reloadOurPromotions(); } catch(e) { console.error(e); }
@@ -5760,10 +5773,10 @@ export default function App() {
               <p style={{ ...sml, margin:"0 0 4px" }}>Notes</p>
               <input style={{ ...inp(), marginBottom:8 }} value={promoForm.notes} onChange={e=>setPromoForm(f=>({ ...f, notes:e.target.value }))} placeholder="ex : offre directe -10%"/>
               {promoSaved==="ok"&&<p style={{ margin:"0 0 6px", fontSize:11, color:C.green, fontWeight:600 }}>✓ Promo enregistrée</p>}
-              {promoSaved==="err"&&<p style={{ margin:"0 0 6px", fontSize:11, color:C.red }}>✗ Prix promo et période requis</p>}
+              {promoSaved?.startsWith("err")&&<p style={{ margin:"0 0 6px", fontSize:11, color:C.red }}>✗ {promoSaved.slice(4)||"Prix promo et période requis"}</p>}
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
                 <button onClick={()=>{ setPromoForm(null); setPromoSaved(null); }} style={{ ...btn(false,C.white,C.text), margin:0, border:`1px solid ${C.grayM}` }}>Annuler</button>
-                <button onClick={handleSavePromo} disabled={!promoForm.price_promo||!promoForm.period_id} style={{ ...btn(!promoForm.price_promo||!promoForm.period_id,C.green), margin:0 }}>{promoForm.id?"Mettre à jour":"Créer la promo"}</button>
+                <button onClick={handleSavePromo} disabled={!promoForm.price_promo||!promoForm.period_start} style={{ ...btn(!promoForm.price_promo||!promoForm.period_start,C.green), margin:0 }}>{promoForm.id?"Mettre à jour":"Créer la promo"}</button>
               </div>
             </div>
           ); })()}
