@@ -935,7 +935,7 @@ async function saveOurPromotion(promo) {
   };
   if (SB_READY) {
     try {
-      if (promo.id) { await sb.update("our_promotions", promo.id, payload); return { ...payload, id: promo.id }; }
+      if (promo.id) { await sb.update("our_promotions", `id=eq.${promo.id}`, payload); return { ...payload, id: promo.id }; }
       const ins = await sb.insert("our_promotions", payload); return Array.isArray(ins) ? ins[0] : ins;
     } catch (e) {
       // Fallback localStorage si table absente
@@ -953,7 +953,7 @@ async function saveOurPromotion(promo) {
   return payload;
 }
 async function deleteOurPromotion(id) {
-  if (SB_READY) { try { await sb.update("our_promotions", id, { status: "expiree" }); return; } catch {} }
+  if (SB_READY) { try { await sb.update("our_promotions", `id=eq.${id}`, { status: "expiree" }); return; } catch {} }
   const all = ls.get(OUR_PROMOTIONS_LS);
   const i = all.findIndex(x=>x.id===id);
   if (i>=0) { all[i].status = "expiree"; ls.set(OUR_PROMOTIONS_LS, all); }
@@ -1936,6 +1936,7 @@ export default function App() {
   const [benchPriceMode, setBenchPriceMode] = useState("public"); // public | promo
   const [promoForm, setPromoForm]         = useState(null); // null=fermé ; objet=formulaire
   const [promoSaved, setPromoSaved]       = useState(null);
+  const [promoListFilter, setPromoListFilter] = useState("active"); // active | brouillon | expiree | all
   const [benchOccupancy, setBenchOccupancy] = useState(6);
   // ── Promotions & courts séjours ───────────────────────────────
   const [promoOpps, setPromoOpps]         = useState([]);
@@ -2094,6 +2095,7 @@ export default function App() {
   useEffect(()=>{ if(user) getImports().then(setImports).catch(()=>{}); },[user]);
   useEffect(()=>{ if(user) getOurRates().then(setOurRates).catch(()=>{}); },[user]);
   useEffect(()=>{ if(user) getOurPromotions().then(setOurPromotions).catch(()=>{}); },[user]);
+  useEffect(()=>{ if(user && (screen==="benchmark"||screen==="promotions"||screen==="tarifs"||screen==="dashboard")) reloadOurPromotions(); /* eslint-disable-next-line */ },[user,screen]);
   useEffect(()=>{ if(user) getCompetitorCatalog().then(setCatalog).catch(()=>{}); },[user]);
   useEffect(()=>{ if(user) getCompetitorSources().then(setSources).catch(()=>{}); },[user]);
 
@@ -2143,6 +2145,13 @@ export default function App() {
   }
   async function handleDeletePromo(id) {
     try { await deleteOurPromotion(id); await reloadOurPromotions(); } catch(e) { console.error(e); }
+  }
+  async function handleHardDeletePromo(id) {
+    try {
+      if (SB_READY) { try { await sb.delete("our_promotions", `id=eq.${id}`); } catch { await deleteOurPromotion(id); } }
+      else { const all = ls.get(OUR_PROMOTIONS_LS).filter(x=>x.id!==id); ls.set(OUR_PROMOTIONS_LS, all); }
+      await reloadOurPromotions();
+    } catch(e) { console.error(e); }
   }
 
   // ── Concurrents suivis : chargement + handlers ────────────────
@@ -5645,6 +5654,25 @@ export default function App() {
       } catch(e) { setPromoMsg("err:"+e.message); }
     }
 
+    // Applique la recommandation comme VRAIE promo (our_promotions), distinct de l'opportunité
+    async function applyAsPromo() {
+      const recPrice = opp.recommendedPrice || 0;
+      if (!recPrice || datesInvalid) { setPromoMsg("err:Recommandation indisponible"); return; }
+      const pub = ourPrice || 0;
+      const message = buildPromoMessage({ promo_type:opp.promoType, stay_nights:stayNights, pressure:opp.pressure });
+      const today = dateObjToISO(new Date());
+      try {
+        await saveOurPromotion({
+          period_id:periodId, period_label:label, period_start:checkin, period_end:checkout, season:promoSeason,
+          stay_nights:stayNights, capacity, accommodation_type:promoAccType,
+          price_public:pub, price_promo:recPrice,
+          channel:"direct", promo_type:(opp.promoType==="court_sejour"?"court_sejour":opp.promoType==="last_minute"?"derniere_minute":"promo_directe"),
+          date_start:today, date_end:checkout, notes:message, status:"active",
+        });
+        await reloadOurPromotions(); setPromoMsg("applied"); setTimeout(()=>setPromoMsg(null),3000);
+      } catch(e) { setPromoMsg("err:"+e.message); }
+    }
+
     return (
       <div><SBar title="Promotions & courts séjours"/>
         <div style={cnt}>
@@ -5655,10 +5683,16 @@ export default function App() {
 
           {/* ── Promotions commerciales Les Cimes (séparées des tarifs publics) ── */}
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:4 }}>
-            <p style={sml}>Promotions commerciales</p>
+            <p style={sml}>Promos appliquées</p>
             <button onClick={()=>openPromoForm(null, {})} style={{ fontSize:11, fontWeight:700, color:C.white, background:C.green, border:"none", borderRadius:7, padding:"6px 11px", cursor:"pointer" }}>+ Créer une promo</button>
           </div>
-          <p style={{ margin:"0 0 6px", fontSize:10, color:C.gray, fontStyle:"italic" }}>Une promo ne remplace jamais le tarif public (our_rates). Elle est stockée séparément dans our_promotions.</p>
+          <p style={{ margin:"0 0 6px", fontSize:10, color:C.gray, fontStyle:"italic" }}>Décisions commerciales en cours. Une promo ne remplace jamais le tarif public (our_rates) — stockée séparément dans our_promotions.</p>
+          <div style={{ display:"flex", gap:4, marginBottom:6, flexWrap:"wrap" }}>
+            {[["active","Actives"],["brouillon","Brouillons"],["expiree","Expirées"],["all","Toutes"]].map(([v,l])=>{
+              const cnt = v==="all" ? ourPromotions.length : ourPromotions.filter(p=>(p.status||"active")===v).length;
+              return <button key={v} onClick={()=>setPromoListFilter(v)} style={{ fontSize:10, fontWeight:promoListFilter===v?700:500, color:promoListFilter===v?C.white:C.gray, background:promoListFilter===v?C.purple:C.white, border:`1px solid ${promoListFilter===v?C.purple:C.grayM}`, borderRadius:6, padding:"5px 9px", cursor:"pointer" }}>{l} ({cnt})</button>;
+            })}
+          </div>
 
           {/* Formulaire promo */}
           {promoForm&&(()=>{ const pub=parseFloat(promoForm.price_public)||0; const pp=parseFloat(promoForm.price_promo)||0; const disc=pub>0&&pp>0?Math.round((1-pp/pub)*100):0; const per=ALL_PERIODS.find(x=>x.id===promoForm.period_id); return (
@@ -5735,31 +5769,37 @@ export default function App() {
           ); })()}
 
           {/* Liste des promos */}
-          {ourPromotions.length===0
-            ? <p style={{ margin:"0 0 8px", fontSize:11, color:C.gray, fontStyle:"italic", textAlign:"center", padding:"8px 0" }}>Aucune promo enregistrée.</p>
+          {(()=>{ const promoList = promoListFilter==="all"?ourPromotions:ourPromotions.filter(p=>(p.status||"active")===promoListFilter); return promoList.length===0
+            ? <p style={{ margin:"0 0 8px", fontSize:11, color:C.gray, fontStyle:"italic", textAlign:"center", padding:"8px 0" }}>Aucune promo {promoListFilter==="all"?"":promoListFilter==="active"?"active":promoListFilter==="brouillon"?"en brouillon":"expirée"}.</p>
             : (
               <div style={{ ...card({ padding:0 }), overflow:"auto", marginBottom:10 }}>
                 <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
                   <thead><tr style={{ background:C.grayL }}>
-                    {["Période","Typo.","Public","Promo","Remise","Canal","Statut","Actions"].map(h=><th key={h} style={{ textAlign:"left", padding:"7px 8px", fontSize:10, fontWeight:700, color:C.gray, textTransform:"uppercase", whiteSpace:"nowrap" }}>{h}</th>)}
+                    {["Période","Typo.","Cap.","Public","Promo","Remise","Canal","Type","Validité","Statut","Actions"].map(h=><th key={h} style={{ textAlign:"left", padding:"7px 8px", fontSize:10, fontWeight:700, color:C.gray, textTransform:"uppercase", whiteSpace:"nowrap" }}>{h}</th>)}
                   </tr></thead>
                   <tbody>
-                    {ourPromotions.map((p,i)=>{
+                    {promoList.map((p,i)=>{
                       const stColor = p.status==="active"?C.green:p.status==="brouillon"?C.orange:C.gray;
                       const stBg = p.status==="active"?C.greenL:p.status==="brouillon"?C.orangeL:C.grayL;
                       const stLabel = p.status==="active"?"Active":p.status==="brouillon"?"Brouillon":"Expirée";
+                      const validite = (p.date_start||p.date_end)?`${p.date_start?fmtDateShort(p.date_start):"…"} → ${p.date_end?fmtDateShort(p.date_end):"…"}`:"—";
                       return (
                         <tr key={p.id||i} style={{ borderTop:`0.5px solid ${C.grayL}` }}>
                           <td style={{ padding:"7px 8px", whiteSpace:"nowrap", fontWeight:600, color:C.text }}>{(p.period_start&&p.period_end)?`${fmtDateShort(p.period_start)} → ${fmtDateShort(p.period_end)}`:p.period_label||"—"}</td>
-                          <td style={{ padding:"7px 8px", color:C.gray }}>{ACCOMMODATION_SHORT[p.accommodation_type]||p.accommodation_type||`${p.capacity}P`}</td>
+                          <td style={{ padding:"7px 8px", color:C.gray }}>{ACCOMMODATION_SHORT[p.accommodation_type]||p.accommodation_type||"—"}</td>
+                          <td style={{ padding:"7px 8px", color:C.gray }}>{p.capacity}P</td>
                           <td style={{ padding:"7px 8px", color:C.gray }}>{p.price_public?`${fmt(p.price_public)}€`:"—"}</td>
                           <td style={{ padding:"7px 8px", fontWeight:700, color:C.green }}>{fmt(p.price_promo)}€</td>
                           <td style={{ padding:"7px 8px", fontWeight:700, color:p.discount_pct>0?C.green:C.gray }}>{p.discount_pct>0?`-${p.discount_pct}%`:"—"}</td>
                           <td style={{ padding:"7px 8px", color:C.gray }}>{PROMO_CHANNELS[p.channel]||p.channel}</td>
+                          <td style={{ padding:"7px 8px", color:C.gray }}>{PROMO_TYPES[p.promo_type]||p.promo_type}</td>
+                          <td style={{ padding:"7px 8px", color:C.gray, whiteSpace:"nowrap" }}>{validite}</td>
                           <td style={{ padding:"7px 8px" }}><Badge label={stLabel} color={stColor} bg={stBg} size={10}/></td>
                           <td style={{ padding:"7px 8px", whiteSpace:"nowrap" }}>
-                            <button onClick={()=>openPromoForm(p,{})} style={{ fontSize:11, fontWeight:600, color:C.blue, background:"none", border:"none", cursor:"pointer", padding:0, marginRight:8 }}>Modifier</button>
-                            {p.status!=="expiree"&&<button onClick={()=>handleDeletePromo(p.id)} style={{ fontSize:11, fontWeight:600, color:C.red, background:"none", border:"none", cursor:"pointer", padding:0 }}>Désactiver</button>}
+                            <button onClick={()=>openPromoForm(p,{})} style={{ fontSize:11, fontWeight:600, color:C.blue, background:"none", border:"none", cursor:"pointer", padding:0, marginRight:7 }}>Modifier</button>
+                            {p.status!=="expiree"&&<button onClick={()=>handleDeletePromo(p.id)} style={{ fontSize:11, fontWeight:600, color:C.orange, background:"none", border:"none", cursor:"pointer", padding:0, marginRight:7 }}>Désactiver</button>}
+                            <button onClick={()=>openPromoForm({ ...p, id:null, status:"brouillon" },{})} style={{ fontSize:11, fontWeight:600, color:C.purple, background:"none", border:"none", cursor:"pointer", padding:0, marginRight:7 }}>Dupliquer</button>
+                            <button onClick={()=>{ if(confirm("Supprimer définitivement cette promo ?")) handleHardDeletePromo(p.id); }} style={{ fontSize:11, fontWeight:600, color:C.red, background:"none", border:"none", cursor:"pointer", padding:0 }}>Suppr.</button>
                           </td>
                         </tr>
                       );
@@ -5767,7 +5807,7 @@ export default function App() {
                   </tbody>
                 </table>
               </div>
-            )}
+            ); })()}
 
           {/* Sélecteurs */}
           <div style={{ ...cd(11), padding:"10px 12px" }}>
@@ -5850,12 +5890,14 @@ export default function App() {
                 <p style={{ margin:0, fontSize:10, color:C.text, fontStyle:"italic" }}>"{buildPromoMessage({ promo_type:opp.promoType, stay_nights:stayNights, pressure:opp.pressure })}"</p>
               </div>
               {promoMsg==="ok"&&<p style={{ margin:"0 0 6px", fontSize:11, color:C.green, fontWeight:600 }}>✓ Opportunité enregistrée</p>}
+              {promoMsg==="applied"&&<p style={{ margin:"0 0 6px", fontSize:11, color:C.green, fontWeight:600 }}>✓ Promo appliquée (visible dans Promos appliquées et Benchmark)</p>}
               {promoMsg?.startsWith("err")&&<p style={{ margin:"0 0 6px", fontSize:11, color:C.red }}>✗ {promoMsg.slice(4)}</p>}
+              <p style={{ margin:"0 0 6px", fontSize:9, color:C.gray, fontStyle:"italic" }}>« Enregistrer opportunité » = idée à étudier (promo_opportunities). « Appliquer comme promo » = décision commerciale active (our_promotions).</p>
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
                 <button onClick={saveOpp} style={{ ...btn(false,C.purple), margin:0 }}>Enregistrer opportunité</button>
+                <button onClick={applyAsPromo} disabled={!opp.recommendedPrice||datesInvalid} style={{ ...btn(!opp.recommendedPrice||datesInvalid,C.green), margin:0 }}>Appliquer comme promo</button>
                 <button onClick={()=>setPromoMsgPreview({ kind:"facebook", text:buildPromoMessage({ promo_type:opp.promoType, stay_nights:stayNights, pressure:opp.pressure }) })} style={{ ...btn(false,C.blue), margin:0 }}>Message Facebook</button>
                 <button onClick={()=>setPromoMsgPreview({ kind:"email", text:buildPromoMessage({ promo_type:opp.promoType, stay_nights:stayNights, pressure:opp.pressure }) })} style={{ ...btn(false,C.white,C.blue), margin:0, border:`1px solid ${C.blueL}` }}>Email promo</button>
-                <button onClick={()=>setPromoMsgPreview(null)} style={{ ...btn(false,C.grayL,C.text), margin:0 }}>Effacer aperçu</button>
               </div>
               {promoMsgPreview&&(
                 <div style={{ ...cd(8), padding:"9px 11px", marginTop:8, background:C.bluePale }}>
