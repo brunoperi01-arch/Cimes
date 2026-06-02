@@ -28,6 +28,10 @@ function normalizeBookingBaseUrl(rawUrl) {
     return "https://www.booking.com/searchresults.html";
   }
 }
+function bookingRoom1(capacity) {
+  const n = Math.max(1, Number(capacity || 1));
+  return Array.from({ length: n }, () => "A").join(",");
+}
 function buildBookingUrl(baseUrl, ctx) {
   const url = new URL(normalizeBookingBaseUrl(baseUrl));
   url.searchParams.set("checkin", ctx.checkin);
@@ -38,6 +42,7 @@ function buildBookingUrl(baseUrl, ctx) {
   url.searchParams.set("req_children", "0");
   url.searchParams.set("no_rooms", "1");
   url.searchParams.set("sb_price_type", "total");
+  url.searchParams.set("room1", bookingRoom1(ctx.capacity));
   return url.toString();
 }
 // La France du Nord au Sud : injecte les dates et la capacité
@@ -202,8 +207,8 @@ function extractBookingPrice(html, ctx, meta = {}) {
       : "Prix Booking non détecté. Page probablement dynamique ou bloquée.";
     return {
       price_total: null, price_candidates: [], confidence: "low",
-      warning: "Booking : prix non détecté automatiquement. Ouvrir et vérifier manuellement.",
-      debug: { detection_method: "booking", prices_found: [], selected_price: null, failure_reason: reason, floor },
+      warning: "Booking : prix non détecté automatiquement. Ouvrez la fiche et saisissez le prix vérifié.",
+      debug: { detection_method: "booking", prices_found: [], selected_price: null, failure_reason: reason, mode: "manual_assisted", floor },
     };
   }
   // Candidats distincts, jamais de moyenne
