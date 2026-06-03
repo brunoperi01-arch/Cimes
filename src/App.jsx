@@ -925,6 +925,106 @@ function getActivePromoForContext(promotions, ctx, accommodationType) {
   );
   return byDates || null;
 }
+// ══ NOS TARIFS EN LIGNE (contrôle diffusion partenaires) ════════
+const ONLINE_SOURCES_LS = "lescimes_online_sources";
+const ONLINE_RATES_LS   = "lescimes_online_rates";
+const ONLINE_SOURCE_TYPES = { booking:"Booking", direct:"Site direct", tour_operator:"Tour-opérateur", marketplace:"Marketplace", other:"Autre" };
+
+async function getOurOnlineSources() {
+  if (SB_READY) {
+    try { const r = await sb.select("our_online_sources", "select=*&order=source_name.asc"); return r || []; }
+    catch (e) { console.warn("getOurOnlineSources:", e?.message); return ls.get(ONLINE_SOURCES_LS) || []; }
+  }
+  return ls.get(ONLINE_SOURCES_LS) || [];
+}
+async function saveOurOnlineSource(s) {
+  const payload = {
+    source_name: String(s.source_name||"").trim(),
+    source_type: s.source_type || "channel",
+    source_url:  s.source_url || null,
+    is_active:   s.is_active !== false,
+    notes:       s.notes || null,
+    updated_at:  new Date().toISOString(),
+  };
+  if (!payload.source_name) throw new Error("Nom de source requis.");
+  if (SB_READY) {
+    try {
+      if (s.id && !String(s.id).startsWith("local_")) { await sb.update("our_online_sources", `id=eq.${s.id}`, payload); return { ...payload, id:s.id }; }
+      const ins = await sb.insert("our_online_sources", payload); return Array.isArray(ins)?ins[0]:ins;
+    } catch (e) {
+      const all = ls.get(ONLINE_SOURCES_LS)||[]; const row={ ...payload, id:s.id||"local_"+Date.now() };
+      const i=all.findIndex(x=>x.id===row.id); if(i>=0)all[i]=row; else all.unshift(row); ls.set(ONLINE_SOURCES_LS, all); return row;
+    }
+  }
+  const all = ls.get(ONLINE_SOURCES_LS)||[]; const row={ ...payload, id:s.id||"local_"+Date.now() };
+  const i=all.findIndex(x=>x.id===row.id); if(i>=0)all[i]=row; else all.unshift(row); ls.set(ONLINE_SOURCES_LS, all); return row;
+}
+async function deleteOurOnlineSource(id) {
+  if (SB_READY && !String(id).startsWith("local_")) { try { await sb.delete("our_online_sources", `id=eq.${id}`); return; } catch {} }
+  const all = (ls.get(ONLINE_SOURCES_LS)||[]).filter(x=>x.id!==id); ls.set(ONLINE_SOURCES_LS, all);
+}
+async function getOurOnlineRates() {
+  if (SB_READY) {
+    try { const r = await sb.select("our_online_rates", "select=*&order=collected_at.desc&limit=500"); return r || []; }
+    catch (e) { console.warn("getOurOnlineRates:", e?.message); return ls.get(ONLINE_RATES_LS) || []; }
+  }
+  return ls.get(ONLINE_RATES_LS) || [];
+}
+async function saveOurOnlineRate(r) {
+  const expected = Number(r.expected_price || 0);
+  const validated = r.validated_price != null ? Number(r.validated_price) : null;
+  const gapAmount = (validated != null && expected > 0) ? Math.round(validated - expected) : null;
+  const gapPct = (validated != null && expected > 0) ? Math.round((gapAmount / expected) * 100) : null;
+  const payload = {
+    source_id:             r.source_id || null,
+    source_name:           r.source_name || null,
+    source_type:           r.source_type || null,
+    source_url:            r.source_url || null,
+    period_start:          r.period_start || null,
+    period_end:            r.period_end || null,
+    stay_nights:           Number(r.stay_nights || 7),
+    accommodation_type:    r.accommodation_type || null,
+    capacity:              r.capacity != null ? Number(r.capacity) : null,
+    expected_public_price: r.expected_public_price != null ? Number(r.expected_public_price) : null,
+    expected_promo_price:  r.expected_promo_price != null ? Number(r.expected_promo_price) : null,
+    expected_price:        expected || null,
+    detected_price:        r.detected_price != null ? Number(r.detected_price) : null,
+    validated_price:       validated,
+    gap_amount:            gapAmount,
+    gap_pct:               gapPct,
+    status:                r.status || "à vérifier",
+    reliability_status:    r.reliability_status || "validé",
+    collected_at:          r.collected_at || dateObjToISO(new Date()),
+    validated_at:          new Date().toISOString(),
+    notes:                 r.notes || null,
+  };
+  if (SB_READY) {
+    try { const ins = await sb.insert("our_online_rates", payload); return Array.isArray(ins)?ins[0]:ins; }
+    catch (e) { const all=ls.get(ONLINE_RATES_LS)||[]; const row={ ...payload, id:"local_"+Date.now() }; all.unshift(row); ls.set(ONLINE_RATES_LS, all); return row; }
+  }
+  const all=ls.get(ONLINE_RATES_LS)||[]; const row={ ...payload, id:"local_"+Date.now() }; all.unshift(row); ls.set(ONLINE_RATES_LS, all); return row;
+}
+// Prix attendu = promo active si présente, sinon tarif public
+function getExpectedOurOnlinePrice({ publicRate, activePromo }) {
+  const publicPrice = Number(publicRate?.price_total || publicRate?.price_week || 0);
+  if (activePromo && (activePromo.price_promo || activePromo.promo_price)) {
+    const promoPrice = Number(activePromo.price_promo || activePromo.promo_price);
+    return { expected_price: promoPrice, expected_public_price: publicPrice, expected_promo_price: promoPrice, mode:"promo" };
+  }
+  return { expected_price: publicPrice, expected_public_price: publicPrice, expected_promo_price: null, mode:"public" };
+}
+// Statut diffusion à partir du prix vérifié vs attendu
+function onlineRateStatus({ validated, expected, expectedPublic, expectedPromo }) {
+  if (validated == null || validated <= 0) return "non trouvé";
+  if (!expected) return "à vérifier";
+  const gapPct = Math.round(((validated - expected) / expected) * 100);
+  // Promo attendue mais prix en ligne ≈ prix public → promo absente
+  if (expectedPromo && expectedPublic && Math.abs(validated - expectedPublic) <= expectedPublic*0.02 && validated > expectedPromo*1.02) return "promo absente";
+  if (gapPct > 2) return "trop haut";
+  if (gapPct < -2) return "trop bas";
+  return "OK";
+}
+
 async function saveOurPromotion(promo) {
   const pricePromo = Number(promo.price_promo ?? promo.promo_price ?? 0);
   const pricePublic = Number(promo.price_public ?? promo.public_price ?? 0);
@@ -2002,6 +2102,14 @@ export default function App() {
   const [radarAnalyzing, setRadarAnalyzing] = useState(null);
   const [radarManual, setRadarManual]     = useState(null);
   const [radarMsg, setRadarMsg]           = useState(null);
+  const [onlineSources, setOnlineSources] = useState([]);
+  const [onlineRates, setOnlineRates]     = useState([]);
+  const [onlineFilters, setOnlineFilters] = useState({ season:"ete", periodId:"", stay_nights:7, accType:"2P6", capacity:6 });
+  const [onlineForm, setOnlineForm]       = useState(null); // formulaire source Les Cimes
+  const [onlinePrices, setOnlinePrices]   = useState({});   // saisie prix vérifié par source
+  const [onlineDetected, setOnlineDetected] = useState({}); // prix détecté (candidat) par source
+  const [onlineMsg, setOnlineMsg]         = useState(null);
+  const [onlineTab, setOnlineTab]         = useState("releve"); // releve | sources | historique
   // ── Concurrents suivis (competitor_catalog) ───────────────────
   const [catalog, setCatalog]             = useState([]);
   const [catForm, setCatForm]             = useState(null); // null = fermé ; objet = formulaire ouvert
@@ -2212,6 +2320,7 @@ export default function App() {
   useEffect(()=>{ if(user) getOurPromotions().then(setOurPromotions).catch(()=>{}); },[user]);
   useEffect(()=>{ if(user && (screen==="benchmark"||screen==="promotions"||screen==="tarifs"||screen==="dashboard")) reloadOurPromotions(); /* eslint-disable-next-line */ },[user,screen]);
   useEffect(()=>{ if(user && screen==="radar") reloadRadar(); /* eslint-disable-next-line */ },[user,screen]);
+  useEffect(()=>{ if(user && (screen==="our_online_rates"||screen==="dashboard"||screen==="benchmark")) { reloadOnlineSources(); reloadOnlineRates(); } /* eslint-disable-next-line */ },[user,screen]);
   useEffect(()=>{ if(user) getCompetitorCatalog().then(setCatalog).catch(()=>{}); },[user]);
   useEffect(()=>{ if(user) getCompetitorSources().then(setSources).catch(()=>{}); },[user]);
 
@@ -2395,6 +2504,76 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
       await reloadRadar();
       setRadarMsg("opp");
     } catch(e) { setRadarMsg("err:"+e.message); }
+  }
+
+  // ── Nos tarifs en ligne (contrôle diffusion) ──────────────────
+  async function reloadOnlineSources() { try { const d=await getOurOnlineSources(); setOnlineSources(d||[]); } catch {} }
+  async function reloadOnlineRates() { try { const d=await getOurOnlineRates(); setOnlineRates(d||[]); } catch {} }
+  function onlineContext() {
+    const p = ALL_PERIODS.find(x=>x.id===onlineFilters.periodId);
+    const checkin = p ? (p.period_start||p.week_start) : null;
+    const nights = onlineFilters.stay_nights || p?.stay_nights || 7;
+    const checkout = p ? (p.period_end || (checkin?addDaysStr(checkin, nights):null)) : null;
+    const acc = ACCOMMODATION_TYPES[onlineFilters.accType];
+    return { checkin, checkout, stayNights:nights, capacity:acc?.capacity||onlineFilters.capacity, accType:onlineFilters.accType, periodId:onlineFilters.periodId, season:onlineFilters.season };
+  }
+  // Prix attendu (public + promo) pour le contexte en ligne courant
+  function onlineExpected() {
+    const ctx = onlineContext();
+    const publicRate = getOurRateForContext(ourRates, ctx, onlineFilters.accType);
+    const activePromo = getActivePromoForContext(ourPromotions, ctx, onlineFilters.accType);
+    return getExpectedOurOnlinePrice({ publicRate, activePromo });
+  }
+  async function saveOnlineSource() {
+    if (!onlineForm) return;
+    try { await saveOurOnlineSource(onlineForm); await reloadOnlineSources(); setOnlineForm(null); setOnlineMsg("source_ok"); }
+    catch(e) { setOnlineMsg("err:"+e.message); }
+  }
+  async function handleDeleteOnlineSource(id) {
+    try { await deleteOurOnlineSource(id); await reloadOnlineSources(); } catch(e) { console.error(e); }
+  }
+  // Enregistre un relevé de notre tarif en ligne (jamais dans competitor_rates)
+  async function saveOnlineRate(source) {
+    const ctx = onlineContext();
+    if (!ctx.checkin || !ctx.checkout) { setOnlineMsg("err:Choisissez une période."); return; }
+    const key = source.id;
+    const validated = parseFloat(onlinePrices[key])||0;
+    if (!validated) { setOnlineMsg("err:Saisissez un prix vérifié."); return; }
+    const exp = onlineExpected();
+    const status = onlineRateStatus({ validated, expected:exp.expected_price, expectedPublic:exp.expected_public_price, expectedPromo:exp.expected_promo_price });
+    try {
+      await saveOurOnlineRate({
+        source_id: source.id, source_name: source.source_name, source_type: source.source_type, source_url: source.source_url,
+        period_start: ctx.checkin, period_end: ctx.checkout, stay_nights: ctx.stayNights,
+        accommodation_type: ctx.accType, capacity: ctx.capacity,
+        expected_public_price: exp.expected_public_price, expected_promo_price: exp.expected_promo_price, expected_price: exp.expected_price,
+        detected_price: onlineDetected[key]!=null?Number(onlineDetected[key]):null,
+        validated_price: validated, status, reliability_status: "validé",
+      });
+      setOnlinePrices(p=>({ ...p, [key]:"" }));
+      await reloadOnlineRates();
+      setOnlineMsg("rate_ok");
+    } catch(e) { setOnlineMsg("err:"+e.message); }
+  }
+  // Synthèse contrôle diffusion (pour Dashboard / Benchmark)
+  function onlineDiffusionSummary(ctx, accType) {
+    const c = ctx || onlineContext();
+    const at = accType || onlineFilters.accType;
+    const latestBySource = {};
+    (onlineRates||[]).forEach(r=>{
+      if (c.checkin && !(String(r.period_start||"").slice(0,10)===String(c.checkin).slice(0,10))) return;
+      if (at && r.accommodation_type && r.accommodation_type!==at) return;
+      const k = r.source_id || r.source_name;
+      if (!latestBySource[k] || String(r.collected_at||"") > String(latestBySource[k].collected_at||"")) latestBySource[k]=r;
+    });
+    const rows = Object.values(latestBySource);
+    return {
+      sources: onlineSources.filter(s=>s.is_active!==false).length,
+      ok: rows.filter(r=>r.status==="OK").length,
+      ecarts: rows.filter(r=>["trop haut","trop bas","promo absente"].includes(r.status)).length,
+      nonTrouves: rows.filter(r=>r.status==="non trouvé").length,
+      rows,
+    };
   }
   // Ouvre le formulaire promo (édition si promo fournie, sinon création préremplie depuis le contexte)
   function openPromoForm(existing, opts={}) {
@@ -3312,7 +3491,7 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
   const NAV=[{id:"dashboard",icon:"▣",l:"Dashboard"},{id:"benchmark",icon:"📊",l:"Benchmark"},{id:"track",icon:"💶",l:"Suivi prix"},{id:"promotions",icon:"🎯",l:"Promos"},{id:"weeks",icon:"📡",l:"Radar"},{id:"diag",icon:"🔬",l:"Diag"}];
   const NAV_GROUPS=[
     { label:"Pilotage", items:[{id:"dashboard",icon:"▣",l:"Dashboard"},{id:"benchmark",icon:"📊",l:"Benchmark"},{id:"promotions",icon:"🎯",l:"Promos"},{id:"track",icon:"💶",l:"Suivi prix"},{id:"radar",icon:"🛰️",l:"Radar Marché"}] },
-    { label:"Données", items:[{id:"tarifs",icon:"💰",l:"Tarifs Les Cimes"},{id:"competitors_residence",icon:"🏢",l:"Concurrents Résidences"},{id:"competitors_private",icon:"🏠",l:"Concurrents Particuliers"},{id:"import",icon:"🔗",l:"Sources & Import"}] },
+    { label:"Données", items:[{id:"tarifs",icon:"💰",l:"Tarifs Les Cimes"},{id:"our_online_rates",icon:"🧾",l:"Nos tarifs en ligne"},{id:"competitors_residence",icon:"🏢",l:"Concurrents Résidences"},{id:"competitors_private",icon:"🏠",l:"Concurrents Particuliers"},{id:"import",icon:"🔗",l:"Sources & Import"}] },
     { label:"Outils", items:[{id:"weeks",icon:"📅",l:"Semaines"},{id:"collect",icon:"📥",l:"Import / Saisie"},{id:"diag",icon:"🔬",l:"Diagnostic"}] },
   ];
   const goScreen=id=>{ setScreen(id); setCM(null); setIaText(null); setPasteEdit(null); };
@@ -3710,6 +3889,19 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
             </div>
             <button onClick={()=>setScreen("tarifs")} style={{ ...btn(false,C.blue), width:"auto", padding:"9px 16px", margin:0 }}>Gérer les tarifs →</button>
           </div>
+          {/* Contrôle diffusion en ligne */}
+          {(()=>{ const sum=onlineDiffusionSummary(); return (
+            <div style={{ marginTop:10, paddingTop:10, borderTop:`0.5px solid ${C.grayL}` }}>
+              <p style={{ margin:"0 0 4px", fontSize:11, fontWeight:700, color:C.text }}>🧾 Contrôle diffusion en ligne</p>
+              <div style={{ display:"flex", gap:12, flexWrap:"wrap", marginBottom:6 }}>
+                <span style={{ fontSize:12, fontWeight:700, color:C.blue }}>{sum.sources}<span style={{ fontSize:9, fontWeight:500, color:C.gray }}> sources</span></span>
+                <span style={{ fontSize:12, fontWeight:700, color:C.green }}>{sum.ok}<span style={{ fontSize:9, fontWeight:500, color:C.gray }}> OK</span></span>
+                <span style={{ fontSize:12, fontWeight:700, color:C.orange }}>{sum.ecarts}<span style={{ fontSize:9, fontWeight:500, color:C.gray }}> écarts</span></span>
+                <span style={{ fontSize:12, fontWeight:700, color:C.gray }}>{sum.nonTrouves}<span style={{ fontSize:9, fontWeight:500, color:C.gray }}> non trouvés</span></span>
+              </div>
+              <button onClick={()=>setScreen("our_online_rates")} style={{ fontSize:10, fontWeight:700, color:C.white, background:C.blue, border:"none", borderRadius:7, padding:"5px 11px", cursor:"pointer" }}>Contrôler mes tarifs en ligne</button>
+            </div>
+          ); })()}
         </div>
 
 
@@ -5528,6 +5720,187 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
   };
 
   // ── Radar Marché Montagne ─────────────────────────────────────
+  // ── Nos tarifs en ligne (contrôle diffusion partenaires) ──────
+  const OurOnlineRates=()=>{
+    const ctx = onlineContext();
+    const datesOk = ctx.checkin && ctx.checkout;
+    const exp = onlineExpected();
+    const activeSources = onlineSources.filter(s=>s.is_active!==false);
+    const summary = onlineDiffusionSummary(ctx, onlineFilters.accType);
+    const statusMeta = st => ({
+      "OK":[C.green,C.greenL], "promo absente":[C.orange,C.orangeL], "trop haut":[C.red,C.redL],
+      "trop bas":["#0EA5E9","#E0F2FE"], "non trouvé":[C.gray,C.grayL], "à vérifier":[C.gray,C.grayL],
+    }[st]||[C.gray,C.grayL]);
+    // dernier relevé par source pour la période courante
+    const lastRateForSource = (sid) => {
+      const rows = (onlineRates||[]).filter(r=>(r.source_id===sid||r.source_name===activeSources.find(s=>s.id===sid)?.source_name) && (!datesOk||String(r.period_start||"").slice(0,10)===String(ctx.checkin).slice(0,10)) && (!onlineFilters.accType||!r.accommodation_type||r.accommodation_type===onlineFilters.accType));
+      return rows.sort((a,b)=>String(b.collected_at||"").localeCompare(String(a.collected_at||"")))[0]||null;
+    };
+    const buildOnlineUrl = (s) => {
+      if (!s.source_url) return null;
+      if (!datesOk) return s.source_url;
+      try { const u=new URL(s.source_url); if(u.hostname.includes("booking.com")){ u.searchParams.set("checkin",ctx.checkin); u.searchParams.set("checkout",ctx.checkout); u.searchParams.set("group_adults",String(ctx.capacity)); u.searchParams.set("no_rooms","1"); } return u.toString(); }
+      catch { return s.source_url; }
+    };
+    return (
+      <div><SBar title="Nos tarifs en ligne"/>
+        <div style={cnt}>
+          <div style={{ ...cd(11), padding:"11px 13px", background:C.bluePale, marginTop:8 }}>
+            <p style={{ margin:0, fontSize:13, fontWeight:700, color:C.blue }}>🧾 Nos tarifs en ligne</p>
+            <p style={{ margin:"3px 0 0", fontSize:11, color:C.blueL }}>Contrôlez que vos partenaires (Booking, Maeva, TO…) affichent bien VOS tarifs Les Cimes. Comparaison avec le tarif public et la promo active. Module séparé : rien n'est écrit dans les relevés concurrents.</p>
+          </div>
+
+          {/* Synthèse contrôle diffusion */}
+          <div style={{ ...responsiveGrid(4), marginBottom:8 }}>
+            {[["Sources suivies",summary.sources,C.blue],["OK",summary.ok,C.green],["Écarts prix",summary.ecarts,C.orange],["Non trouvés",summary.nonTrouves,C.gray]].map(([l,v,c])=>(
+              <div key={l} style={{ ...cd(10,0), padding:"9px 12px" }}><p style={{ margin:0, fontSize:22, fontWeight:700, color:c }}>{v}</p><p style={{ margin:0, fontSize:11, color:C.gray }}>{l}</p></div>
+            ))}
+          </div>
+
+          {/* Onglets */}
+          <div style={{ display:"flex", background:C.grayM, padding:2, borderRadius:9, marginBottom:8 }}>
+            {[["releve","Relevé en ligne"],["sources","Sources Les Cimes"],["historique","Historique"]].map(([id,lbl])=>(
+              <button key={id} style={tabB(onlineTab===id)} onClick={()=>setOnlineTab(id)}>{lbl}</button>
+            ))}
+          </div>
+
+          {onlineMsg==="source_ok"&&<p style={{ margin:"0 0 6px", fontSize:11, color:C.green, fontWeight:600 }}>✓ Source enregistrée</p>}
+          {onlineMsg==="rate_ok"&&<p style={{ margin:"0 0 6px", fontSize:11, color:C.green, fontWeight:600 }}>✓ Relevé en ligne enregistré</p>}
+          {onlineMsg?.startsWith("err")&&<p style={{ margin:"0 0 6px", fontSize:11, color:C.red }}>✗ {onlineMsg.slice(4)}</p>}
+
+          {/* ── Onglet Sources Les Cimes ── */}
+          {onlineTab==="sources"&&(<>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+              <p style={sml}>Sources Les Cimes suivies</p>
+              <button onClick={()=>setOnlineForm({ source_name:"", source_type:"booking", source_url:"", is_active:true, notes:"" })} style={{ fontSize:11, fontWeight:700, color:C.white, background:C.blue, border:"none", borderRadius:7, padding:"6px 11px", cursor:"pointer" }}>+ Ajouter source Les Cimes</button>
+            </div>
+            {onlineForm&&(
+              <div style={{ ...cd(11), padding:"11px 13px", border:`1px solid ${C.blue}`, marginBottom:8 }}>
+                <p style={{ margin:"0 0 6px", fontSize:12, fontWeight:700, color:C.blue }}>{onlineForm.id?"Modifier la source":"Nouvelle source Les Cimes"}</p>
+                <input style={{ ...inp(), marginBottom:5 }} placeholder="Nom (ex : Booking Les Cimes)" value={onlineForm.source_name} onChange={e=>setOnlineForm(f=>({ ...f, source_name:e.target.value }))}/>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:5, marginBottom:5 }}>
+                  <select value={onlineForm.source_type} onChange={e=>setOnlineForm(f=>({ ...f, source_type:e.target.value }))} style={inp()}>{Object.entries(ONLINE_SOURCE_TYPES).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select>
+                  <select value={onlineForm.is_active?"1":"0"} onChange={e=>setOnlineForm(f=>({ ...f, is_active:e.target.value==="1" }))} style={inp()}><option value="1">Active</option><option value="0">Inactive</option></select>
+                </div>
+                <input style={{ ...inp(), marginBottom:5 }} placeholder="URL de la fiche / page tarif" value={onlineForm.source_url} onChange={e=>setOnlineForm(f=>({ ...f, source_url:e.target.value }))}/>
+                <input style={{ ...inp(), marginBottom:8 }} placeholder="Notes" value={onlineForm.notes||""} onChange={e=>setOnlineForm(f=>({ ...f, notes:e.target.value }))}/>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
+                  <button onClick={()=>setOnlineForm(null)} style={{ ...btn(false,C.white,C.text), margin:0, border:`1px solid ${C.grayM}` }}>Annuler</button>
+                  <button onClick={saveOnlineSource} disabled={!onlineForm.source_name} style={{ ...btn(!onlineForm.source_name,C.blue), margin:0 }}>Enregistrer</button>
+                </div>
+              </div>
+            )}
+            {onlineSources.length===0
+              ? <p style={{ textAlign:"center", padding:14, color:C.gray, fontSize:12, fontStyle:"italic" }}>Aucune source. Ajoutez vos canaux (Booking, Maeva, TO…).</p>
+              : onlineSources.map(s=>(
+                <div key={s.id} style={{ ...cd(10), padding:"9px 12px", marginBottom:6, display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+                  <div style={{ minWidth:0 }}>
+                    <span style={{ fontSize:13, fontWeight:600, color:C.text }}>{s.source_name}</span>
+                    <div style={{ display:"flex", gap:5, marginTop:2, alignItems:"center", flexWrap:"wrap" }}>
+                      <Badge label={ONLINE_SOURCE_TYPES[s.source_type]||s.source_type} color={C.blue} bg={C.bluePale} size={10}/>
+                      <Badge label={s.is_active!==false?"Active":"Inactive"} color={s.is_active!==false?C.green:C.gray} bg={s.is_active!==false?C.greenL:C.grayL} size={10}/>
+                      {s.notes&&<span style={{ fontSize:10, color:C.gray }}>{s.notes}</span>}
+                    </div>
+                  </div>
+                  <div style={{ display:"flex", gap:4 }}>
+                    {s.source_url&&<a href={s.source_url} target="_blank" rel="noreferrer" style={{ fontSize:11, fontWeight:600, color:C.blue, background:C.bluePale, borderRadius:5, padding:"5px 9px", textDecoration:"none" }}>Ouvrir</a>}
+                    <button onClick={()=>setOnlineForm({ ...s })} style={{ fontSize:11, fontWeight:600, color:C.orange, background:C.orangeL, border:"none", borderRadius:5, padding:"5px 9px", cursor:"pointer" }}>Modifier</button>
+                    <button onClick={()=>handleDeleteOnlineSource(s.id)} style={{ fontSize:11, fontWeight:600, color:C.red, background:C.redL, border:"none", borderRadius:5, padding:"5px 9px", cursor:"pointer" }}>Supprimer</button>
+                  </div>
+                </div>
+              ))}
+          </>)}
+
+          {/* ── Onglet Relevé en ligne ── */}
+          {onlineTab==="releve"&&(<>
+            <div style={{ display:"flex", gap:5, marginBottom:8, flexWrap:"wrap" }}>
+              <select value={onlineFilters.season} onChange={e=>setOnlineFilters(f=>({ ...f, season:e.target.value }))} style={{ ...inp(), flex:"1 1 90px", fontSize:13, padding:"7px 9px" }}><option value="ete">Été</option><option value="hiver">Hiver</option></select>
+              <select value={onlineFilters.periodId} onChange={e=>setOnlineFilters(f=>({ ...f, periodId:e.target.value }))} style={{ ...inp(), flex:"1 1 200px", fontSize:13, padding:"7px 9px" }}><option value="">Choisir une période…</option>{ALL_PERIODS.filter(p=>p.season===onlineFilters.season).map(p=><option key={p.id} value={p.id}>{periodOptionLabel(p)}</option>)}</select>
+              <select value={onlineFilters.stay_nights} onChange={e=>setOnlineFilters(f=>({ ...f, stay_nights:parseInt(e.target.value) }))} style={{ ...inp(), flex:"1 1 80px", fontSize:13, padding:"7px 9px" }}>{[7,4,3,2].map(n=><option key={n} value={n}>{n} nuits</option>)}</select>
+              <select value={onlineFilters.accType} onChange={e=>setOnlineFilters(f=>({ ...f, accType:e.target.value }))} style={{ ...inp(), flex:"1 1 90px", fontSize:13, padding:"7px 9px" }}>{ACCOMMODATION_ORDER.map(a=><option key={a} value={a}>{ACCOMMODATION_SHORT[a]}</option>)}</select>
+            </div>
+
+            {/* Prix attendu */}
+            {datesOk&&(
+              <div style={{ ...cd(10), padding:"9px 12px", background:exp.mode==="promo"?C.greenL:C.bluePale, marginBottom:8 }}>
+                <p style={{ margin:0, fontSize:11, fontWeight:700, color:exp.mode==="promo"?C.green:C.blue }}>Prix attendu en ligne : {fmt(exp.expected_price)}€ {exp.mode==="promo"?`(promo active, public ${fmt(exp.expected_public_price)}€)`:"(tarif public)"}</p>
+                <p style={{ margin:"1px 0 0", fontSize:10, color:C.gray }}>{periodOptionLabel(ALL_PERIODS.find(p=>p.id===onlineFilters.periodId)||{})} · {ACCOMMODATION_SHORT[onlineFilters.accType]} · {ctx.capacity}P</p>
+              </div>
+            )}
+            {!datesOk&&<p style={{ margin:"0 0 6px", fontSize:11, color:C.orange }}>Choisissez une période pour voir le prix attendu.</p>}
+
+            {activeSources.length===0
+              ? <p style={{ textAlign:"center", padding:14, color:C.gray, fontSize:12, fontStyle:"italic" }}>Aucune source active. Ajoutez vos canaux dans l'onglet « Sources Les Cimes ».</p>
+              : (
+                <div style={{ ...card({ padding:0 }), overflow:"auto" }}>
+                  <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+                    <thead><tr style={{ background:C.grayL }}>
+                      {["Source","Attendu","Détecté","Prix vérifié","Écart","Statut","Actions"].map(h=><th key={h} style={{ textAlign:"left", padding:"7px 8px", fontSize:10, fontWeight:700, color:C.gray, textTransform:"uppercase", whiteSpace:"nowrap" }}>{h}</th>)}
+                    </tr></thead>
+                    <tbody>
+                      {activeSources.map(s=>{ const key=s.id; const last=lastRateForSource(s.id); const vp=onlinePrices[key]??""; const det=onlineDetected[key]; const url=buildOnlineUrl(s);
+                        const liveStatus = vp ? onlineRateStatus({ validated:parseFloat(vp)||0, expected:exp.expected_price, expectedPublic:exp.expected_public_price, expectedPromo:exp.expected_promo_price }) : (last?last.status:null);
+                        const [stc,stbg] = statusMeta(liveStatus||"à vérifier");
+                        const gap = vp&&exp.expected_price ? Math.round((parseFloat(vp)||0)-exp.expected_price) : (last?last.gap_amount:null);
+                        return (
+                        <tr key={s.id} style={{ borderTop:`0.5px solid ${C.grayL}`, verticalAlign:"top" }}>
+                          <td style={{ padding:"7px 8px" }}>
+                            <p style={{ margin:0, fontSize:13, fontWeight:600, color:C.text }}>{s.source_name}</p>
+                            <Badge label={ONLINE_SOURCE_TYPES[s.source_type]||s.source_type} color={C.blue} bg={C.bluePale} size={10}/>
+                          </td>
+                          <td style={{ padding:"7px 8px", whiteSpace:"nowrap" }}>{exp.expected_price?<strong style={{ color:C.text }}>{fmt(exp.expected_price)}€</strong>:"—"}</td>
+                          <td style={{ padding:"7px 8px", whiteSpace:"nowrap" }}>{det!=null?<span style={{ fontSize:11, color:C.orange }}>{fmt(det)}€ <button onClick={()=>setOnlinePrices(p=>({ ...p, [key]:String(det) }))} style={{ fontSize:9, fontWeight:700, color:C.green, background:C.greenL, border:"none", borderRadius:4, padding:"2px 5px", cursor:"pointer" }}>Utiliser</button></span>:<span style={{ color:C.grayM }}>—</span>}</td>
+                          <td style={{ padding:"7px 8px" }}><input type="number" placeholder="Prix en ligne" value={vp} onChange={e=>setOnlinePrices(p=>({ ...p, [key]:e.target.value }))} style={{ width:90, padding:"6px 8px", fontSize:13, border:`1px solid ${C.grayM}`, borderRadius:6, boxSizing:"border-box" }}/></td>
+                          <td style={{ padding:"7px 8px", whiteSpace:"nowrap", fontWeight:700, color:gap==null?C.gray:gap>0?C.red:gap<0?"#0EA5E9":C.green }}>{gap==null?"—":`${gap>0?"+":""}${fmt(gap)}€`}</td>
+                          <td style={{ padding:"7px 8px" }}>{liveStatus?<Badge label={liveStatus} color={stc} bg={stbg} size={10}/>:<span style={{ color:C.grayM }}>—</span>}</td>
+                          <td style={{ padding:"7px 8px", whiteSpace:"nowrap" }}>
+                            <div style={{ display:"flex", gap:3, flexWrap:"wrap" }}>
+                              {url&&<a href={url} target="_blank" rel="noreferrer" style={{ fontSize:10, fontWeight:600, color:C.blue, background:C.bluePale, borderRadius:5, padding:"4px 7px", textDecoration:"none" }}>Ouvrir</a>}
+                              <button onClick={()=>saveOnlineRate(s)} disabled={!vp||!datesOk} style={{ fontSize:10, fontWeight:700, color:(vp&&datesOk)?C.white:C.gray, background:(vp&&datesOk)?C.green:C.grayL, border:"none", borderRadius:5, padding:"4px 8px", cursor:(vp&&datesOk)?"pointer":"default" }}>Enregistrer</button>
+                            </div>
+                            {last&&<p style={{ margin:"2px 0 0", fontSize:9, color:C.gray }}>Dernier : {fmt(Number(last.validated_price||0))}€ ({last.collected_at})</p>}
+                          </td>
+                        </tr>
+                      ); })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            <p style={{ margin:"6px 0 10px", fontSize:10, color:C.gray, fontStyle:"italic" }}>Le prix détecté est un candidat : cliquez « Utiliser » puis « Enregistrer » pour valider. Ces relevés vont dans our_online_rates, jamais dans competitor_rates.</p>
+          </>)}
+
+          {/* ── Onglet Historique ── */}
+          {onlineTab==="historique"&&(
+            onlineRates.length===0
+              ? <p style={{ textAlign:"center", padding:16, color:C.gray, fontSize:12, fontStyle:"italic" }}>Aucun relevé en ligne enregistré.</p>
+              : (
+                <div style={{ ...card({ padding:0 }), overflow:"auto", marginBottom:10 }}>
+                  <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+                    <thead><tr style={{ background:C.grayL }}>
+                      {["Date","Source","Période","Attendu","En ligne","Écart","Statut"].map(h=><th key={h} style={{ textAlign:"left", padding:"7px 8px", fontSize:10, fontWeight:700, color:C.gray, textTransform:"uppercase", whiteSpace:"nowrap" }}>{h}</th>)}
+                    </tr></thead>
+                    <tbody>
+                      {onlineRates.map((r,i)=>{ const [stc,stbg]=statusMeta(r.status); return (
+                        <tr key={r.id||i} style={{ borderTop:`0.5px solid ${C.grayL}` }}>
+                          <td style={{ padding:"7px 8px", color:C.gray, whiteSpace:"nowrap" }}>{fmtCollected(r.collected_at)}</td>
+                          <td style={{ padding:"7px 8px", fontWeight:600, color:C.text, whiteSpace:"nowrap" }}>{r.source_name}</td>
+                          <td style={{ padding:"7px 8px", whiteSpace:"nowrap" }}>{(r.period_start&&r.period_end)?`${fmtDateShort(r.period_start)} → ${fmtDateShort(r.period_end)}`:"—"}</td>
+                          <td style={{ padding:"7px 8px", whiteSpace:"nowrap" }}>{r.expected_price?`${fmt(r.expected_price)}€`:"—"}</td>
+                          <td style={{ padding:"7px 8px", whiteSpace:"nowrap", fontWeight:700, color:C.text }}>{r.validated_price?`${fmt(r.validated_price)}€`:"—"}</td>
+                          <td style={{ padding:"7px 8px", whiteSpace:"nowrap", fontWeight:700, color:r.gap_amount==null?C.gray:r.gap_amount>0?C.red:r.gap_amount<0?"#0EA5E9":C.green }}>{r.gap_amount==null?"—":`${r.gap_amount>0?"+":""}${fmt(r.gap_amount)}€`}</td>
+                          <td style={{ padding:"7px 8px" }}><Badge label={r.status||"—"} color={stc} bg={stbg} size={10}/></td>
+                        </tr>
+                      ); })}
+                    </tbody>
+                  </table>
+                </div>
+              )
+          )}
+        </div><BNav/>
+      </div>
+    );
+  };
+
   const RadarScreen=()=>{
     const ctx = radarContext();
     const datesOk = ctx.checkin && ctx.checkout;
@@ -5863,6 +6236,13 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
                 </div>
               )}
               {usePromo&&<p style={{ margin:"4px 0 0", fontSize:9, color:C.green, fontStyle:"italic" }}>Analyse basée sur le prix promo.</p>}
+              {/* Résumé diffusion en ligne */}
+              {(()=>{ const sum=onlineDiffusionSummary({ checkin:ctx.checkin }, benchAccType); return sum.rows.length>0?(
+                <div style={{ marginTop:6, paddingTop:6, borderTop:`0.5px solid ${C.blueL}` }}>
+                  <p style={{ margin:"0 0 2px", fontSize:9, fontWeight:700, color:C.blueL, textTransform:"uppercase" }}>Diffusion en ligne</p>
+                  {sum.rows.slice(0,4).map((r,i)=>{ const col=r.status==="OK"?C.green:r.status==="non trouvé"?C.gray:C.orange; return <p key={i} style={{ margin:"1px 0 0", fontSize:10, color:C.text }}>{r.source_name} : {r.validated_price?`${fmt(Number(r.validated_price))}€`:"non vérifié"} <span style={{ color:col, fontWeight:600 }}>· {r.status}</span></p>; })}
+                </div>
+              ):null; })()}
               <div style={{ display:"flex", gap:4, marginTop:7 }}>
                 <button onClick={()=>{ setScreen("dashboard"); setDashTarifTab("saisie"); setDashOurPeriodId(selWeekId); setDashOurCap(acc.capacity); }} style={{ ...btn(false,C.white,C.blue), margin:0, border:`1px solid ${C.blueL}`, padding:"6px", fontSize:11 }}>Modifier tarif public</button>
                 <button onClick={()=>openPromoForm(benchActivePromo, { periodId:selWeekId, accType:benchAccType, ctx, pricePublic:benchPublicPrice })} style={{ ...btn(false,C.green), margin:0, padding:"6px", fontSize:11 }}>{benchActivePromo?"Modifier promo":"Créer une promo"}</button>
@@ -6421,6 +6801,7 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
             {screen === "competitors_private" && CompetitorsSegmentScreen({ segment: "private" })}
             {screen === "track" && TrackPrices()}
             {screen === "radar" && RadarScreen()}
+            {screen === "our_online_rates" && OurOnlineRates()}
             {screen === "import" && ImportScreen()}
             {screen === "diag" && Diagnostic()}
           </div>
@@ -6440,6 +6821,7 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
             {screen === "competitors_private" && CompetitorsSegmentScreen({ segment: "private" })}
             {screen === "track" && TrackPrices()}
           {screen === "radar" && RadarScreen()}
+          {screen === "our_online_rates" && OurOnlineRates()}
           {screen === "import" && ImportScreen()}
           {screen === "diag" && Diagnostic()}
         </div>
