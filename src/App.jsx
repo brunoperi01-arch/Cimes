@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import calculateRecommendation from "./domain/pricingEngine.js";
 
 // ══ CONFIG ══════════════════════════════════════════════════════
 const SB_URL = import.meta.env.VITE_SUPABASE_URL || "DEMO";
@@ -6715,6 +6716,22 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
     const privGapPct = (benchOurPrice && privMedian) ? Math.round(((benchOurPrice - privMedian) / privMedian) * 100) : null;
     const privPressure = privGapPct==null ? "indéterminée" : privGapPct>30 ? "forte" : privGapPct>=15 ? "moyenne" : "faible";
     const dec = calcBenchmarkDecision({ ourPrice:benchOurPrice, marketRates:verified, stayNights:ctx.stayNights });
+    // Moteur de recommandation indépendant (src/domain/pricingEngine.js)
+    const engineReco = calculateRecommendation({
+      officialRate: benchPublicPrice,
+      ownOnlineRates: onlineRates.filter(r => sameDate(r.period_start, ctx.checkin) && (!benchAccType || !r.accommodation_type || r.accommodation_type===benchAccType)),
+      competitorRates: histAll,
+      period: { period_start: ctx.checkin, period_end: ctx.checkout, stay_nights: ctx.stayNights },
+      apartmentType: benchAccType,
+      options: { capacity: ctx.capacity },
+    });
+    const engineMeta = {
+      augmenter:{ label:"Augmenter", color:C.green, bg:C.greenL, icon:"↑" },
+      baisser:{ label:"Baisser", color:C.orange, bg:C.orangeL, icon:"↓" },
+      maintenir:{ label:"Maintenir", color:C.blue, bg:C.bluePale, icon:"=" },
+      verifier:{ label:"À vérifier", color:C.gray, bg:C.grayL, icon:"?" },
+    }[engineReco.recommendation] || { label:engineReco.recommendation, color:C.gray, bg:C.grayL, icon:"?" };
+    const confMeta = { forte:C.green, moyenne:C.orange, faible:C.gray }[engineReco.confidence] || C.gray;
     const priceOf = r => Number(r.price_total||r.price_week||r.price||0);
     const usedSources = Array.from(new Set(verified.map(r=>r.source).filter(Boolean)));
     const actChoices = [["increase","Augmenter"],["promo","Baisser / promo"],["maintain","Maintenir"],["surveiller","Surveiller"],["need_data","Relevés insuffisants"]];
@@ -6851,6 +6868,18 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
                 <button onClick={()=>{ setScreen("dashboard"); setDashTarifTab("saisie"); setDashOurPeriodId(selWeekId); setDashOurCap(acc.capacity); }} style={{ ...btn(false,C.white,C.blue), margin:0, border:`1px solid ${C.blueL}`, padding:"6px", fontSize:11 }}>Modifier tarif public</button>
                 <button onClick={()=>openPromoForm(benchActivePromo, { periodId:selWeekId, accType:benchAccType, ctx, pricePublic:benchPublicPrice })} style={{ ...btn(false,C.green), margin:0, padding:"6px", fontSize:11 }}>{benchActivePromo?"Modifier promo":"Créer une promo"}</button>
               </div>
+            </div>
+            {/* Recommandation du moteur (src/domain/pricingEngine.js) */}
+            <div style={{ ...cd(11,0), padding:"10px 12px", background:engineMeta.bg, borderLeft:`3px solid ${engineMeta.color}` }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:6 }}>
+                <p style={{ margin:0, fontSize:11, fontWeight:700, color:engineMeta.color, textTransform:"uppercase" }}>Reco moteur</p>
+                <Badge label={`confiance ${engineReco.confidence}`} color={confMeta} bg={C.white} size={9}/>
+              </div>
+              <p style={{ margin:"1px 0 0", fontSize:18, fontWeight:700, color:engineMeta.color }}>{engineMeta.icon} {engineMeta.label}</p>
+              <p style={{ margin:"2px 0 0", fontSize:11, color:C.text, lineHeight:1.4 }}>{engineReco.explanation}</p>
+              {engineReco.differenceVsMarket&&<p style={{ margin:"3px 0 0", fontSize:10, color:C.gray }}>Vs marché : {engineReco.differenceVsMarket.amount>0?"+":""}{fmt(engineReco.differenceVsMarket.amount)}€ ({engineReco.differenceVsMarket.pct>0?"+":""}{engineReco.differenceVsMarket.pct}%)</p>}
+              {engineReco.differenceVsOwnOnline&&<p style={{ margin:"1px 0 0", fontSize:10, color:C.gray }}>Vs nos prix en ligne : {engineReco.differenceVsOwnOnline.amount>0?"+":""}{fmt(engineReco.differenceVsOwnOnline.amount)}€ ({engineReco.differenceVsOwnOnline.pct>0?"+":""}{engineReco.differenceVsOwnOnline.pct}%)</p>}
+              {engineReco.alerts.length>0&&<p style={{ margin:"4px 0 0", fontSize:10, color:engineMeta.color, fontWeight:600 }}>{engineReco.alerts.length} alerte(s) — voir l'onglet Alertes</p>}
             </div>
             <div style={{ ...cd(11,0), padding:"10px 12px", background:dec.validatedCount>=3?C.greenL:C.goldL }}>
               <p style={{ margin:"0 0 1px", fontSize:11, color:dec.validatedCount>=3?C.green:C.gold, fontWeight:700, textTransform:"uppercase" }}>Marché vérifié ({dec.validatedCount})</p>
