@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import calculateRecommendation from "./domain/pricingEngine.js";
 import { dateISO, dateObjToISO, sameDate, addDaysStr, fmtDateShort, periodOptionLabel, fmtCollected, daysBetween } from "./utils/dates.js";
 import { fmt, fmtPct, median } from "./utils/money.js";
+import { parseCsv, parseCsvNumber, downloadCsv } from "./utils/csv.js";
 
 // ══ CONFIG ══════════════════════════════════════════════════════
 const SB_URL = import.meta.env.VITE_SUPABASE_URL || "DEMO";
@@ -1106,21 +1107,16 @@ async function saveOurOnlineRate(r) {
 // Colonnes : source_name;source_type;period_start;period_end;stay_nights;accommodation_type;capacity;online_price[;notes]
 // Le prix attendu (officiel/promo) est recalculé ici à partir de our_rates + our_promotions.
 async function importOurOnlineRatesCsv(csvText, { ourRates = [], ourPromotions = [] } = {}) {
-  const lines = String(csvText || "").trim().split(/\r?\n/).filter(Boolean);
-  if (lines.length < 2) throw new Error("CSV vide ou sans données.");
-  const sep = lines[0].includes(";") ? ";" : ",";
-  const headers = lines[0].split(sep).map(h => h.trim().toLowerCase());
-  const idx = name => headers.indexOf(name);
+  const { rows } = parseCsv(csvText);
   let ok = 0, errors = 0;
-  for (const line of lines.slice(1)) {
-    const v = line.split(sep).map(x => x.trim().replace(/^"|"$/g, ""));
-    const get = name => { const i = idx(name); return i >= 0 ? v[i] : ""; };
+  for (const row of rows) {
+    const get = name => row[name] || "";
     const accType = normalizeAccommodationType(get("accommodation_type")) || get("accommodation_type") || null;
     const capacity = parseInt(get("capacity")) || (accType ? ACCOMMODATION_TYPES[accType]?.capacity : null);
     const stayNights = parseInt(get("stay_nights")) || 7;
     const periodStart = get("period_start") || null;
     const periodEnd = get("period_end") || (periodStart ? addDaysStr(periodStart, stayNights) : null);
-    const onlinePrice = parseFloat(get("online_price") || get("validated_price") || get("price")) || 0;
+    const onlinePrice = parseCsvNumber(get("online_price") || get("validated_price") || get("price"));
     if (!periodStart || !onlinePrice) { errors++; continue; }
     // Prix attendu recalculé (jamais inventé) à partir des 2 sources internes
     const ctx = { checkin: periodStart, checkout: periodEnd, capacity, stayNights, period_start: periodStart, period_end: periodEnd };
@@ -6292,7 +6288,7 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
             <details style={{ ...cd(10), padding:"9px 12px", marginBottom:8 }}>
               <summary style={{ fontSize:12, fontWeight:700, color:C.green, cursor:"pointer" }}>📥 Importer des relevés en ligne (CSV)</summary>
               <p style={{ margin:"6px 0", fontSize:10, color:C.gray, lineHeight:1.5 }}>Colonnes : <code>source_name;source_type;period_start;period_end;stay_nights;accommodation_type;capacity;online_price;notes</code>. Le prix attendu (officiel + promo) et l'écart sont recalculés automatiquement — aucun prix inventé.</p>
-              <button onClick={()=>{ const tmpl=["source_name;source_type;period_start;period_end;stay_nights;accommodation_type;capacity;online_price;notes","Booking;booking;2026-08-01;2026-08-08;7;3P8;8;855;relevé manuel","Maeva;tour_operator;2026-08-01;2026-08-08;7;3P8;8;831;OK"].join("\n"); const b=new Blob([tmpl],{type:"text/csv;charset=utf-8"}); const u=URL.createObjectURL(b); const a=document.createElement("a"); a.href=u; a.download="modele_tarifs_en_ligne.csv"; a.click(); }} style={{ ...btn(false,C.grayL,C.green), margin:"0 0 6px", border:`1px solid ${C.green}`, fontSize:11 }}>⬇ Modèle CSV</button>
+              <button onClick={()=>{ const tmpl=["source_name;source_type;period_start;period_end;stay_nights;accommodation_type;capacity;online_price;notes","Booking;booking;2026-08-01;2026-08-08;7;3P8;8;855;relevé manuel","Maeva;tour_operator;2026-08-01;2026-08-08;7;3P8;8;831;OK"].join("\n"); downloadCsv("modele_tarifs_en_ligne.csv", tmpl); }} style={{ ...btn(false,C.grayL,C.green), margin:"0 0 6px", border:`1px solid ${C.green}`, fontSize:11 }}>⬇ Modèle CSV</button>
               <textarea value={onlineCsv} onChange={e=>setOnlineCsv(e.target.value)} placeholder="Collez le contenu CSV ici…" style={{ ...inp(), minHeight:70, resize:"vertical", marginBottom:6, fontFamily:"monospace", fontSize:11 }}/>
               {onlineCsvMsg&&<p style={{ margin:"0 0 6px", fontSize:11, color:onlineCsvMsg.startsWith("ok")?C.green:C.red, fontWeight:600 }}>{onlineCsvMsg.startsWith("ok")?"✓ "+onlineCsvMsg.slice(3):"✗ "+onlineCsvMsg.slice(4)}</p>}
               <button onClick={handleImportOnlineCsv} disabled={!onlineCsv.trim()} style={{ ...btn(!onlineCsv.trim(),C.green), margin:0 }}>Importer le CSV</button>
