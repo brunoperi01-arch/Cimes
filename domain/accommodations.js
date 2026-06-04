@@ -111,3 +111,50 @@ export function findRateForGridCell(rates, period, accommodationType) {
     );
   }) || null;
 }
+
+// Sélectionne le tarif officiel correspondant au contexte (dates+durée+capacité+typologie, fallbacks)
+export function getOurRateForContext(ourRates, ctx, accommodationType) {
+  if (!ourRates?.length || !ctx) return null;
+  const capacity = Number(ctx.capacity);
+  const stayNights = Number(ctx.stayNights || ctx.stay_nights || 7);
+  const start = ctx.checkin || ctx.period_start || ctx.week_start;
+  const end = ctx.checkout || ctx.period_end;
+  const active = ourRates.filter(r => r.is_active !== false);
+  const accType = String(accommodationType || "");
+  // 1. Priorité absolue : dates + durée + capacité + typologie
+  if (accType) {
+    const byDatesAndType = active.find(r =>
+      String(r.period_start || "") === String(start || "") &&
+      String(r.period_end || "") === String(end || "") &&
+      Number(r.capacity) === capacity &&
+      Number(r.stay_nights || 7) === stayNights &&
+      String(r.accommodation_type || "") === accType
+    );
+    if (byDatesAndType) return { ...byDatesAndType, match_type: "dates+typologie" };
+  }
+  // 2. Fallback : dates + capacité + durée (sans typologie)
+  const byDates = active.find(r =>
+    String(r.period_start || "") === String(start || "") &&
+    String(r.period_end || "") === String(end || "") &&
+    Number(r.capacity) === capacity &&
+    Number(r.stay_nights || 7) === stayNights
+  );
+  if (byDates) return { ...byDates, match_type: "dates" };
+  // 3. Fallback : period_id + capacité + durée (+ typologie si fournie)
+  if (accType) {
+    const byPeriodIdAndType = active.find(r =>
+      String(r.period_id || "") === String(ctx.periodId || ctx.period_id || "") &&
+      Number(r.capacity) === capacity &&
+      Number(r.stay_nights || 7) === stayNights &&
+      String(r.accommodation_type || "") === accType
+    );
+    if (byPeriodIdAndType) return { ...byPeriodIdAndType, match_type: "period_id+typologie" };
+  }
+  const byPeriodId = active.find(r =>
+    String(r.period_id || "") === String(ctx.periodId || ctx.period_id || "") &&
+    Number(r.capacity) === capacity &&
+    Number(r.stay_nights || 7) === stayNights
+  );
+  if (byPeriodId) return { ...byPeriodId, match_type: "period_id" };
+  return null;
+}
