@@ -7,6 +7,7 @@ import { OUR_PROMOTIONS_LS, PROMO_CHANNELS, PROMO_TYPES, normalizePromotion, get
 import { getOurPromotions, saveOurPromotion, deleteOurPromotion } from "./services/promotionsService.js";
 import { DEFAULT_COMPETITORS, CATALOG_LS, SOURCES_LS, enrichRates, getCompetitorRates, saveCompetitorRate, deleteCompetitorRate, getHistoricalRates, getCompetitorCatalog, saveCompetitorCatalogItem, deleteCompetitorCatalogItem, getCompetitorSources, saveCompetitorSource, deleteCompetitorSource, getAllCompetitorRatesHistory, correctCompetitorRate } from "./services/competitorRatesService.js";
 import { C, CAT_C, CAT_L } from "./components/theme.js";
+import { makeStyles } from "./components/ui.js";
 import Badge from "./components/Badge.jsx";
 import { isOwnProperty, competitorSegment, isPrivateCompetitor, SOURCE_TYPES, sourceBadgeMeta } from "./domain/comparability.js";
 import { ACCOMMODATION_TYPES, ACCOMMODATION_ORDER, ACCOMMODATION_SHORT, ACCOMMODATION_CAPACITIES, FILTER_CAPACITIES, OUR_TARIFS_BY_TYPE, OUR_TARIFS, OUR_TARIFS_META, accommodationTypesForCapacity, defaultAccommodationForCapacity, migrateCapacityToAccommodation, accommodationMeta, fallbackTarifForType, normalizeAccommodationType, inferAccommodationType, findRateForGridCell, getOurRateForContext } from "./domain/accommodations.js";
@@ -2641,27 +2642,13 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
     ? { width:"100%", maxWidth:440, margin:"0 auto", background:C.grayL, minHeight:"100vh", overflow:"hidden" }
     : { width:"100%", background:C.white, borderRadius:16, overflow:"hidden", border:`0.5px solid ${C.grayM}`, minHeight:600 };
   const sbar={ height:46, display:"flex", alignItems:"flex-end", justifyContent:"space-between", padding:"0 20px 6px", background:isMobile?C.grayL:C.white };
-  const cnt ={ padding:isMobile?"0 14px 80px":"0 18px 24px" };
-  const responsiveGrid = (cols = 2) => ({
-    display:"grid",
-    gridTemplateColumns: isMobile ? "1fr" : `repeat(${cols}, minmax(0, 1fr))`,
-    gap: isMobile ? 8 : 14,
-    alignItems:"start",
-  });
-  const formGrid = { display:"grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap:8 };
-  const card = (extra={}) => ({ background:C.white, borderRadius:14, border:`0.5px solid ${C.grayM}`, padding:isMobile?"12px":"14px 16px", boxShadow:"0 1px 3px rgba(16,24,40,0.04)", boxSizing:"border-box", ...extra });
+  const { cnt, responsiveGrid, formGrid, card, cd, rw, btn, sml, inp, tabB } = makeStyles(isMobile);
   const sectionTitle = (txt, icon) => (
     <div style={{ display:"flex", alignItems:"center", gap:7, margin:"4px 2px 8px" }}>
       {icon&&<span style={{ fontSize:17 }}>{icon}</span>}
       <span style={{ fontSize:16, fontWeight:700, color:C.text }}>{txt}</span>
     </div>
   );
-  const cd  =(r=14,mb=8)=>({ background:C.white, borderRadius:r, overflow:"hidden", marginBottom:mb });
-  const rw  =last=>({ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 13px", borderBottom:last?"none":`0.5px solid ${C.grayL}` });
-  const btn =(dis,bg=C.blue,fg=C.white)=>({ width:"100%", padding:"12px", fontSize:14, fontWeight:600, background:dis?"#C7C7CC":bg, color:fg, border:"none", borderRadius:11, cursor:dis?"not-allowed":"pointer", marginBottom:6 });
-  const sml ={ fontSize:12, fontWeight:700, color:C.gray, margin:"12px 2px 5px", letterSpacing:"0.06em", textTransform:"uppercase" };
-  const inp =(extra={})=>({ width:"100%", padding:"9px 11px", fontSize:14, border:`1px solid ${C.grayM}`, borderRadius:9, background:C.white, color:C.text, boxSizing:"border-box", ...extra });
-  const tabB=a=>({ flex:1, padding:"9px 2px", fontSize:13, fontWeight:a?700:400, background:a?C.white:"transparent", color:a?C.blue:C.gray, border:"none", borderRadius:8, cursor:"pointer" });
 
   const SBar=({ title })=>(
     <div style={sbar}>
