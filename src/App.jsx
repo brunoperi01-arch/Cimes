@@ -2149,6 +2149,7 @@ export default function App() {
   const [histFilters, setHistFilters]     = useState({ competitor:"", source:"", capacity:0, status:"", segment:"" });
   const [trackTab, setTrackTab]           = useState("table"); // table | timeline
   const [tlFilters, setTlFilters]         = useState({ segment:"all", competitor:"", source:"all", periodId:"", stay_nights:0, capacity:0, accommodation_type:"all" });
+  const [mxFilters, setMxFilters]         = useState({ season:"ete", segment:"residence", stay_nights:7, capacity:6, accType:"2P6" });
   // ── Décisions commerciales ────────────────────────────────────
   const [decisions, setDecisions]         = useState([]);
   const [decForm, setDecForm]             = useState({ action_type:"maintain", our_price_after:"", direct_price:"", decision_status:"à faire", notes:"" });
@@ -5583,12 +5584,104 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
             <button onClick={()=>setScreen("dashboard")} style={{ ...btn(false,C.blue), marginTop:8, marginBottom:0 }}>→ Aller au relevé rapide</button>
           </div>
 
-          {/* Onglets Tableau global / Timeline prix */}
+          {/* Onglets Tableau global / Timeline prix / Matrice */}
           <div style={{ display:"flex", background:C.grayM, padding:2, borderRadius:9, margin:"8px 0" }}>
-            {[["table","Tableau global"],["timeline","Timeline prix"]].map(([id,lbl])=>(
+            {[["table","Tableau global"],["timeline","Timeline prix"],["matrix","Matrice"]].map(([id,lbl])=>(
               <button key={id} style={tabB(trackTab===id)} onClick={()=>setTrackTab(id)}>{lbl}</button>
             ))}
           </div>
+
+          {trackTab==="matrix" && (()=>{
+            const norm = v => String(v||"").trim().toLowerCase();
+            // Périodes de la saison/durée choisies (colonnes)
+            const cols = ALL_PERIODS
+              .filter(p => p.season===mxFilters.season && Number(p.stay_nights||7)===Number(mxFilters.stay_nights))
+              .sort((a,b)=>String(a.period_start||a.week_start||"").localeCompare(String(b.period_start||b.week_start||"")));
+            // Relevés validés correspondant au verrou capacité+durée+segment
+            const segOf = r => (r.market_segment==="private"||r.is_private_rental===true||r.property_type==="particulier"||r.property_type==="studio") ? "private"
+              : (norm(r.property_type).includes("hôtel")||norm(r.property_type).includes("hotel")) ? "hotel" : "residence";
+            const valid = histAll.filter(r =>
+              String(r.reliability_status||"").toLowerCase()==="validé" &&
+              Number(r.capacity)===Number(mxFilters.capacity) &&
+              Number(r.stay_nights||7)===Number(mxFilters.stay_nights) &&
+              segOf(r)===mxFilters.segment
+            );
+            // Dernier prix validé par concurrent × période (jamais d'interpolation)
+            const competitors = Array.from(new Set(valid.map(r=>r.competitor||r.property_name).filter(Boolean))).sort();
+            const cellFor = (comp, p) => {
+              const ps = p.period_start||p.week_start, pe = p.period_end;
+              const rows = valid.filter(r=>(r.competitor||r.property_name)===comp &&
+                String(r.period_start||"").slice(0,10)===String(ps||"").slice(0,10) &&
+                (!pe || String(r.period_end||"").slice(0,10)===String(pe||"").slice(0,10)))
+                .sort((a,b)=>String(b.collected_at||"").localeCompare(String(a.collected_at||"")));
+              const r = rows[0]; return r?Number(r.price_total||r.price_week||0):null;
+            };
+            // Prix Les Cimes (référence) par période
+            const cimesFor = (p) => {
+              const r = getOurRateForContext(ourRates, { checkin:p.period_start||p.week_start, checkout:p.period_end||addDaysStr(p.period_start||p.week_start, mxFilters.stay_nights), capacity:mxFilters.capacity, stayNights:mxFilters.stay_nights, periodId:p.id }, mxFilters.accType);
+              return r?Number(r.price_total||r.price_week||0):null;
+            };
+            const cellStyle = (price, ref) => {
+              if (price==null) return { bg:C.white, col:C.grayM, txt:"—", pct:null };
+              if (!ref) return { bg:C.grayL, col:C.text, txt:`${fmt(price)}€`, pct:null };
+              const pct = Math.round(((price-ref)/ref)*100);
+              const bg = pct>2?C.greenL:pct<-2?C.orangeL:C.grayL;
+              const col = pct>2?C.green:pct<-2?C.orange:C.text;
+              return { bg, col, txt:`${pct>0?"+":""}${pct}%`, sub:`${fmt(price)}€`, pct };
+            };
+            return (
+              <>
+                <div style={{ display:"flex", gap:5, marginBottom:8, flexWrap:"wrap" }}>
+                  <select value={mxFilters.season} onChange={e=>setMxFilters(f=>({ ...f, season:e.target.value }))} style={{ ...inp(), flex:"1 1 90px", fontSize:13, padding:"7px 9px" }}><option value="ete">Été</option><option value="hiver">Hiver</option></select>
+                  <select value={mxFilters.segment} onChange={e=>setMxFilters(f=>({ ...f, segment:e.target.value }))} style={{ ...inp(), flex:"1 1 130px", fontSize:13, padding:"7px 9px" }}><option value="residence">Résidences / Pros</option><option value="private">Particuliers</option><option value="hotel">Hôtels</option></select>
+                  <select value={mxFilters.stay_nights} onChange={e=>setMxFilters(f=>({ ...f, stay_nights:parseInt(e.target.value) }))} style={{ ...inp(), flex:"1 1 80px", fontSize:13, padding:"7px 9px" }}>{[7,4,3,2].map(n=><option key={n} value={n}>{n} nuits</option>)}</select>
+                  <select value={mxFilters.capacity} onChange={e=>setMxFilters(f=>({ ...f, capacity:parseInt(e.target.value) }))} style={{ ...inp(), flex:"1 1 70px", fontSize:13, padding:"7px 9px" }}>{[2,4,6,8].map(n=><option key={n} value={n}>{n}P</option>)}</select>
+                  <select value={mxFilters.accType} onChange={e=>setMxFilters(f=>({ ...f, accType:e.target.value }))} style={{ ...inp(), flex:"1 1 90px", fontSize:13, padding:"7px 9px" }}>{ACCOMMODATION_ORDER.map(a=><option key={a} value={a}>{ACCOMMODATION_SHORT[a]}</option>)}</select>
+                </div>
+                <div style={{ ...cd(10), padding:"8px 11px", background:C.bluePale, marginBottom:8 }}>
+                  <p style={{ margin:0, fontSize:10, color:C.blueL }}>Écart en % de chaque concurrent vs Les Cimes (référence). Verrou : {mxFilters.capacity}P · {mxFilters.stay_nights} nuits · {ACCOMMODATION_SHORT[mxFilters.accType]} · {mxFilters.segment==="private"?"particuliers":mxFilters.segment==="hotel"?"hôtels":"résidences pros"}. Prix validés uniquement, aucune interpolation.</p>
+                </div>
+                {cols.length===0
+                  ? <p style={{ textAlign:"center", padding:16, color:C.gray, fontSize:12, fontStyle:"italic" }}>Aucune période {mxFilters.stay_nights} nuits pour cette saison.</p>
+                  : (
+                    <div style={{ ...card({ padding:0 }), overflowX:"auto", marginBottom:10 }}>
+                      <table style={{ borderCollapse:"collapse", fontSize:12, minWidth:Math.max(420, 150+cols.length*78) }}>
+                        <thead><tr style={{ background:"#FAFAFB" }}>
+                          <th style={{ position:"sticky", left:0, background:"#FAFAFB", zIndex:2, textAlign:"left", padding:"8px 9px", fontSize:10, fontWeight:700, color:C.gray, textTransform:"uppercase", minWidth:150 }}>Établissement</th>
+                          {cols.map(p=><th key={p.id} style={{ padding:"8px 9px", fontSize:10, fontWeight:700, color:C.gray, textTransform:"uppercase", whiteSpace:"nowrap", textAlign:"center" }}>{fmtDateShort(p.period_start||p.week_start)}</th>)}
+                        </tr></thead>
+                        <tbody>
+                          {/* Ligne Les Cimes (référence, épinglée) */}
+                          <tr>
+                            <td style={{ position:"sticky", left:0, background:C.bluePale, zIndex:2, textAlign:"left", padding:"8px 9px", fontWeight:700, color:C.blue, fontSize:12 }}>🏔️ Les Cimes <span style={{ fontSize:9, color:C.blue }}>RÉFÉRENCE</span></td>
+                            {cols.map(p=>{ const ref=cimesFor(p); return <td key={p.id} style={{ background:C.bluePale, textAlign:"center", padding:"8px 9px", fontWeight:700, color:ref?C.blue:C.grayM, whiteSpace:"nowrap" }}>{ref?`${fmt(ref)}€`:"—"}</td>; })}
+                          </tr>
+                          {competitors.length===0
+                            ? <tr><td colSpan={cols.length+1} style={{ textAlign:"center", padding:14, color:C.gray, fontSize:12, fontStyle:"italic" }}>Aucun relevé validé pour ce verrou.</td></tr>
+                            : competitors.map(comp=>(
+                              <tr key={comp} style={{ borderTop:`0.5px solid ${C.grayL}` }}>
+                                <td style={{ position:"sticky", left:0, background:C.white, zIndex:1, textAlign:"left", padding:"8px 9px", fontWeight:600, color:C.text, fontSize:12, whiteSpace:"nowrap", maxWidth:160, overflow:"hidden", textOverflow:"ellipsis" }}>{comp}</td>
+                                {cols.map(p=>{ const price=cellFor(comp,p); const ref=cimesFor(p); const c=cellStyle(price,ref); return (
+                                  <td key={p.id} style={{ background:c.bg, textAlign:"center", padding:"7px 9px", whiteSpace:"nowrap" }}>
+                                    <span style={{ fontSize:12, fontWeight:700, color:c.col }}>{c.txt}</span>
+                                    {c.sub&&<span style={{ display:"block", fontSize:9, color:C.gray, marginTop:1 }}>{c.sub}</span>}
+                                  </td>
+                                ); })}
+                              </tr>
+                            ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                <div style={{ display:"flex", gap:12, flexWrap:"wrap", fontSize:10, color:C.gray, marginBottom:10, alignItems:"center" }}>
+                  <span style={{ display:"inline-flex", alignItems:"center", gap:5 }}><span style={{ width:13, height:13, borderRadius:3, background:C.orangeL, display:"inline-block" }}></span> Moins cher que vous (−%)</span>
+                  <span style={{ display:"inline-flex", alignItems:"center", gap:5 }}><span style={{ width:13, height:13, borderRadius:3, background:C.grayL, display:"inline-block" }}></span> Aligné (±2%)</span>
+                  <span style={{ display:"inline-flex", alignItems:"center", gap:5 }}><span style={{ width:13, height:13, borderRadius:3, background:C.greenL, display:"inline-block" }}></span> Plus cher que vous (+%)</span>
+                  <span style={{ display:"inline-flex", alignItems:"center", gap:5 }}><span style={{ width:13, height:13, borderRadius:3, background:C.white, border:`1px solid ${C.grayM}`, display:"inline-block" }}></span> — non relevé</span>
+                </div>
+              </>
+            );
+          })()}
 
           {trackTab==="timeline" && (()=>{
             const periodsForFilter = ALL_PERIODS.filter(p=>!tlFilters.stay_nights||Number(p.stay_nights||7)===Number(tlFilters.stay_nights));
