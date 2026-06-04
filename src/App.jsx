@@ -3,6 +3,7 @@ import calculateRecommendation from "./domain/pricingEngine.js";
 import { dateISO, dateObjToISO, sameDate, addDaysStr, fmtDateShort, periodOptionLabel, fmtCollected, daysBetween } from "./utils/dates.js";
 import { fmt, fmtPct, median } from "./utils/money.js";
 import { parseCsv, parseCsvNumber, downloadCsv } from "./utils/csv.js";
+import { OUR_PROMOTIONS_LS, PROMO_CHANNELS, PROMO_TYPES, normalizePromotion, getActivePromoForContext } from "./domain/promotions.js";
 
 // ══ CONFIG ══════════════════════════════════════════════════════
 const SB_URL = import.meta.env.VITE_SUPABASE_URL || "DEMO";
@@ -946,33 +947,8 @@ function getOurRateForContext(ourRates, ctx, accommodationType) {
   return null;
 }
 
-const OUR_PROMOTIONS_LS = "lescimes_our_promotions";
-const PROMO_CHANNELS = { direct:"Direct", booking:"Booking", tour_operator:"Tour-opérateur", marketplace:"Marketplace", other:"Autre" };
-const PROMO_TYPES = { promo_directe:"Promo directe", derniere_minute:"Dernière minute", court_sejour:"Court séjour", early_booking:"Early booking", other:"Autre" };
 
 // Normalise une promo lue (accepte public_price/promo_price OU price_public/price_promo, etc.)
-function normalizePromotion(p) {
-  if (!p) return p;
-  const price_public = p.price_public ?? p.public_price ?? null;
-  const price_promo  = p.price_promo ?? p.promo_price ?? null;
-  const channel      = p.channel ?? p.promo_channel ?? "direct";
-  const date_start   = p.date_start ?? p.start_date ?? null;
-  const date_end     = p.date_end ?? p.end_date ?? null;
-  const pub = Number(price_public || 0), pp = Number(price_promo || 0);
-  const discount_pct = p.discount_pct != null ? p.discount_pct : (pub > 0 && pp > 0 ? Math.round((1 - pp / pub) * 100) : 0);
-  return {
-    ...p,
-    price_public, public_price: price_public,
-    price_promo, promo_price: price_promo,
-    channel, promo_channel: channel,
-    date_start, start_date: date_start,
-    date_end, end_date: date_end,
-    discount_pct,
-    promo_type: p.promo_type || "promo",
-    promo_label: p.promo_label || p.period_label || null,
-    status: p.status || "active",
-  };
-}
 async function getOurPromotions() {
   if (SB_READY) {
     try {
@@ -981,38 +957,6 @@ async function getOurPromotions() {
     } catch (e) { console.warn("getOurPromotions Supabase:", e?.message); return (ls.get(OUR_PROMOTIONS_LS)||[]).map(normalizePromotion); }
   }
   return (ls.get(OUR_PROMOTIONS_LS)||[]).map(normalizePromotion);
-}
-// Promo active correspondant au contexte (dates + durée + capacité + typologie), statut "active"
-function getActivePromoForContext(promotions, ctx, accommodationType) {
-  if (!promotions?.length || !ctx) return null;
-  const capacity = Number(ctx.capacity);
-  const stayNights = Number(ctx.stayNights || ctx.stay_nights || 7);
-  const start = ctx.checkin || ctx.period_start || ctx.week_start;
-  const end = ctx.checkout || ctx.period_end;
-  const accType = String(accommodationType || ctx.accommodationType || "");
-  const today = dateObjToISO(new Date());
-  const sameDate = (a,b) => String(a||"").slice(0,10) === String(b||"").slice(0,10);
-  const active = promotions.map(normalizePromotion).filter(p => {
-    if ((p.status || "active") !== "active") return false;
-    if (p.date_start && String(p.date_start).slice(0,10) > today) return false; // pas encore commencée
-    if (p.date_end && String(p.date_end).slice(0,10) < today) return false;     // expirée
-    return true;
-  });
-  // 1. dates + durée + capacité + typologie
-  if (accType) {
-    const m = active.find(p =>
-      sameDate(p.period_start, start) && sameDate(p.period_end, end) &&
-      Number(p.capacity)===capacity && Number(p.stay_nights||7)===stayNights &&
-      (!p.accommodation_type || String(p.accommodation_type)===accType)
-    );
-    if (m) return m;
-  }
-  // 2. dates + durée + capacité (sans typologie)
-  const byDates = active.find(p =>
-    sameDate(p.period_start, start) && sameDate(p.period_end, end) &&
-    Number(p.capacity)===capacity && Number(p.stay_nights||7)===stayNights
-  );
-  return byDates || null;
 }
 // ══ NOS TARIFS EN LIGNE (contrôle diffusion partenaires) ════════
 const ONLINE_SOURCES_LS = "lescimes_online_sources";
