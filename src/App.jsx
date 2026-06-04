@@ -5618,8 +5618,12 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
             };
             // Prix Les Cimes (référence) par période
             const cimesFor = (p) => {
-              const r = getOurRateForContext(ourRates, { checkin:p.period_start||p.week_start, checkout:p.period_end||addDaysStr(p.period_start||p.week_start, mxFilters.stay_nights), capacity:mxFilters.capacity, stayNights:mxFilters.stay_nights, periodId:p.id }, mxFilters.accType);
-              return r?Number(r.price_total||r.price_week||0):null;
+              const ctx = { checkin:p.period_start||p.week_start, checkout:p.period_end||addDaysStr(p.period_start||p.week_start, mxFilters.stay_nights), capacity:mxFilters.capacity, stayNights:mxFilters.stay_nights, periodId:p.id };
+              const r = getOurRateForContext(ourRates, ctx, mxFilters.accType);
+              const publicPrice = r ? Number(r.price_total||r.price_week||0) : null;
+              const promo = getActivePromoForContext(ourPromotions, ctx, mxFilters.accType);
+              const promoPrice = promo ? Number(promo.price_promo||promo.promo_price||0) : null;
+              return { publicPrice, promoPrice: promoPrice>0?promoPrice:null };
             };
             const cellStyle = (price, ref) => {
               if (price==null) return { bg:C.white, col:C.grayM, txt:"—", pct:null };
@@ -5639,7 +5643,7 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
                   <select value={mxFilters.accType} onChange={e=>setMxFilters(f=>({ ...f, accType:e.target.value }))} style={{ ...inp(), flex:"1 1 90px", fontSize:13, padding:"7px 9px" }}>{ACCOMMODATION_ORDER.map(a=><option key={a} value={a}>{ACCOMMODATION_SHORT[a]}</option>)}</select>
                 </div>
                 <div style={{ ...cd(10), padding:"8px 11px", background:C.bluePale, marginBottom:8 }}>
-                  <p style={{ margin:0, fontSize:10, color:C.blueL }}>Écart en % de chaque concurrent vs Les Cimes (référence). Verrou : {mxFilters.capacity}P · {mxFilters.stay_nights} nuits · {ACCOMMODATION_SHORT[mxFilters.accType]} · {mxFilters.segment==="private"?"particuliers":mxFilters.segment==="hotel"?"hôtels":"résidences pros"}. Prix validés uniquement, aucune interpolation.</p>
+                  <p style={{ margin:0, fontSize:10, color:C.blueL }}>Écart en % de chaque concurrent vs le tarif <b>public</b> Les Cimes (le tarif promo est affiché sous la référence à titre indicatif). Verrou : {mxFilters.capacity}P · {mxFilters.stay_nights} nuits · {ACCOMMODATION_SHORT[mxFilters.accType]} · {mxFilters.segment==="private"?"particuliers":mxFilters.segment==="hotel"?"hôtels":"résidences pros"}. Prix validés uniquement, aucune interpolation.</p>
                 </div>
                 {cols.length===0
                   ? <p style={{ textAlign:"center", padding:16, color:C.gray, fontSize:12, fontStyle:"italic" }}>Aucune période {mxFilters.stay_nights} nuits pour cette saison.</p>
@@ -5651,17 +5655,22 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
                           {cols.map(p=><th key={p.id} style={{ padding:"8px 9px", fontSize:10, fontWeight:700, color:C.gray, textTransform:"uppercase", whiteSpace:"nowrap", textAlign:"center" }}>{fmtDateShort(p.period_start||p.week_start)}</th>)}
                         </tr></thead>
                         <tbody>
-                          {/* Ligne Les Cimes (référence, épinglée) */}
+                          {/* Ligne Les Cimes (référence, épinglée) — tarif public + promo active */}
                           <tr>
                             <td style={{ position:"sticky", left:0, background:C.bluePale, zIndex:2, textAlign:"left", padding:"8px 9px", fontWeight:700, color:C.blue, fontSize:12 }}>🏔️ Les Cimes <span style={{ fontSize:9, color:C.blue }}>RÉFÉRENCE</span></td>
-                            {cols.map(p=>{ const ref=cimesFor(p); return <td key={p.id} style={{ background:C.bluePale, textAlign:"center", padding:"8px 9px", fontWeight:700, color:ref?C.blue:C.grayM, whiteSpace:"nowrap" }}>{ref?`${fmt(ref)}€`:"—"}</td>; })}
+                            {cols.map(p=>{ const cm=cimesFor(p); return (
+                              <td key={p.id} style={{ background:C.bluePale, textAlign:"center", padding:"8px 9px", whiteSpace:"nowrap" }}>
+                                <span style={{ fontSize:12, fontWeight:700, color:cm.publicPrice?C.blue:C.grayM }}>{cm.publicPrice?`${fmt(cm.publicPrice)}€`:"—"}</span>
+                                {cm.promoPrice&&<span style={{ display:"block", fontSize:10, fontWeight:700, color:C.green, marginTop:1 }}>{fmt(cm.promoPrice)}€ promo</span>}
+                              </td>
+                            ); })}
                           </tr>
                           {competitors.length===0
                             ? <tr><td colSpan={cols.length+1} style={{ textAlign:"center", padding:14, color:C.gray, fontSize:12, fontStyle:"italic" }}>Aucun relevé validé pour ce verrou.</td></tr>
                             : competitors.map(comp=>(
                               <tr key={comp} style={{ borderTop:`0.5px solid ${C.grayL}` }}>
                                 <td style={{ position:"sticky", left:0, background:C.white, zIndex:1, textAlign:"left", padding:"8px 9px", fontWeight:600, color:C.text, fontSize:12, whiteSpace:"nowrap", maxWidth:160, overflow:"hidden", textOverflow:"ellipsis" }}>{comp}</td>
-                                {cols.map(p=>{ const price=cellFor(comp,p); const ref=cimesFor(p); const c=cellStyle(price,ref); return (
+                                {cols.map(p=>{ const price=cellFor(comp,p); const ref=cimesFor(p).publicPrice; const c=cellStyle(price,ref); return (
                                   <td key={p.id} style={{ background:c.bg, textAlign:"center", padding:"7px 9px", whiteSpace:"nowrap" }}>
                                     <span style={{ fontSize:12, fontWeight:700, color:c.col }}>{c.txt}</span>
                                     {c.sub&&<span style={{ display:"block", fontSize:9, color:C.gray, marginTop:1 }}>{c.sub}</span>}
