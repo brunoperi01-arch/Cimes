@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import calculateRecommendation from "./domain/pricingEngine.js";
+import { dateISO, dateObjToISO, sameDate, addDaysStr, fmtDateShort, periodOptionLabel, fmtCollected, daysBetween } from "./utils/dates.js";
 
 // ══ CONFIG ══════════════════════════════════════════════════════
 const SB_URL = import.meta.env.VITE_SUPABASE_URL || "DEMO";
@@ -258,12 +259,6 @@ const DEFAULT_COMPETITORS = [
 ];
 
 // Dates métier : ne JAMAIS utiliser toISOString() (décalage de fuseau possible)
-function dateISO(y, m, d) {
-  return `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-}
-function dateObjToISO(date) {
-  return dateISO(date.getFullYear(), date.getMonth(), date.getDate());
-}
 
 const STATIC_WEEKS = (() => {
   const mns=["jan","fév","mar","avr","mai","juin","juil","août","sept"];
@@ -381,9 +376,6 @@ function normalizeAccommodationType(value, notes = "") {
 // Compat : ancienne API renvoie null si indéterminé
 function inferAccommodationType(rate) {
   return normalizeAccommodationType(rate?.accommodation_type, rate?.notes || rate?.accommodation_label) || null;
-}
-function sameDate(a, b) {
-  return String(a || "").slice(0, 10) === String(b || "").slice(0, 10);
 }
 // Retrouve la ligne our_rates pour une cellule de grille : par dates + durée + typologie (jamais par period_id)
 function findRateForGridCell(rates, period, accommodationType) {
@@ -565,25 +557,8 @@ const ALL_PERIODS = [
 ];
 
 // ══ HELPERS ══════════════════════════════════════════════════════
-function addDaysStr(dateStr, days) {
-  const d = new Date(dateStr + "T12:00:00Z");
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-function fmtDateShort(dateStr) {
-  if (!dateStr) return "";
-  const mns = ["jan","fév","mar","avr","mai","juin","juil","août","sept","oct","nov","déc"];
-  const d = new Date(dateStr + "T12:00:00Z");
-  return `${d.getUTCDate()} ${mns[d.getUTCMonth()]}`;
-}
 
 // Libellé d'une période pour le sélecteur du relevé (utilise les vraies dates Booking)
-function periodOptionLabel(p) {
-  const start = p.period_start || p.week_start;
-  const nights = Number(p.stay_nights || 7);
-  const end = p.period_end || addDaysStr(start, nights);
-  return `${fmtDateShort(start)} → ${fmtDateShort(end)} · ${nights} nuits`;
-}
 
 // ══ TIMELINE PRIX (historique) ══════════════════════════════════
 function formatRatePeriod(row) {
@@ -591,11 +566,6 @@ function formatRatePeriod(row) {
   const nights = Number(row.stay_nights || 7);
   if (!start || !end) return "Période inconnue";
   return `${fmtDateShort(start)} → ${fmtDateShort(end)} · ${nights} nuits`;
-}
-function fmtCollected(s) {
-  if (!s) return "—";
-  const d = String(s).slice(0, 10).split("-");
-  return d.length === 3 ? `${d[2]}/${d[1]}/${d[0]}` : String(s).slice(0, 10);
 }
 // Filtre les lignes pour la timeline (uniquement les relevés validés)
 function getTimelineRows({ rates, filters }) {
@@ -1580,12 +1550,6 @@ async function importCatalogCsv(csvText) {
 }
 
 // Lien Booking fiable pour un concurrent suivi (URL exacte si fournie)
-function daysBetween(start, end) {
-  if (!start || !end) return 0;
-  const a = new Date(start + "T12:00:00");
-  const b = new Date(end + "T12:00:00");
-  return Math.max(0, Math.round((b - a) / 86400000));
-}
 
 // Nettoie une URL Booking : on garde domaine + chemin, jamais les anciens paramètres (dates, etc.)
 function normalizeBookingBaseUrl(rawUrl) {
