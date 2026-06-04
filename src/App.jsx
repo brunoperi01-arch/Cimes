@@ -4,6 +4,7 @@ import { dateISO, dateObjToISO, sameDate, addDaysStr, fmtDateShort, periodOption
 import { fmt, fmtPct, median } from "./utils/money.js";
 import { parseCsv, parseCsvNumber, downloadCsv } from "./utils/csv.js";
 import { OUR_PROMOTIONS_LS, PROMO_CHANNELS, PROMO_TYPES, normalizePromotion, getActivePromoForContext } from "./domain/promotions.js";
+import { getOurPromotions, saveOurPromotion, deleteOurPromotion } from "./services/promotionsService.js";
 import { isOwnProperty, competitorSegment, isPrivateCompetitor, SOURCE_TYPES, sourceBadgeMeta } from "./domain/comparability.js";
 import { ACCOMMODATION_TYPES, ACCOMMODATION_ORDER, ACCOMMODATION_SHORT, ACCOMMODATION_CAPACITIES, FILTER_CAPACITIES, OUR_TARIFS_BY_TYPE, OUR_TARIFS, OUR_TARIFS_META, accommodationTypesForCapacity, defaultAccommodationForCapacity, migrateCapacityToAccommodation, accommodationMeta, fallbackTarifForType, normalizeAccommodationType, inferAccommodationType, findRateForGridCell, getOurRateForContext } from "./domain/accommodations.js";
 import { ONLINE_SOURCE_TYPES, ONLINE_PLATFORMS, getExpectedOurOnlinePrice, onlineRateStatus } from "./domain/onlineRates.js";
@@ -523,16 +524,6 @@ async function getOurRate(periodId, capacity, stayNights=7) {
 // Récupère le tarif Les Cimes correspondant au contexte : priorité aux dates réelles, puis period_id
 
 
-// Normalise une promo lue (accepte public_price/promo_price OU price_public/price_promo, etc.)
-async function getOurPromotions() {
-  if (SB_READY) {
-    try {
-      const rows = await sb.select("our_promotions", "select=*&order=period_start.asc");
-      return (rows || []).map(normalizePromotion);
-    } catch (e) { console.warn("getOurPromotions Supabase:", e?.message); return (ls.get(OUR_PROMOTIONS_LS)||[]).map(normalizePromotion); }
-  }
-  return (ls.get(OUR_PROMOTIONS_LS)||[]).map(normalizePromotion);
-}
 // ══ NOS TARIFS EN LIGNE (contrôle diffusion partenaires) ════════
 // Plateformes proposées en saisie rapide (libellé → type de canal)
 
@@ -658,52 +649,6 @@ function computeAlerts({ ourRates = [], onlineRates = [], competitorRates = [], 
   return alerts.sort((a, b) => (ALERT_LEVELS[b.level]?.rank || 0) - (ALERT_LEVELS[a.level]?.rank || 0));
 }
 
-async function saveOurPromotion(promo) {
-  const pricePromo = Number(promo.price_promo ?? promo.promo_price ?? 0);
-  const pricePublic = Number(promo.price_public ?? promo.public_price ?? 0);
-  if (!pricePromo) throw new Error("Prix promo manquant.");
-  const stayNights = Number(promo.stay_nights || 7);
-  const discountPct = pricePublic > 0 ? Math.round((1 - pricePromo / pricePublic) * 100) : 0;
-  // Payload aligné sur le schéma SQL public.our_promotions (public_price/promo_price/promo_channel/start_date/end_date)
-  const payload = {
-    period_start:       promo.period_start || null,
-    period_end:         promo.period_end || null,
-    stay_nights:        stayNights,
-    accommodation_type: promo.accommodation_type || null,
-    capacity:           promo.capacity != null ? Number(promo.capacity) : null,
-    public_price:       pricePublic || null,
-    promo_price:        pricePromo,
-    discount_pct:       discountPct,
-    promo_type:         promo.promo_type || "promo",
-    promo_label:        promo.promo_label || promo.period_label || null,
-    promo_channel:      promo.promo_channel || promo.channel || "direct",
-    start_date:         promo.start_date || promo.date_start || null,
-    end_date:           promo.end_date || promo.date_end || null,
-    status:             promo.status || "active",
-    notes:              promo.notes || null,
-  };
-  if (!payload.period_start || !payload.period_end) throw new Error("Période (dates) requise.");
-  if (SB_READY) {
-    if (promo.id && !String(promo.id).startsWith("local_")) {
-      await sb.update("our_promotions", `id=eq.${promo.id}`, payload);
-      return { ...payload, id: promo.id };
-    }
-    const ins = await sb.insert("our_promotions", payload);
-    return Array.isArray(ins) ? ins[0] : ins;
-  }
-  // Hors Supabase : localStorage
-  const all = ls.get(OUR_PROMOTIONS_LS);
-  if (promo.id) { const i = all.findIndex(x=>x.id===promo.id); if (i>=0) all[i] = { ...all[i], ...payload }; }
-  else all.unshift({ ...payload, id: "local_"+Date.now() });
-  ls.set(OUR_PROMOTIONS_LS, all);
-  return payload;
-}
-async function deleteOurPromotion(id) {
-  if (SB_READY && !String(id).startsWith("local_")) { await sb.update("our_promotions", `id=eq.${id}`, { status: "expiree" }); return; }
-  const all = ls.get(OUR_PROMOTIONS_LS);
-  const i = all.findIndex(x=>x.id===id);
-  if (i>=0) { all[i].status = "expiree"; ls.set(OUR_PROMOTIONS_LS, all); }
-}
 
 async function importOurRatesCsv(csvText, allPeriods) {
   const lines = csvText.trim().split("\n").filter(l=>l.trim());
