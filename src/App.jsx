@@ -1045,6 +1045,16 @@ function getActivePromoForContext(promotions, ctx, accommodationType) {
 const ONLINE_SOURCES_LS = "lescimes_online_sources";
 const ONLINE_RATES_LS   = "lescimes_online_rates";
 const ONLINE_SOURCE_TYPES = { booking:"Booking", direct:"Site direct", tour_operator:"Tour-opérateur", marketplace:"Marketplace", other:"Autre" };
+// Plateformes proposées en saisie rapide (libellé → type de canal)
+const ONLINE_PLATFORMS = [
+  { name:"Booking",            type:"booking" },
+  { name:"Maeva",              type:"tour_operator" },
+  { name:"Ski Planet",         type:"tour_operator" },
+  { name:"Travelski",          type:"tour_operator" },
+  { name:"Carrefour Voyages",  type:"tour_operator" },
+  { name:"Site officiel",      type:"direct" },
+  { name:"Autre",              type:"other" },
+];
 
 async function getOurOnlineSources() {
   if (SB_READY) {
@@ -2266,7 +2276,9 @@ export default function App() {
   const [onlinePrices, setOnlinePrices]   = useState({});   // saisie prix vérifié par source
   const [onlineDetected, setOnlineDetected] = useState({}); // prix détecté (candidat) par source
   const [onlineMsg, setOnlineMsg]         = useState(null);
-  const [onlineTab, setOnlineTab]         = useState("releve"); // releve | sources | historique
+  const [onlineTab, setOnlineTab]         = useState("saisie"); // saisie | releve | sources | historique
+  const [onlineQuick, setOnlineQuick]     = useState({ platform:"Booking", price:"", url:"", collected_at:dateObjToISO(new Date()) });
+  const [onlineQuickMsg, setOnlineQuickMsg] = useState(null);
   const [onlineCsv, setOnlineCsv]         = useState("");
   const [onlineCsvMsg, setOnlineCsvMsg]   = useState(null);
   // ── Concurrents suivis (competitor_catalog) ───────────────────
@@ -2676,6 +2688,30 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
       await reloadOnlineRates();
       setOnlineCsv(""); setOnlineCsvMsg(`ok:${res.ok} importé(s)${res.errors?`, ${res.errors} ignoré(s)`:""}`);
     } catch(e) { setOnlineCsvMsg("err:"+e.message); }
+  }
+  // Saisie rapide directe d'un prix vu en ligne (sans pré-enregistrer de source)
+  async function saveOnlineQuick() {
+    const ctx = onlineContext();
+    if (!ctx.checkin || !ctx.checkout) { setOnlineQuickMsg("err:Choisissez une période."); return; }
+    const price = parseFloat(onlineQuick.price)||0;
+    if (!price) { setOnlineQuickMsg("err:Saisissez le prix vu en ligne."); return; }
+    const platform = ONLINE_PLATFORMS.find(p=>p.name===onlineQuick.platform) || ONLINE_PLATFORMS[0];
+    const exp = onlineExpected();
+    if (!exp.expected_price) { setOnlineQuickMsg("err:Aucun tarif officiel pour cette période/typologie. Renseignez-le d'abord dans la grille officielle."); return; }
+    const status = onlineRateStatus({ validated:price, expected:exp.expected_price, expectedPublic:exp.expected_public_price, expectedPromo:exp.expected_promo_price });
+    try {
+      await saveOurOnlineRate({
+        source_name: platform.name, source_type: platform.type, source_url: onlineQuick.url||null,
+        period_start: ctx.checkin, period_end: ctx.checkout, stay_nights: ctx.stayNights,
+        accommodation_type: ctx.accType, capacity: ctx.capacity,
+        expected_public_price: exp.expected_public_price, expected_promo_price: exp.expected_promo_price, expected_price: exp.expected_price,
+        validated_price: price, status, reliability_status: "saisi manuellement",
+        collected_at: onlineQuick.collected_at || dateObjToISO(new Date()),
+      });
+      setOnlineQuick(q=>({ ...q, price:"", url:"" }));
+      await reloadOnlineRates();
+      setOnlineQuickMsg("ok");
+    } catch(e) { setOnlineQuickMsg("err:"+e.message); }
   }
   function onlineContext() {
     const p = ALL_PERIODS.find(x=>x.id===onlineFilters.periodId);
@@ -6078,7 +6114,7 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
 
           {/* Onglets */}
           <div style={{ display:"flex", background:C.grayM, padding:2, borderRadius:9, marginBottom:8 }}>
-            {[["releve","Relevé en ligne"],["sources","Sources Les Cimes"],["historique","Historique"]].map(([id,lbl])=>(
+            {[["saisie","Saisie rapide"],["releve","Relevé en ligne"],["sources","Sources Les Cimes"],["historique","Historique"]].map(([id,lbl])=>(
               <button key={id} style={tabB(onlineTab===id)} onClick={()=>setOnlineTab(id)}>{lbl}</button>
             ))}
           </div>
@@ -6086,6 +6122,84 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
           {onlineMsg==="source_ok"&&<p style={{ margin:"0 0 6px", fontSize:11, color:C.green, fontWeight:600 }}>✓ Source enregistrée</p>}
           {onlineMsg==="rate_ok"&&<p style={{ margin:"0 0 6px", fontSize:11, color:C.green, fontWeight:600 }}>✓ Relevé en ligne enregistré</p>}
           {onlineMsg?.startsWith("err")&&<p style={{ margin:"0 0 6px", fontSize:11, color:C.red }}>✗ {onlineMsg.slice(4)}</p>}
+
+          {/* ── Onglet Saisie rapide ── */}
+          {onlineTab==="saisie"&&(()=>{
+            const price = parseFloat(onlineQuick.price)||0;
+            const gap = (price && exp.expected_price) ? Math.round(price - exp.expected_price) : null;
+            const gapPct = (price && exp.expected_price) ? Math.round((gap / exp.expected_price) * 100) : null;
+            const liveStatus = price ? onlineRateStatus({ validated:price, expected:exp.expected_price, expectedPublic:exp.expected_public_price, expectedPromo:exp.expected_promo_price }) : null;
+            const [stc,stbg] = statusMeta(liveStatus||"à vérifier");
+            const alertText = !liveStatus ? null
+              : liveStatus==="OK" ? `${onlineQuick.platform} affiche bien votre tarif (écart négligeable).`
+              : liveStatus==="trop bas" ? `${onlineQuick.platform} affiche un prix INFÉRIEUR à votre tarif officiel.`
+              : liveStatus==="trop haut" ? `${onlineQuick.platform} affiche un prix SUPÉRIEUR à votre tarif officiel.`
+              : liveStatus==="promo absente" ? `${onlineQuick.platform} ne répercute pas votre promo active.`
+              : `${onlineQuick.platform} : prix non concluant.`;
+            return (
+              <>
+                {/* 1. Période + typologie */}
+                <p style={sml}>1. Période & type d'appartement</p>
+                <div style={{ display:"flex", gap:5, marginBottom:8, flexWrap:"wrap" }}>
+                  <select value={onlineFilters.season} onChange={e=>setOnlineFilters(f=>({ ...f, season:e.target.value }))} style={{ ...inp(), flex:"1 1 80px", fontSize:13, padding:"7px 9px" }}><option value="ete">Été</option><option value="hiver">Hiver</option></select>
+                  <select value={onlineFilters.periodId} onChange={e=>setOnlineFilters(f=>({ ...f, periodId:e.target.value }))} style={{ ...inp(), flex:"1 1 190px", fontSize:13, padding:"7px 9px" }}><option value="">Choisir une période…</option>{ALL_PERIODS.filter(p=>p.season===onlineFilters.season).map(p=><option key={p.id} value={p.id}>{periodOptionLabel(p)}</option>)}</select>
+                  <select value={onlineFilters.stay_nights} onChange={e=>setOnlineFilters(f=>({ ...f, stay_nights:parseInt(e.target.value) }))} style={{ ...inp(), flex:"1 1 75px", fontSize:13, padding:"7px 9px" }}>{[7,4,3,2].map(n=><option key={n} value={n}>{n} nuits</option>)}</select>
+                  <select value={onlineFilters.accType} onChange={e=>setOnlineFilters(f=>({ ...f, accType:e.target.value }))} style={{ ...inp(), flex:"1 1 90px", fontSize:13, padding:"7px 9px" }}>{ACCOMMODATION_ORDER.map(a=><option key={a} value={a}>{ACCOMMODATION_SHORT[a]}</option>)}</select>
+                </div>
+
+                {/* Rappel tarif officiel */}
+                {datesOk && (
+                  <div style={{ ...cd(10), padding:"8px 12px", background:exp.mode==="promo"?C.greenL:C.bluePale, marginBottom:8 }}>
+                    <p style={{ margin:0, fontSize:11, fontWeight:700, color:exp.mode==="promo"?C.green:C.blue }}>Tarif officiel attendu : {exp.expected_price?`${fmt(exp.expected_price)}€`:"— (à renseigner)"}{exp.mode==="promo"?` (promo, public ${fmt(exp.expected_public_price)}€)`:""}</p>
+                    <p style={{ margin:"1px 0 0", fontSize:10, color:C.gray }}>{ACCOMMODATION_SHORT[onlineFilters.accType]} · {ctx.capacity}P · {ctx.stayNights} nuits</p>
+                  </div>
+                )}
+                {!datesOk && <p style={{ margin:"0 0 8px", fontSize:11, color:C.orange }}>Choisissez une période pour activer la comparaison.</p>}
+
+                {/* 2. Saisie du prix vu en ligne */}
+                <p style={sml}>2. Prix vu en ligne</p>
+                <div style={{ ...cd(11), padding:"11px 13px", marginBottom:8 }}>
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:6 }}>
+                    <div>
+                      <p style={{ ...sml, margin:"0 0 4px" }}>Plateforme</p>
+                      <select value={onlineQuick.platform} onChange={e=>setOnlineQuick(q=>({ ...q, platform:e.target.value }))} style={inp()}>{ONLINE_PLATFORMS.map(p=><option key={p.name} value={p.name}>{p.name}</option>)}</select>
+                    </div>
+                    <div>
+                      <p style={{ ...sml, margin:"0 0 4px" }}>Prix vu en ligne (€)</p>
+                      <input type="number" value={onlineQuick.price} onChange={e=>setOnlineQuick(q=>({ ...q, price:e.target.value }))} placeholder="ex : 795" style={inp()}/>
+                    </div>
+                  </div>
+                  <div style={{ display:"grid", gridTemplateColumns:"2fr 1fr", gap:6, marginBottom:6 }}>
+                    <div>
+                      <p style={{ ...sml, margin:"0 0 4px" }}>URL (optionnel)</p>
+                      <input value={onlineQuick.url} onChange={e=>setOnlineQuick(q=>({ ...q, url:e.target.value }))} placeholder="https://…" style={inp()}/>
+                    </div>
+                    <div>
+                      <p style={{ ...sml, margin:"0 0 4px" }}>Date relevé</p>
+                      <input type="date" value={onlineQuick.collected_at} onChange={e=>setOnlineQuick(q=>({ ...q, collected_at:e.target.value }))} style={inp()}/>
+                    </div>
+                  </div>
+
+                  {/* 3. Comparaison live */}
+                  {price>0 && exp.expected_price>0 && (
+                    <div style={{ background:stbg, borderRadius:9, padding:"9px 11px", marginBottom:8 }}>
+                      <div style={{ display:"flex", gap:14, flexWrap:"wrap", alignItems:"baseline" }}>
+                        <span style={{ fontSize:11, color:C.gray }}>Officiel <strong style={{ color:C.text, fontSize:14 }}>{fmt(exp.expected_price)}€</strong></span>
+                        <span style={{ fontSize:11, color:C.gray }}>En ligne <strong style={{ color:C.text, fontSize:14 }}>{fmt(price)}€</strong></span>
+                        <span style={{ fontSize:14, fontWeight:700, color:stc }}>Écart : {gap>0?"+":""}{fmt(gap)}€ ({gapPct>0?"+":""}{gapPct}%)</span>
+                      </div>
+                      <p style={{ margin:"4px 0 0", fontSize:12, fontWeight:600, color:stc }}>⚠️ {alertText}</p>
+                    </div>
+                  )}
+
+                  {onlineQuickMsg==="ok"&&<p style={{ margin:"0 0 6px", fontSize:11, color:C.green, fontWeight:600 }}>✓ Relevé enregistré (visible dans Historique et Relevé en ligne).</p>}
+                  {onlineQuickMsg?.startsWith("err")&&<p style={{ margin:"0 0 6px", fontSize:11, color:C.red }}>✗ {onlineQuickMsg.slice(4)}</p>}
+                  <button onClick={saveOnlineQuick} disabled={!price||!datesOk} style={{ ...btn(!price||!datesOk,C.green), margin:0 }}>Enregistrer le relevé</button>
+                </div>
+                <p style={{ margin:"0 0 10px", fontSize:10, color:C.gray, fontStyle:"italic" }}>Saisie manuelle fiable. Le scraping automatique viendra plus tard ; ici vous comparez directement au tarif officiel Les Cimes.</p>
+              </>
+            );
+          })()}
 
           {/* ── Onglet Sources Les Cimes ── */}
           {onlineTab==="sources"&&(<>
