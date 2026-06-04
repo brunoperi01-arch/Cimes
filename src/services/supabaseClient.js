@@ -253,3 +253,16 @@ export const ls = {
   set: (k,v)=>{ try { localStorage.setItem(k,JSON.stringify(v)); } catch {} },
   push: (k,item)=>{ const arr=ls.get(k); ls.set(k,[...arr.filter(x=>x.id!==item.id),item]); },
 };
+
+// ── Helpers transverses de persistance ─────────────────────────────
+export function stripUserId(rate) { const { user_id, ...rest } = rate; return rest; }
+
+export function isMissingColumnError(error) {
+  const msg = String(error?.message || error || "");
+  return (
+    msg.includes("PGRST204") ||
+    msg.includes("Could not find") ||
+    msg.includes("column") ||
+    msg.includes("schema cache")
+  );
+}
