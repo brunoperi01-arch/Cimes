@@ -10,6 +10,8 @@ import { C, CAT_C, CAT_L } from "./components/theme.js";
 import { makeStyles } from "./components/ui.js";
 import Badge from "./components/Badge.jsx";
 import AlertCard from "./components/AlertCard.jsx";
+import PeriodSelector from "./components/PeriodSelector.jsx";
+import ApartmentTypeSelector from "./components/ApartmentTypeSelector.jsx";
 import { isOwnProperty, competitorSegment, isPrivateCompetitor, SOURCE_TYPES, sourceBadgeMeta } from "./domain/comparability.js";
 import { ACCOMMODATION_TYPES, ACCOMMODATION_ORDER, ACCOMMODATION_SHORT, ACCOMMODATION_CAPACITIES, FILTER_CAPACITIES, OUR_TARIFS_BY_TYPE, OUR_TARIFS, OUR_TARIFS_META, accommodationTypesForCapacity, defaultAccommodationForCapacity, migrateCapacityToAccommodation, accommodationMeta, fallbackTarifForType, normalizeAccommodationType, inferAccommodationType, findRateForGridCell, getOurRateForContext } from "./domain/accommodations.js";
 import { ONLINE_SOURCE_TYPES, ONLINE_PLATFORMS, getExpectedOurOnlinePrice, onlineRateStatus } from "./domain/onlineRates.js";
@@ -4870,7 +4872,7 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
                   <select value={mxFilters.segment} onChange={e=>setMxFilters(f=>({ ...f, segment:e.target.value }))} style={{ ...inp(), flex:"1 1 130px", fontSize:13, padding:"7px 9px" }}><option value="residence">Résidences / Pros</option><option value="private">Particuliers</option><option value="hotel">Hôtels</option></select>
                   <select value={mxFilters.stay_nights} onChange={e=>setMxFilters(f=>({ ...f, stay_nights:parseInt(e.target.value) }))} style={{ ...inp(), flex:"1 1 80px", fontSize:13, padding:"7px 9px" }}>{[7,4,3,2].map(n=><option key={n} value={n}>{n} nuits</option>)}</select>
                   <select value={mxFilters.capacity} onChange={e=>setMxFilters(f=>({ ...f, capacity:parseInt(e.target.value) }))} style={{ ...inp(), flex:"1 1 70px", fontSize:13, padding:"7px 9px" }}>{FILTER_CAPACITIES.map(n=><option key={n} value={n}>{n}P</option>)}</select>
-                  <select value={mxFilters.accType} onChange={e=>setMxFilters(f=>({ ...f, accType:e.target.value }))} style={{ ...inp(), flex:"1 1 90px", fontSize:13, padding:"7px 9px" }}>{ACCOMMODATION_ORDER.map(a=><option key={a} value={a}>{ACCOMMODATION_SHORT[a]}</option>)}</select>
+                  <ApartmentTypeSelector value={mxFilters.accType} onChange={v=>setMxFilters(f=>({ ...f, accType:v }))} style={{ ...inp(), flex:"1 1 90px", fontSize:13, padding:"7px 9px" }} />
                 </div>
                 <div style={{ ...cd(10), padding:"8px 11px", background:C.bluePale, marginBottom:8 }}>
                   <p style={{ margin:0, fontSize:10, color:C.blueL }}>Écart en % de chaque concurrent vs le tarif <b>public</b> Les Cimes (le tarif promo est affiché sous la référence à titre indicatif). Verrou : {mxFilters.capacity}P · {mxFilters.stay_nights} nuits · {ACCOMMODATION_SHORT[mxFilters.accType]} · {mxFilters.segment==="private"?"particuliers":mxFilters.segment==="hotel"?"hôtels":"résidences pros"}. Prix validés uniquement, aucune interpolation.</p>
@@ -5119,7 +5121,7 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
                 <p style={sml}>1. Période & type d'appartement</p>
                 <div style={{ display:"flex", gap:5, marginBottom:8, flexWrap:"wrap" }}>
                   <select value={onlineFilters.season} onChange={e=>setOnlineFilters(f=>({ ...f, season:e.target.value }))} style={{ ...inp(), flex:"1 1 80px", fontSize:13, padding:"7px 9px" }}><option value="ete">Été</option><option value="hiver">Hiver</option></select>
-                  <select value={onlineFilters.periodId} onChange={e=>setOnlineFilters(f=>({ ...f, periodId:e.target.value }))} style={{ ...inp(), flex:"1 1 190px", fontSize:13, padding:"7px 9px" }}><option value="">Choisir une période…</option>{ALL_PERIODS.filter(p=>p.season===onlineFilters.season).map(p=><option key={p.id} value={p.id}>{periodOptionLabel(p)}</option>)}</select>
+                  <PeriodSelector value={onlineFilters.periodId} onChange={v=>setOnlineFilters(f=>({ ...f, periodId:v }))} periods={ALL_PERIODS} season={onlineFilters.season} style={{ ...inp(), flex:"1 1 190px", fontSize:13, padding:"7px 9px" }} />
                   <select value={onlineFilters.stay_nights} onChange={e=>setOnlineFilters(f=>({ ...f, stay_nights:parseInt(e.target.value) }))} style={{ ...inp(), flex:"1 1 75px", fontSize:13, padding:"7px 9px" }}>{[7,4,3,2].map(n=><option key={n} value={n}>{n} nuits</option>)}</select>
                   <select value={onlineFilters.accType} onChange={e=>setOnlineFilters(f=>({ ...f, accType:e.target.value }))} style={{ ...inp(), flex:"1 1 90px", fontSize:13, padding:"7px 9px" }}>{ACCOMMODATION_ORDER.map(a=><option key={a} value={a}>{ACCOMMODATION_SHORT[a]}</option>)}</select>
                 </div>
@@ -5234,7 +5236,7 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
           {onlineTab==="releve"&&(<>
             <div style={{ display:"flex", gap:5, marginBottom:8, flexWrap:"wrap" }}>
               <select value={onlineFilters.season} onChange={e=>setOnlineFilters(f=>({ ...f, season:e.target.value }))} style={{ ...inp(), flex:"1 1 90px", fontSize:13, padding:"7px 9px" }}><option value="ete">Été</option><option value="hiver">Hiver</option></select>
-              <select value={onlineFilters.periodId} onChange={e=>setOnlineFilters(f=>({ ...f, periodId:e.target.value }))} style={{ ...inp(), flex:"1 1 200px", fontSize:13, padding:"7px 9px" }}><option value="">Choisir une période…</option>{ALL_PERIODS.filter(p=>p.season===onlineFilters.season).map(p=><option key={p.id} value={p.id}>{periodOptionLabel(p)}</option>)}</select>
+              <PeriodSelector value={onlineFilters.periodId} onChange={v=>setOnlineFilters(f=>({ ...f, periodId:v }))} periods={ALL_PERIODS} season={onlineFilters.season} style={{ ...inp(), flex:"1 1 200px", fontSize:13, padding:"7px 9px" }} />
               <select value={onlineFilters.stay_nights} onChange={e=>setOnlineFilters(f=>({ ...f, stay_nights:parseInt(e.target.value) }))} style={{ ...inp(), flex:"1 1 80px", fontSize:13, padding:"7px 9px" }}>{[7,4,3,2].map(n=><option key={n} value={n}>{n} nuits</option>)}</select>
               <select value={onlineFilters.accType} onChange={e=>setOnlineFilters(f=>({ ...f, accType:e.target.value }))} style={{ ...inp(), flex:"1 1 90px", fontSize:13, padding:"7px 9px" }}>{ACCOMMODATION_ORDER.map(a=><option key={a} value={a}>{ACCOMMODATION_SHORT[a]}</option>)}</select>
             </div>
