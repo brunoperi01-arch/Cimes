@@ -285,19 +285,88 @@ const STATIC_WEEKS = (() => {
   return rows;
 })();
 
-const OUR_TARIFS = {
-  "2p":{ haute:245, moyenne:195, basse:145 },
-  "4p":{ haute:359, moyenne:280, basse:210 },
-  "6p":{ haute:428, moyenne:340, basse:259 },
-  "8p":{ haute:489, moyenne:390, basse:290 },
+// ══════════════════════════════════════════════════════════════════
+// ══ CONFIGURATION CENTRALE — TYPOLOGIES COMMERCIALES LES CIMES ═════
+// Source unique de vérité pour les catégories d'appartements vendues.
+// Toute l'app doit lire ces constantes / helpers, jamais des capacités
+// codées en dur (2p/4p/6p/8p).
+// ══════════════════════════════════════════════════════════════════
+const ACCOMMODATION_TYPES = {
+  "2P6":     { code:"2P6",     label:"2 pièces 6 pers.",            short:"2P6",     capacity:6, surfaceMin:34, surfaceMax:45, targetMin:2, targetMax:4, comfort:"budget_famille",        segment:"6p_budget"  },
+  "2P6_SUP": { code:"2P6_SUP", label:"2 pièces 6 pers. supérieur",  short:"2P6 Sup", capacity:6, surfaceMin:42, surfaceMax:45, targetMin:4, targetMax:6, comfort:"confort_intermediaire", segment:"6p_confort" },
+  "3P6":     { code:"3P6",     label:"3 pièces 6 pers.",            short:"3P6",     capacity:6, surfaceMin:42, surfaceMax:45, targetMin:4, targetMax:6, comfort:"confort",              segment:"6p_confort" },
+  "3P8":     { code:"3P8",     label:"3 pièces 8 pers.",            short:"3P8",     capacity:8, surfaceMin:57, surfaceMax:57, targetMin:6, targetMax:8, comfort:"famille_premium",      segment:"8p_famille" },
 };
+// Ordre d'affichage canonique
+const ACCOMMODATION_ORDER = ["2P6", "2P6_SUP", "3P6", "3P8"];
+// Libellés courts dérivés de la config (plus de map séparée à maintenir)
+const ACCOMMODATION_SHORT = Object.fromEntries(ACCOMMODATION_ORDER.map(k => [k, ACCOMMODATION_TYPES[k].short]));
+// Capacités réellement vendues, déduites des typologies (remplace FILTER_CAPACITIES)
+const ACCOMMODATION_CAPACITIES = Array.from(new Set(ACCOMMODATION_ORDER.map(k => ACCOMMODATION_TYPES[k].capacity))).sort((a, b) => a - b); // [6, 8]
+// Capacités proposées dans les filtres concurrents (le marché inclut des biens 2/4 pers.)
+const FILTER_CAPACITIES = [2, 4, 6, 8];
+// Typologies disponibles pour une capacité donnée
+function accommodationTypesForCapacity(capacity) {
+  const c = Number(capacity);
+  return ACCOMMODATION_ORDER.filter(k => ACCOMMODATION_TYPES[k].capacity === c);
+}
+// Typologie par défaut pour une capacité (1re de l'ordre canonique)
+function defaultAccommodationForCapacity(capacity) {
+  return accommodationTypesForCapacity(capacity)[0] || ACCOMMODATION_ORDER[0];
+}
+// MIGRATION/MAPPING : ancienne catégorie générique (capacité "2p/4p/6p/8p"
+// ou nombre 2/4/6/8) → typologie commerciale. Best-effort, pour compat ascendante.
+function migrateCapacityToAccommodation(legacy) {
+  if (legacy == null) return "";
+  const s = String(legacy).trim().toUpperCase();
+  // Déjà une vraie typologie ?
+  const norm = normalizeAccommodationType(s);
+  if (norm) return norm;
+  // Forme "6P" / "6p" / "6" / "6 pers."
+  const m = s.match(/(\d+)/);
+  if (!m) return "";
+  const cap = Number(m[1]);
+  if (cap <= 6) return "2P6";   // 2/4/6 pers historiques → 2P6 (offre de base 6 pers.)
+  if (cap >= 8) return "3P8";   // 8 pers → 3P8
+  return defaultAccommodationForCapacity(cap);
+}
+// Métadonnées d'une typologie (sécurisé)
+function accommodationMeta(type) {
+  return ACCOMMODATION_TYPES[normalizeAccommodationType(type) || type] || null;
+}
+
+// Tarif interne de repli, indexé PAR TYPOLOGIE (remplace OUR_TARIFS 2p/4p/6p/8p).
+// Utilisé uniquement comme fallback quand aucune ligne our_rates n'existe.
+const OUR_TARIFS_BY_TYPE = {
+  "2P6":     { haute:428, moyenne:340, basse:259 },
+  "2P6_SUP": { haute:455, moyenne:365, basse:280 },
+  "3P6":     { haute:455, moyenne:365, basse:280 },
+  "3P8":     { haute:489, moyenne:390, basse:290 },
+};
+// Compat : ancien OUR_TARIFS par capacité, dérivé de la table par typologie.
+// (Conservé pour ne pas casser les appels existants OUR_TARIFS["6p"] / OUR_TARIFS[6].)
+const OUR_TARIFS = (() => {
+  const out = {};
+  for (const cap of ACCOMMODATION_CAPACITIES) {
+    const t = OUR_TARIFS_BY_TYPE[defaultAccommodationForCapacity(cap)];
+    out[`${cap}p`] = t; out[cap] = t;
+  }
+  // Capacités historiques sans typologie propre → repli sur le 2P6
+  out["2p"] = out["2p"] || OUR_TARIFS_BY_TYPE["2P6"];
+  out["4p"] = out["4p"] || OUR_TARIFS_BY_TYPE["2P6"];
+  out[2] = out[2] || OUR_TARIFS_BY_TYPE["2P6"];
+  out[4] = out[4] || OUR_TARIFS_BY_TYPE["2P6"];
+  return out;
+})();
+// Tarif de repli par typologie + saison
+function fallbackTarifForType(accommodationType, seasonType) {
+  const t = OUR_TARIFS_BY_TYPE[normalizeAccommodationType(accommodationType) || accommodationType];
+  return t ? (t[seasonType] || 0) : 0;
+}
 
 // Métadonnées de notre grille interne
 const OUR_TARIFS_META = { source:"Tarif interne validé", verified_at:"avril 2026", status:"réel" };
 
-// ══ TYPOLOGIES COMMERCIALES LES CIMES ═══════════════════════════
-const ACCOMMODATION_ORDER = ["2P6","2P6_SUP","3P6","3P8"];
-const ACCOMMODATION_SHORT = { "2P6":"2P6", "2P6_SUP":"2P6 Sup", "3P6":"3P6", "3P8":"3P8" };
 // Normalise une typologie depuis accommodation_type OU notes (ordre : SUP avant 2P6 simple). "" si indéterminé.
 function normalizeAccommodationType(value, notes = "") {
   const raw = String(value || "").trim().toUpperCase().replace(/\s+/g, "");
@@ -330,13 +399,6 @@ function findRateForGridCell(rates, period, accommodationType) {
     );
   }) || null;
 }
-
-const ACCOMMODATION_TYPES = {
-  "2P6":     { label:"2 pièces 6 pers.",            capacity:6, surfaceMin:34, surfaceMax:45, targetMin:2, targetMax:4, comfort:"budget_famille",        segment:"6p_budget"  },
-  "2P6_SUP": { label:"2 pièces 6 pers. supérieur",  capacity:6, surfaceMin:42, surfaceMax:45, targetMin:4, targetMax:6, comfort:"confort_intermediaire", segment:"6p_confort" },
-  "3P6":     { label:"3 pièces 6 pers.",            capacity:6, surfaceMin:42, surfaceMax:45, targetMin:4, targetMax:6, comfort:"confort",              segment:"6p_confort" },
-  "3P8":     { label:"3 pièces 8 pers.",            capacity:8, surfaceMin:57, surfaceMax:57, targetMin:6, targetMax:8, comfort:"famille_premium",      segment:"8p_famille" },
-};
 
 // Prix par personne et par nuit selon l'occupation cible
 function pricePerPersonNight(priceTotal, stayNights, occupancy) {
@@ -3706,7 +3768,7 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
           <div style={{ flex:"1 1 110px" }}>
             <p style={{ margin:"0 0 3px 2px", fontSize:12, fontWeight:600, color:C.gray }}>Capacité</p>
             <select value={dashFilters.capacity} onChange={e=>setDashFilters(f=>({ ...f, capacity:Number(e.target.value) }))} style={{ ...inp(), fontSize:12, padding:"8px 9px" }}>
-              {[2,4,6,8].map(n=><option key={n} value={n}>{n}P</option>)}
+              {FILTER_CAPACITIES.map(n=><option key={n} value={n}>{n}P</option>)}
             </select>
           </div>
           <div style={{ flex:"1 1 130px" }}>
@@ -4033,7 +4095,7 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
 
                 <p style={{ ...sml, margin:"8px 0 4px" }}>Capacité</p>
                 <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:4 }}>
-                  {[2,4,6,8].map(n=><button key={n} onClick={()=>setTrackedCapacity(n)} style={{ padding:"6px 0", background:Number(trackedCapacity)===n?C.blue:C.grayL, border:"none", borderRadius:8, cursor:"pointer", fontSize:11, fontWeight:Number(trackedCapacity)===n?700:400, color:Number(trackedCapacity)===n?C.white:C.text }}>{n}P</button>)}
+                  {FILTER_CAPACITIES.map(n=><button key={n} onClick={()=>setTrackedCapacity(n)} style={{ padding:"6px 0", background:Number(trackedCapacity)===n?C.blue:C.grayL, border:"none", borderRadius:8, cursor:"pointer", fontSize:11, fontWeight:Number(trackedCapacity)===n?700:400, color:Number(trackedCapacity)===n?C.white:C.text }}>{n}P</button>)}
                 </div>
               </div>
 
@@ -5097,7 +5159,7 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
                     {/* Capacités */}
                     <p style={{ ...sml, margin:"0 0 5px" }}>Capacités</p>
                     <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:4, marginBottom:10 }}>
-                      {[2,4,6,8].map(c=>{ const sel=planCaps.includes(c); return (<button key={c} onClick={()=>setPlanCaps(prev=>sel?prev.filter(x=>x!==c):[...prev,c])} style={{ padding:"6px 0", background:sel?C.blue:C.grayL, border:"none", borderRadius:8, cursor:"pointer", fontSize:11, fontWeight:sel?700:400, color:sel?C.white:C.text }}>{c}P</button>); })}
+                      {FILTER_CAPACITIES.map(c=>{ const sel=planCaps.includes(c); return (<button key={c} onClick={()=>setPlanCaps(prev=>sel?prev.filter(x=>x!==c):[...prev,c])} style={{ padding:"6px 0", background:sel?C.blue:C.grayL, border:"none", borderRadius:8, cursor:"pointer", fontSize:11, fontWeight:sel?700:400, color:sel?C.white:C.text }}>{c}P</button>); })}
                     </div>
 
                     {/* Typologies */}
@@ -5371,7 +5433,7 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
               <div><p style={sml}>Semaine</p><select value={pasteWeekId} onChange={e=>setPWId(e.target.value)} style={inp()}>{STATIC_WEEKS.map(w=><option key={w.id} value={w.id}>{w.label?.slice(0,14)} {w.year}</option>)}</select></div>
             </div>
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:6 }}>
-              <div><p style={sml}>Capacité</p><select value={pasteCap} onChange={e=>setPCap(parseInt(e.target.value))} style={inp()}>{[2,4,6,8].map(n=><option key={n} value={n}>{n} pers.</option>)}</select></div>
+              <div><p style={sml}>Capacité</p><select value={pasteCap} onChange={e=>setPCap(parseInt(e.target.value))} style={inp()}>{FILTER_CAPACITIES.map(n=><option key={n} value={n}>{n} pers.</option>)}</select></div>
               <div><p style={sml}>Concurrent</p><select value={pasteCompId} onChange={e=>setPComp(e.target.value)} style={inp()}>{competitors.map(c=><option key={c.id} value={c.id}>{c.name.slice(0,22)}</option>)}</select></div>
             </div>
             <p style={sml}>Texte collé</p>
@@ -5423,7 +5485,7 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
           <select value={form.competitorId} onChange={e=>{ const c=competitors.find(x=>x.id===e.target.value); setForm({ ...form, competitorId:e.target.value, source:c?.source||"", type:c?.property_type||"résidence" }); }} style={{ ...inp(), marginBottom:6 }}>{competitors.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:6 }}>
             <div><p style={sml}>Source</p><input style={inp()} placeholder="Booking…" value={form.source} onChange={e=>setForm({ ...form, source:e.target.value })}/></div>
-            <div><p style={sml}>Capacité</p><select value={form.capacity} onChange={e=>setForm({ ...form, capacity:parseInt(e.target.value) })} style={inp()}>{[2,4,6,8].map(n=><option key={n} value={n}>{n} pers.</option>)}</select></div>
+            <div><p style={sml}>Capacité</p><select value={form.capacity} onChange={e=>setForm({ ...form, capacity:parseInt(e.target.value) })} style={inp()}>{FILTER_CAPACITIES.map(n=><option key={n} value={n}>{n} pers.</option>)}</select></div>
           </div>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:6 }}>
             <div><p style={sml}>Prix / semaine € *</p><input type="number" style={inp()} placeholder="650" value={form.priceWeek} onChange={e=>setForm({ ...form, priceWeek:e.target.value, priceNight:e.target.value?Math.round(parseFloat(e.target.value)/7):"" })}/></div>
@@ -5639,7 +5701,7 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
                   <select value={mxFilters.season} onChange={e=>setMxFilters(f=>({ ...f, season:e.target.value }))} style={{ ...inp(), flex:"1 1 90px", fontSize:13, padding:"7px 9px" }}><option value="ete">Été</option><option value="hiver">Hiver</option></select>
                   <select value={mxFilters.segment} onChange={e=>setMxFilters(f=>({ ...f, segment:e.target.value }))} style={{ ...inp(), flex:"1 1 130px", fontSize:13, padding:"7px 9px" }}><option value="residence">Résidences / Pros</option><option value="private">Particuliers</option><option value="hotel">Hôtels</option></select>
                   <select value={mxFilters.stay_nights} onChange={e=>setMxFilters(f=>({ ...f, stay_nights:parseInt(e.target.value) }))} style={{ ...inp(), flex:"1 1 80px", fontSize:13, padding:"7px 9px" }}>{[7,4,3,2].map(n=><option key={n} value={n}>{n} nuits</option>)}</select>
-                  <select value={mxFilters.capacity} onChange={e=>setMxFilters(f=>({ ...f, capacity:parseInt(e.target.value) }))} style={{ ...inp(), flex:"1 1 70px", fontSize:13, padding:"7px 9px" }}>{[2,4,6,8].map(n=><option key={n} value={n}>{n}P</option>)}</select>
+                  <select value={mxFilters.capacity} onChange={e=>setMxFilters(f=>({ ...f, capacity:parseInt(e.target.value) }))} style={{ ...inp(), flex:"1 1 70px", fontSize:13, padding:"7px 9px" }}>{FILTER_CAPACITIES.map(n=><option key={n} value={n}>{n}P</option>)}</select>
                   <select value={mxFilters.accType} onChange={e=>setMxFilters(f=>({ ...f, accType:e.target.value }))} style={{ ...inp(), flex:"1 1 90px", fontSize:13, padding:"7px 9px" }}>{ACCOMMODATION_ORDER.map(a=><option key={a} value={a}>{ACCOMMODATION_SHORT[a]}</option>)}</select>
                 </div>
                 <div style={{ ...cd(10), padding:"8px 11px", background:C.bluePale, marginBottom:8 }}>
@@ -5715,7 +5777,7 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
                   <select value={tlFilters.source} onChange={e=>setTlFilters(f=>({ ...f, source:e.target.value }))} style={{ ...inp(), flex:"1 1 30%", fontSize:13, padding:"6px 8px" }}><option value="all">Toutes sources</option>{["Booking.com","Site direct","La France du Nord au Sud","Maeva","Airbnb","Abritel","Booking particulier","PAP vacances","Leboncoin"].map(n=><option key={n} value={n}>{n}</option>)}</select>
                   <select value={tlFilters.periodId} onChange={e=>setTlFilters(f=>({ ...f, periodId:e.target.value }))} style={{ ...inp(), flex:"1 1 45%", fontSize:13, padding:"6px 8px" }}><option value="">Toutes périodes</option>{periodsForFilter.map(p=><option key={p.id} value={p.id}>{periodOptionLabel(p)}</option>)}</select>
                   <select value={tlFilters.stay_nights} onChange={e=>setTlFilters(f=>({ ...f, stay_nights:parseInt(e.target.value)||0 }))} style={{ ...inp(), flex:"1 1 22%", fontSize:13, padding:"6px 8px" }}><option value="0">Toutes durées</option>{[2,3,4,7].map(n=><option key={n} value={n}>{n} nuits</option>)}</select>
-                  <select value={tlFilters.capacity} onChange={e=>setTlFilters(f=>({ ...f, capacity:parseInt(e.target.value)||0 }))} style={{ ...inp(), flex:"1 1 22%", fontSize:13, padding:"6px 8px" }}><option value="0">Toutes cap.</option>{[2,4,6,8].map(n=><option key={n} value={n}>{n}P</option>)}</select>
+                  <select value={tlFilters.capacity} onChange={e=>setTlFilters(f=>({ ...f, capacity:parseInt(e.target.value)||0 }))} style={{ ...inp(), flex:"1 1 22%", fontSize:13, padding:"6px 8px" }}><option value="0">Toutes cap.</option>{FILTER_CAPACITIES.map(n=><option key={n} value={n}>{n}P</option>)}</select>
                   <select value={tlFilters.accommodation_type} onChange={e=>setTlFilters(f=>({ ...f, accommodation_type:e.target.value }))} style={{ ...inp(), flex:"1 1 22%", fontSize:13, padding:"6px 8px" }}><option value="all">Toutes typo.</option>{ACCOMMODATION_ORDER.map(a=><option key={a} value={a}>{ACCOMMODATION_SHORT[a]}</option>)}</select>
                 </div>
 
@@ -5774,7 +5836,7 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
           <div style={{ display:"flex", gap:4, marginBottom:6, flexWrap:"wrap" }}>
             <select value={histFilters.competitor} onChange={e=>setHistFilters(f=>({ ...f, competitor:e.target.value }))} style={{ ...inp(), flex:"1 1 45%", fontSize:11, padding:"5px 7px" }}><option value="">Tous concurrents</option>{fltCompetitors.map(n=><option key={n} value={n}>{n}</option>)}</select>
             <select value={histFilters.source} onChange={e=>setHistFilters(f=>({ ...f, source:e.target.value }))} style={{ ...inp(), flex:"1 1 45%", fontSize:11, padding:"5px 7px" }}><option value="">Toutes sources</option>{fltSources.map(n=><option key={n} value={n}>{n}</option>)}</select>
-            <select value={histFilters.capacity} onChange={e=>setHistFilters(f=>({ ...f, capacity:parseInt(e.target.value)||0 }))} style={{ ...inp(), flex:"1 1 45%", fontSize:11, padding:"5px 7px" }}><option value="0">Toutes cap.</option>{[2,4,6,8].map(n=><option key={n} value={n}>{n}P</option>)}</select>
+            <select value={histFilters.capacity} onChange={e=>setHistFilters(f=>({ ...f, capacity:parseInt(e.target.value)||0 }))} style={{ ...inp(), flex:"1 1 45%", fontSize:11, padding:"5px 7px" }}><option value="0">Toutes cap.</option>{FILTER_CAPACITIES.map(n=><option key={n} value={n}>{n}P</option>)}</select>
             <select value={histFilters.status} onChange={e=>setHistFilters(f=>({ ...f, status:e.target.value }))} style={{ ...inp(), flex:"1 1 45%", fontSize:11, padding:"5px 7px" }}><option value="">Tous statuts</option>{["validé","à vérifier","rejeté"].map(n=><option key={n} value={n}>{n}</option>)}</select>
             <select value={histFilters.segment} onChange={e=>setHistFilters(f=>({ ...f, segment:e.target.value }))} style={{ ...inp(), flex:"1 1 45%", fontSize:11, padding:"5px 7px" }}><option value="">Tous segments</option><option value="residence">Résidences / Pros</option><option value="private">Particuliers</option><option value="hotel">Hôtels / secondaires</option></select>
           </div>
@@ -6033,7 +6095,7 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
               {ALL_PERIODS.filter(p=>p.season===radarFilters.season).map(p=><option key={p.id} value={p.id}>{periodOptionLabel(p)}</option>)}
             </select>
             <select value={radarFilters.stay_nights} onChange={e=>setRadarFilters(f=>({ ...f, stay_nights:parseInt(e.target.value) }))} style={{ ...inp(), flex:"1 1 80px", fontSize:13, padding:"7px 9px" }}>{[7,4,3,2].map(n=><option key={n} value={n}>{n} nuits</option>)}</select>
-            <select value={radarFilters.capacity} onChange={e=>setRadarFilters(f=>({ ...f, capacity:parseInt(e.target.value) }))} style={{ ...inp(), flex:"1 1 70px", fontSize:13, padding:"7px 9px" }}>{[2,4,6,8].map(n=><option key={n} value={n}>{n}P</option>)}</select>
+            <select value={radarFilters.capacity} onChange={e=>setRadarFilters(f=>({ ...f, capacity:parseInt(e.target.value) }))} style={{ ...inp(), flex:"1 1 70px", fontSize:13, padding:"7px 9px" }}>{FILTER_CAPACITIES.map(n=><option key={n} value={n}>{n}P</option>)}</select>
             <select value={radarFilters.accType} onChange={e=>setRadarFilters(f=>({ ...f, accType:e.target.value }))} style={{ ...inp(), flex:"1 1 90px", fontSize:13, padding:"7px 9px" }}>{ACCOMMODATION_ORDER.map(a=><option key={a} value={a}>{ACCOMMODATION_SHORT[a]}</option>)}</select>
             <select value={radarFilters.zone} onChange={e=>setRadarFilters(f=>({ ...f, zone:e.target.value }))} style={{ ...inp(), flex:"1 1 140px", fontSize:13, padding:"7px 9px" }}><option>La Foux d'Allos</option><option>Val d'Allos</option></select>
           </div>
@@ -6164,7 +6226,7 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
     const datesInvalid = !ctx.checkin || !ctx.checkout || !ctx.stayNights || ctx.stayNights<=0;
     // Tarif PUBLIC Les Cimes pour cette typologie (dates + durée + capacité + typologie)
     const benchOurRate = getOurRateForContext(ourRates, ctx, benchAccType);
-    const benchFallback = OUR_TARIFS[`${acc.capacity}p`]?.[selWeek?.season_type] || 0;
+    const benchFallback = fallbackTarifForType(benchAccType, selWeek?.season_type) || OUR_TARIFS[`${acc.capacity}p`]?.[selWeek?.season_type] || 0;
     const benchPublicPrice = benchOurRate
       ? Number(benchOurRate.price_total || benchOurRate.price_week || benchOurRate.price || 0)
       : benchFallback;
@@ -6303,7 +6365,7 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
               <div>
                 <p style={{ ...sml, margin:"0 0 4px" }}>Occupation cible</p>
                 <select value={benchOccupancy} onChange={e=>setBenchOccupancy(Number(e.target.value))} style={inp()}>
-                  {[2,4,6,8].map(n=><option key={n} value={n}>{n} personnes</option>)}
+                  {FILTER_CAPACITIES.map(n=><option key={n} value={n}>{n} personnes</option>)}
                 </select>
               </div>
             </div>
