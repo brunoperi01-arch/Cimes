@@ -6,6 +6,8 @@ import { parseCsv, parseCsvNumber, downloadCsv } from "./utils/csv.js";
 import { OUR_PROMOTIONS_LS, PROMO_CHANNELS, PROMO_TYPES, normalizePromotion, getActivePromoForContext } from "./domain/promotions.js";
 import { getOurPromotions, saveOurPromotion, deleteOurPromotion } from "./services/promotionsService.js";
 import { DEFAULT_COMPETITORS, CATALOG_LS, SOURCES_LS, enrichRates, getCompetitorRates, saveCompetitorRate, deleteCompetitorRate, getHistoricalRates, getCompetitorCatalog, saveCompetitorCatalogItem, deleteCompetitorCatalogItem, getCompetitorSources, saveCompetitorSource, deleteCompetitorSource, getAllCompetitorRatesHistory, correctCompetitorRate } from "./services/competitorRatesService.js";
+import { C, CAT_C, CAT_L } from "./components/theme.js";
+import Badge from "./components/Badge.jsx";
 import { isOwnProperty, competitorSegment, isPrivateCompetitor, SOURCE_TYPES, sourceBadgeMeta } from "./domain/comparability.js";
 import { ACCOMMODATION_TYPES, ACCOMMODATION_ORDER, ACCOMMODATION_SHORT, ACCOMMODATION_CAPACITIES, FILTER_CAPACITIES, OUR_TARIFS_BY_TYPE, OUR_TARIFS, OUR_TARIFS_META, accommodationTypesForCapacity, defaultAccommodationForCapacity, migrateCapacityToAccommodation, accommodationMeta, fallbackTarifForType, normalizeAccommodationType, inferAccommodationType, findRateForGridCell, getOurRateForContext } from "./domain/accommodations.js";
 import { ONLINE_SOURCE_TYPES, ONLINE_PLATFORMS, getExpectedOurOnlinePrice, onlineRateStatus } from "./domain/onlineRates.js";
@@ -1122,10 +1124,7 @@ function parsePaste(text, source, weekId, capacity) {
 }
 
 // ══ UI HELPERS ═══════════════════════════════════════════════════
-const C = { blue:"#1B3A6B", blueL:"#2E5FAC", bluePale:"#EEF4FF", green:"#1A7A5E", greenL:"#E6F4EF", orange:"#D45400", orangeL:"#FFF0E6", red:"#B91C1C", redL:"#FEE2E2", purple:"#6D28D9", purpleL:"#EDE9FE", gold:"#92400E", goldL:"#FEF3C7", gray:"#6B7280", grayL:"#F3F4F6", grayM:"#E5E7EB", white:"#FFF", text:"#111827", textS:"#6B7280" };
 const daysSince=d=>d?Math.floor((Date.now()-new Date(d))/864e5):999;
-const CAT_C={ haute:"#D45400", moyenne:C.blueL, basse:C.green };
-const CAT_L={ haute:"Haute saison", moyenne:"Moy. saison", basse:"Basse saison" };
 
 function MiniPriceChart({ rows, color = "#2563EB" }) {
   if (!rows || rows.length < 2) {
@@ -1155,7 +1154,6 @@ function MiniPriceChart({ rows, color = "#2563EB" }) {
     </div>
   );
 }
-function Badge({ label, color, bg, size=10 }) { return <span style={{ fontSize:size, fontWeight:700, background:bg, color, padding:"2px 6px", borderRadius:4, whiteSpace:"nowrap" }}>{label}</span>; }
 function ReliaBadge({ status }) { const m={ réel:{bg:C.greenL,c:C.green}, "validé":{bg:C.greenL,c:C.green}, "saisi manuellement":{bg:C.bluePale,c:C.blue}, "importé CSV":{bg:C.purpleL,c:C.purple}, "copier-coller":{bg:"#F3E8FF",c:C.purple}, "à vérifier":{bg:C.goldL,c:C.orange}, "rejeté":{bg:C.redL,c:C.red}, estimé:{bg:C.goldL,c:C.gold}, "scraping-auto":{bg:"#F0FDF4",c:"#166534"}, "scraping-batch":{bg:"#F0FDF4",c:"#166534"} }[status]||{bg:C.grayL,c:C.gray}; return <span style={{ fontSize:12, fontWeight:600, background:m.bg, color:m.c, padding:"1px 5px", borderRadius:4 }}>{status}</span>; }
 function PromoBadge({ label }) { if(!label) return null; const m={ "Genius -10%":{bg:"#DBEAFE",c:"#1D40AE"}, "Last minute":{bg:C.redL,c:C.red}, "Early booking":{bg:C.greenL,c:C.green}, "PDJ inclus":{bg:C.purpleL,c:C.purple}, "Annulation gratuite":{bg:C.greenL,c:C.green} }[label]||{bg:C.orangeL,c:C.orange}; const short=label.replace("Genius -10%","GENIUS").replace("Last minute","LAST MIN").replace("Early booking","EARLY").replace("PDJ inclus","PDJ").replace("Annulation gratuite","ANNUL.").slice(0,12); return <span style={{ fontSize:12, fontWeight:700, background:m.bg, color:m.c, padding:"2px 5px", borderRadius:4 }}>{short}</span>; }
 
