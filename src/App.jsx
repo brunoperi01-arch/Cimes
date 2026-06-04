@@ -12,6 +12,7 @@ import Badge from "./components/Badge.jsx";
 import AlertCard from "./components/AlertCard.jsx";
 import PeriodSelector from "./components/PeriodSelector.jsx";
 import ApartmentTypeSelector from "./components/ApartmentTypeSelector.jsx";
+import BottomNav from "./components/BottomNav.jsx";
 import { isOwnProperty, competitorSegment, isPrivateCompetitor, SOURCE_TYPES, sourceBadgeMeta } from "./domain/comparability.js";
 import { ACCOMMODATION_TYPES, ACCOMMODATION_ORDER, ACCOMMODATION_SHORT, ACCOMMODATION_CAPACITIES, FILTER_CAPACITIES, OUR_TARIFS_BY_TYPE, OUR_TARIFS, OUR_TARIFS_META, accommodationTypesForCapacity, defaultAccommodationForCapacity, migrateCapacityToAccommodation, accommodationMeta, fallbackTarifForType, normalizeAccommodationType, inferAccommodationType, findRateForGridCell, getOurRateForContext } from "./domain/accommodations.js";
 import { ONLINE_SOURCE_TYPES, ONLINE_PLATFORMS, getExpectedOurOnlinePrice, onlineRateStatus } from "./domain/onlineRates.js";
@@ -2708,14 +2709,7 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
 
   // Barre mobile : 5 modules
   const BNav=()=>isMobile?(
-    <div style={{ position:"sticky", bottom:0, background:C.white, borderTop:`0.5px solid ${C.grayM}`, display:"flex", padding:"6px 0 16px", zIndex:10 }}>
-      {MODULES.map(m=>{ const on=activeModule.id===m.id; return (
-        <button key={m.id} onClick={()=>goModule(m)} style={{ flex:1, background:"none", border:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:1 }}>
-          <span style={{ fontSize:16 }}>{m.icon}</span>
-          <span style={{ fontSize:11, fontWeight:on?700:400, color:on?C.blue:C.gray }}>{m.l}</span>
-        </button>
-      ); })}
-    </div>
+    <BottomNav modules={MODULES} activeId={activeModule.id} onSelect={goModule} />
   ):null;
 
   // Sous-navigation (onglets) affichée en haut du contenu si le module a >1 sous-vue
