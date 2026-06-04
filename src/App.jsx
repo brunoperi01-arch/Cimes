@@ -4,250 +4,11 @@ import { dateISO, dateObjToISO, sameDate, addDaysStr, fmtDateShort, periodOption
 import { fmt, fmtPct, median } from "./utils/money.js";
 import { parseCsv, parseCsvNumber, downloadCsv } from "./utils/csv.js";
 import { OUR_PROMOTIONS_LS, PROMO_CHANNELS, PROMO_TYPES, normalizePromotion, getActivePromoForContext } from "./domain/promotions.js";
+import { isOwnProperty, competitorSegment, isPrivateCompetitor, SOURCE_TYPES, sourceBadgeMeta } from "./domain/comparability.js";
 
 // ══ CONFIG ══════════════════════════════════════════════════════
-const SB_URL = import.meta.env.VITE_SUPABASE_URL || "DEMO";
-const SB_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "DEMO";
-const SB_READY = SB_URL !== "DEMO" && SB_KEY !== "DEMO"
-              && SB_URL.startsWith("https://") && SB_KEY.length > 20;
+import { sb, ls, SB_READY, SB_URL, SB_KEY, sbErrors, clearStoredSession, storeSession, refreshSessionIfNeeded } from "./services/supabaseClient.js";
 const IA_ENDPOINT = "/api/analyse-reco";
-
-// ══ SUPABASE REST WRAPPER ════════════════════════════════════════
-let _token = null;
-let _refreshToken = null;
-let _expiresAt = 0;
-
-function clearStoredSession() {
-  _token = null;
-  _refreshToken = null;
-  _expiresAt = 0;
-
-  try {
-    sessionStorage.removeItem("sb_token");
-    sessionStorage.removeItem("sb_refresh");
-    sessionStorage.removeItem("sb_expires_at");
-    sessionStorage.removeItem("sb_user");
-  } catch {}
-}
-
-function storeSession(data) {
-  _token = data.access_token;
-  _refreshToken = data.refresh_token || _refreshToken;
-  _expiresAt = Date.now() + ((data.expires_in || 3600) * 1000);
-
-  try {
-    sessionStorage.setItem("sb_token", _token);
-    sessionStorage.setItem("sb_refresh", _refreshToken || "");
-    sessionStorage.setItem("sb_expires_at", String(_expiresAt));
-
-    if (data.user) {
-      sessionStorage.setItem(
-        "sb_user",
-        JSON.stringify({
-          email: data.user?.email,
-          id: data.user?.id,
-        })
-      );
-    }
-  } catch {}
-}
-
-async function refreshSessionIfNeeded() {
-  if (!SB_READY || !_token) return;
-
-  const now = Date.now();
-
-  if (_expiresAt && now < _expiresAt - 60000) return;
-
-  if (!_refreshToken) {
-    clearStoredSession();
-    throw new Error("Session expirée. Déconnecte-toi puis reconnecte-toi.");
-  }
-
-  const r = await fetch(`${SB_URL}/auth/v1/token?grant_type=refresh_token`, {
-    method: "POST",
-    headers: {
-      "apikey": SB_KEY,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      refresh_token: _refreshToken,
-    }),
-  });
-
-  const d = await r.json();
-
-  if (!r.ok) {
-    clearStoredSession();
-    throw new Error("Session expirée. Déconnecte-toi puis reconnecte-toi.");
-  }
-
-  storeSession(d);
-}
-
-const authHeaders = async () => {
-  await refreshSessionIfNeeded();
-
-  return {
-    "apikey": SB_KEY,
-    "Authorization": `Bearer ${_token || SB_KEY}`,
-    "Content-Type": "application/json",
-    "Prefer": "return=representation",
-  };
-};
-
-const sbErrors = [];
-
-const sb = {
-  async rpc(path, body) {
-    const r = await fetch(`${SB_URL}${path}`, {
-      method: "POST",
-      headers: await authHeaders(),
-      body: JSON.stringify(body),
-    });
-
-    const d = await r.json();
-
-    if (!r.ok) {
-      sbErrors.push({
-        ts: new Date().toISOString(),
-        msg: d?.message || r.statusText,
-        path,
-      });
-      throw new Error(d?.message || r.statusText);
-    }
-
-    return d;
-  },
-
-  async select(table, params = "") {
-    const r = await fetch(`${SB_URL}/rest/v1/${table}?${params}`, {
-      headers: await authHeaders(),
-    });
-
-    if (!r.ok) {
-      const t = await r.text();
-      sbErrors.push({
-        ts: new Date().toISOString(),
-        msg: t,
-        path: table,
-      });
-      throw new Error(t);
-    }
-
-    return r.json();
-  },
-
-  async insert(table, body) {
-    const r = await fetch(`${SB_URL}/rest/v1/${table}`, {
-      method: "POST",
-      headers: await authHeaders(),
-      body: JSON.stringify(body),
-    });
-
-    if (!r.ok) {
-      const t = await r.text();
-
-      if (
-        t.includes("unique") ||
-        t.includes("duplicate") ||
-        t.includes("23505")
-      ) {
-        throw new Error("DUPLICATE:" + t);
-      }
-
-      sbErrors.push({
-        ts: new Date().toISOString(),
-        msg: t,
-        path: table,
-      });
-
-      throw new Error(t);
-    }
-
-    return r.json();
-  },
-
-  async update(table, filter, body) {
-    const r = await fetch(`${SB_URL}/rest/v1/${table}?${filter}`, {
-      method: "PATCH",
-      headers: await authHeaders(),
-      body: JSON.stringify(body),
-    });
-
-    if (!r.ok) {
-      const t = await r.text();
-      throw new Error(t);
-    }
-
-    return r.json();
-  },
-
-  async delete(table, filter) {
-    const r = await fetch(`${SB_URL}/rest/v1/${table}?${filter}`, {
-      method: "DELETE",
-      headers: await authHeaders(),
-    });
-
-    if (!r.ok) throw new Error(await r.text());
-
-    return true;
-  },
-
-  async signIn(email, pwd) {
-    const r = await fetch(`${SB_URL}/auth/v1/token?grant_type=password`, {
-      method: "POST",
-      headers: {
-        "apikey": SB_KEY,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        email,
-        password: pwd,
-      }),
-    });
-
-    const d = await r.json();
-
-    if (!r.ok) {
-      throw new Error(
-        d.error_description ||
-        d.message ||
-        "Identifiants incorrects"
-      );
-    }
-
-    storeSession(d);
-
-    return d;
-  },
-
-  signOut() {
-    clearStoredSession();
-  },
-
-  restoreSession() {
-    try {
-      const t = sessionStorage.getItem("sb_token");
-      const r = sessionStorage.getItem("sb_refresh");
-      const e = sessionStorage.getItem("sb_expires_at");
-      const u = sessionStorage.getItem("sb_user");
-
-      if (t && r && u) {
-        _token = t;
-        _refreshToken = r;
-        _expiresAt = Number(e || 0);
-        return JSON.parse(u);
-      }
-
-      clearStoredSession();
-    } catch {
-      clearStoredSession();
-    }
-
-    return null;
-  },
-};
 
 // ══ DONNÉES STATIQUES ═══════════════════════════════════════════
 const DEFAULT_COMPETITORS = [
@@ -673,15 +434,6 @@ function safeListingUrl(item, result) {
 }
 
 // Détecte notre propre établissement pour l'exclure des concurrents
-function isOwnProperty(name) {
-  const n = String(name || "").toLowerCase();
-  return (
-    n.includes("les cimes du val d'allos") ||
-    n.includes("les cimes val d'allos") ||
-    n.includes("résidence les cimes") ||
-    n.includes("residence les cimes")
-  );
-}
 
 function isDuplicate(existing, rate) {
   if (rate.competitor_id) return existing.some(r=>r.week_id===rate.week_id&&r.competitor_id===rate.competitor_id&&r.capacity===rate.capacity&&r.collected_at===rate.collected_at&&r.source===rate.source);
@@ -697,11 +449,6 @@ function enrichRates(rawRates, competitors) {
   });
 }
 
-const ls = {
-  get: k=>{ try { return JSON.parse(localStorage.getItem(k)||"[]"); } catch { return []; } },
-  set: (k,v)=>{ try { localStorage.setItem(k,JSON.stringify(v)); } catch {} },
-  push: (k,item)=>{ const arr=ls.get(k); ls.set(k,[...arr.filter(x=>x.id!==item.id),item]); },
-};
 
 function stripUserId(rate) { const { user_id, ...rest } = rate; return rest; }
 
@@ -1640,34 +1387,8 @@ function radarMarketRecommendation(results, ourPrice) {
 }
 
 // Segment d'un concurrent : "private" (particulier) ou "residence" (pro)
-function competitorSegment(c) {
-  if (!c) return "residence";
-  if (c.is_private_rental === true || c.market_segment === "private" || c.property_type === "particulier" || c.property_type === "studio") return "private";
-  return "residence";
-}
-function isPrivateCompetitor(c) { return competitorSegment(c) === "private"; }
 // Conservé pour compat (anciens types maeva/airbnb/…) — utilisé par les boutons rapides
-const SOURCE_TYPES = [
-  { type:"booking", name:"Booking.com" },
-  { type:"direct",  name:"Site direct" },
-  { type:"maeva",   name:"Maeva" },
-  { type:"airbnb",  name:"Airbnb" },
-  { type:"abritel", name:"Abritel" },
-  { type:"expedia", name:"Expedia" },
-  { type:"other",   name:"Autre" },
-];
 // Badge (label + couleur) selon le type de source, gère aussi les anciens types
-function sourceBadgeMeta(type) {
-  switch (type) {
-    case "booking":       return { l:"Booking", c:"#0A6CFF", bg:"#E8F1FF" };
-    case "direct":        return { l:"Direct",  c:"#1DB954", bg:"#E6F9EE" };
-    case "tour_operator": return { l:"TO",      c:"#7C3AED", bg:"#F1E9FF" };
-    case "marketplace":   return { l:"OTA",     c:"#F5A623", bg:"#FFF4E0" };
-    case "maeva":         return { l:"TO",      c:"#7C3AED", bg:"#F1E9FF" };
-    case "airbnb": case "abritel": case "expedia": return { l:"OTA", c:"#F5A623", bg:"#FFF4E0" };
-    default:              return { l:"Autre",   c:"#8E8E93", bg:"#F2F2F7" };
-  }
-}
 
 async function getCompetitorSources() {
   if (SB_READY) {
