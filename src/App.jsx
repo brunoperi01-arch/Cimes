@@ -9,6 +9,7 @@ import { DEFAULT_COMPETITORS, CATALOG_LS, SOURCES_LS, enrichRates, getCompetitor
 import { C, CAT_C, CAT_L } from "./components/theme.js";
 import { makeStyles } from "./components/ui.js";
 import Badge from "./components/Badge.jsx";
+import AlertCard from "./components/AlertCard.jsx";
 import { isOwnProperty, competitorSegment, isPrivateCompetitor, SOURCE_TYPES, sourceBadgeMeta } from "./domain/comparability.js";
 import { ACCOMMODATION_TYPES, ACCOMMODATION_ORDER, ACCOMMODATION_SHORT, ACCOMMODATION_CAPACITIES, FILTER_CAPACITIES, OUR_TARIFS_BY_TYPE, OUR_TARIFS, OUR_TARIFS_META, accommodationTypesForCapacity, defaultAccommodationForCapacity, migrateCapacityToAccommodation, accommodationMeta, fallbackTarifForType, normalizeAccommodationType, inferAccommodationType, findRateForGridCell, getOurRateForContext } from "./domain/accommodations.js";
 import { ONLINE_SOURCE_TYPES, ONLINE_PLATFORMS, getExpectedOurOnlinePrice, onlineRateStatus } from "./domain/onlineRates.js";
@@ -5496,17 +5497,9 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
           </div>
           {alerts.length===0
             ? <div style={{ ...cd(11), padding:"20px 14px", textAlign:"center" }}><p style={{ margin:0, fontSize:30 }}>✓</p><p style={{ margin:"6px 0 0", fontSize:13, fontWeight:600, color:C.green }}>Aucune anomalie détectée</p><p style={{ margin:"2px 0 0", fontSize:11, color:C.gray }}>Vos tarifs, la diffusion en ligne et le positionnement marché sont cohérents.</p></div>
-            : ["critique","warning","info"].flatMap(lv=>byLevel[lv]).map((a,i)=>{ const m=ALERT_LEVELS[a.level]; return (
-              <div key={i} style={{ ...cd(11), padding:"10px 13px", marginBottom:7, borderLeft:`3px solid ${m.color}`, background:m.bg }}>
-                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 }}>
-                  <p style={{ margin:0, fontSize:13, fontWeight:700, color:C.text }}>{m.icon} {a.title}</p>
-                  <Badge label={m.label} color={m.color} bg={C.white} size={10}/>
-                </div>
-                <p style={{ margin:"4px 0 0", fontSize:12, color:C.text, lineHeight:1.4 }}>{a.explanation}</p>
-                <p style={{ margin:"4px 0 0", fontSize:12, color:m.color, fontWeight:600, lineHeight:1.4 }}>→ {a.action}</p>
-                {a.screen&&<button onClick={()=>setScreen(a.screen)} style={{ marginTop:7, fontSize:11, fontWeight:700, color:C.white, background:m.color, border:"none", borderRadius:7, padding:"5px 11px", cursor:"pointer" }}>Voir</button>}
-              </div>
-            ); })}
+            : ["critique","warning","info"].flatMap(lv=>byLevel[lv]).map((a,i)=>(
+              <AlertCard key={i} alert={a} meta={ALERT_LEVELS[a.level]} cd={cd} onAction={setScreen} />
+            ))}
         </div><BNav/>
       </div>
     );
