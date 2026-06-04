@@ -452,6 +452,60 @@ function accommodationAdvice(accommodationType) {
 }
 
 // Statuts considérés comme fiables pour les calculs / recommandations / IA
+// ══════════════════════════════════════════════════════════════════
+// ══ COUCHE SÉMANTIQUE — 3 DOMAINES DE TARIFS (ne jamais mélanger) ══
+// Source unique de vérité sur QUI détient QUOI. Les 3 domaines sont
+// physiquement séparés (tables Supabase distinctes + clés localStorage
+// distinctes). Aucun écran ne doit lire/écrire le mauvais domaine.
+//
+//  1. official     → tarifs officiels DÉCIDÉS par Les Cimes (grille interne)
+//  2. online_own   → tarifs Les Cimes CONSTATÉS en ligne chez les partenaires
+//                    (Booking, Maeva, Ski Planet, Travelski, Carrefour Voyages,
+//                     site officiel…) — pour contrôler la diffusion
+//  3. competitor   → tarifs des CONCURRENTS (Booking, Airbnb, Abritel, PAP,
+//                     Goélia, Chalets du Verdon…) — pour se situer sur le marché
+// ══════════════════════════════════════════════════════════════════
+const RATE_DOMAINS = {
+  official: {
+    key: "official",
+    label: "Tarif officiel Les Cimes",
+    short: "Officiel",
+    table: "our_rates",
+    ls: "our_rates",
+    owner: "les_cimes",        // c'est NOTRE décision
+    role: "reference",         // sert de référence pour tout le reste
+    color: "#1B3A6B",
+  },
+  online_own: {
+    key: "online_own",
+    label: "Tarif Les Cimes en ligne (partenaires)",
+    short: "En ligne",
+    table: "our_online_rates",
+    ls: "lescimes_online_rates",
+    sourcesTable: "our_online_sources",
+    sourcesLs: "lescimes_online_sources",
+    owner: "les_cimes",        // c'est NOTRE prix, mais constaté chez un tiers
+    role: "diffusion",         // comparé au tarif officiel
+    color: "#1A7A5E",
+  },
+  competitor: {
+    key: "competitor",
+    label: "Tarifs concurrents",
+    short: "Concurrents",
+    table: "competitor_rates",
+    ls: "competitor_rates",
+    catalogTable: "competitor_catalog",
+    sourcesTable: "competitor_sources",
+    owner: "tiers",            // ce n'est PAS notre prix
+    role: "marche",            // comparé à notre tarif officiel
+    color: "#6D28D9",
+  },
+};
+// Garde-fou : à quel domaine appartient une "source" partenaire / canal.
+// online_own et competitor peuvent partager des plateformes (Booking…) mais
+// jamais la même ligne : le domaine est porté par la table, pas par la source.
+const ONLINE_OWN_CHANNELS = ["Booking", "Maeva", "Ski Planet", "Travelski", "Carrefour Voyages", "Site officiel", "Goélia", "La France du Nord au Sud"];
+
 const TRUSTED_STATUSES = ["réel", "validé", "saisi manuellement", "importé CSV"];
 
 // ══ PLAN DE COLLECTE — PÉRIODES STATIQUES ═══════════════════════
@@ -1065,6 +1119,46 @@ async function saveOurOnlineRate(r) {
     catch (e) { const all=ls.get(ONLINE_RATES_LS)||[]; const row={ ...payload, id:"local_"+Date.now() }; all.unshift(row); ls.set(ONLINE_RATES_LS, all); return row; }
   }
   const all=ls.get(ONLINE_RATES_LS)||[]; const row={ ...payload, id:"local_"+Date.now() }; all.unshift(row); ls.set(ONLINE_RATES_LS, all); return row;
+}
+// Import CSV des tarifs Les Cimes constatés en ligne (domaine online_own).
+// Colonnes : source_name;source_type;period_start;period_end;stay_nights;accommodation_type;capacity;online_price[;notes]
+// Le prix attendu (officiel/promo) est recalculé ici à partir de our_rates + our_promotions.
+async function importOurOnlineRatesCsv(csvText, { ourRates = [], ourPromotions = [] } = {}) {
+  const lines = String(csvText || "").trim().split(/\r?\n/).filter(Boolean);
+  if (lines.length < 2) throw new Error("CSV vide ou sans données.");
+  const sep = lines[0].includes(";") ? ";" : ",";
+  const headers = lines[0].split(sep).map(h => h.trim().toLowerCase());
+  const idx = name => headers.indexOf(name);
+  let ok = 0, errors = 0;
+  for (const line of lines.slice(1)) {
+    const v = line.split(sep).map(x => x.trim().replace(/^"|"$/g, ""));
+    const get = name => { const i = idx(name); return i >= 0 ? v[i] : ""; };
+    const accType = normalizeAccommodationType(get("accommodation_type")) || get("accommodation_type") || null;
+    const capacity = parseInt(get("capacity")) || (accType ? ACCOMMODATION_TYPES[accType]?.capacity : null);
+    const stayNights = parseInt(get("stay_nights")) || 7;
+    const periodStart = get("period_start") || null;
+    const periodEnd = get("period_end") || (periodStart ? addDaysStr(periodStart, stayNights) : null);
+    const onlinePrice = parseFloat(get("online_price") || get("validated_price") || get("price")) || 0;
+    if (!periodStart || !onlinePrice) { errors++; continue; }
+    // Prix attendu recalculé (jamais inventé) à partir des 2 sources internes
+    const ctx = { checkin: periodStart, checkout: periodEnd, capacity, stayNights, period_start: periodStart, period_end: periodEnd };
+    const publicRate = getOurRateForContext(ourRates, ctx, accType);
+    const activePromo = getActivePromoForContext(ourPromotions, ctx, accType);
+    const exp = getExpectedOurOnlinePrice({ publicRate, activePromo });
+    const status = onlineRateStatus({ validated: onlinePrice, expected: exp.expected_price, expectedPublic: exp.expected_public_price, expectedPromo: exp.expected_promo_price });
+    try {
+      await saveOurOnlineRate({
+        source_name: get("source_name") || "Import CSV", source_type: get("source_type") || "other",
+        period_start: periodStart, period_end: periodEnd, stay_nights: stayNights,
+        accommodation_type: accType, capacity,
+        expected_public_price: exp.expected_public_price, expected_promo_price: exp.expected_promo_price, expected_price: exp.expected_price,
+        validated_price: onlinePrice, status, reliability_status: "importé CSV",
+        notes: get("notes") || null,
+      });
+      ok++;
+    } catch { errors++; }
+  }
+  return { ok, errors };
 }
 // Prix attendu = promo active si présente, sinon tarif public
 function getExpectedOurOnlinePrice({ publicRate, activePromo }) {
@@ -2090,6 +2184,7 @@ function LoginScreen({ loginErr, SB_READY, loginEmail, setLE, loginPwd, setLP, l
 // ══ APP ══════════════════════════════════════════════════════════
 export default function App() {
   const [screen, setScreen]     = useState("login");
+  const [adminOpen, setAdminOpen] = useState(false);
   const [user, setUser]         = useState(null);
   const [loginEmail, setLE]     = useState("");
   const [loginPwd, setLP]       = useState("");
@@ -2172,6 +2267,8 @@ export default function App() {
   const [onlineDetected, setOnlineDetected] = useState({}); // prix détecté (candidat) par source
   const [onlineMsg, setOnlineMsg]         = useState(null);
   const [onlineTab, setOnlineTab]         = useState("releve"); // releve | sources | historique
+  const [onlineCsv, setOnlineCsv]         = useState("");
+  const [onlineCsvMsg, setOnlineCsvMsg]   = useState(null);
   // ── Concurrents suivis (competitor_catalog) ───────────────────
   const [catalog, setCatalog]             = useState([]);
   const [catForm, setCatForm]             = useState(null); // null = fermé ; objet = formulaire ouvert
@@ -2572,6 +2669,14 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
   // ── Nos tarifs en ligne (contrôle diffusion) ──────────────────
   async function reloadOnlineSources() { try { const d=await getOurOnlineSources(); setOnlineSources(d||[]); } catch {} }
   async function reloadOnlineRates() { try { const d=await getOurOnlineRates(); setOnlineRates(d||[]); } catch {} }
+  async function handleImportOnlineCsv() {
+    if (!onlineCsv.trim()) { setOnlineCsvMsg("err:Collez un CSV."); return; }
+    try {
+      const res = await importOurOnlineRatesCsv(onlineCsv, { ourRates, ourPromotions });
+      await reloadOnlineRates();
+      setOnlineCsv(""); setOnlineCsvMsg(`ok:${res.ok} importé(s)${res.errors?`, ${res.errors} ignoré(s)`:""}`);
+    } catch(e) { setOnlineCsvMsg("err:"+e.message); }
+  }
   function onlineContext() {
     const p = ALL_PERIODS.find(x=>x.id===onlineFilters.periodId);
     const checkin = p ? (p.period_start||p.week_start) : null;
@@ -3551,56 +3656,106 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
     </div>
   ):null;
 
-  const NAV=[{id:"dashboard",icon:"▣",l:"Dashboard"},{id:"benchmark",icon:"📊",l:"Benchmark"},{id:"track",icon:"💶",l:"Suivi prix"},{id:"promotions",icon:"🎯",l:"Promos"},{id:"weeks",icon:"📡",l:"Radar"},{id:"diag",icon:"🔬",l:"Diag"}];
-  const NAV_GROUPS=[
-    { label:"Pilotage", items:[{id:"dashboard",icon:"▣",l:"Dashboard"},{id:"benchmark",icon:"📊",l:"Benchmark"},{id:"promotions",icon:"🎯",l:"Promos"},{id:"track",icon:"💶",l:"Suivi prix"},{id:"radar",icon:"🛰️",l:"Radar Marché"}] },
-    { label:"Données", items:[{id:"tarifs",icon:"💰",l:"Tarifs Les Cimes"},{id:"our_online_rates",icon:"🧾",l:"Nos tarifs en ligne"},{id:"competitors_residence",icon:"🏢",l:"Concurrents Résidences"},{id:"competitors_private",icon:"🏠",l:"Concurrents Particuliers"},{id:"import",icon:"🔗",l:"Sources & Import"}] },
-    { label:"Outils", items:[{id:"weeks",icon:"📅",l:"Semaines"},{id:"collect",icon:"📥",l:"Import / Saisie"},{id:"diag",icon:"🔬",l:"Diagnostic"}] },
+  // ══ NAVIGATION — 5 MODULES (orientée décision) ═══════════════════
+  // Chaque module a une vue par défaut + d'éventuelles sous-vues (onglets).
+  const MODULES = [
+    { id:"dashboard", icon:"🧭", l:"Dashboard", def:"dashboard", subs:[] },
+    { id:"tarifs",    icon:"💰", l:"Mes tarifs", def:"tarifs", subs:[
+      { id:"tarifs", l:"Grille officielle" },
+      { id:"our_online_rates", l:"Vus en ligne" },
+    ] },
+    { id:"marche",    icon:"📊", l:"Marché", def:"track", subs:[
+      { id:"track", l:"Suivi prix" },
+      { id:"competitors_residence", l:"Résidences" },
+      { id:"competitors_private", l:"Particuliers" },
+    ] },
+    { id:"collecte",  icon:"📥", l:"Collecte", def:"collect", subs:[
+      { id:"collect", l:"Saisie / Coller" },
+      { id:"import", l:"Import CSV" },
+      { id:"radar", l:"Scan marché" },
+    ] },
+    { id:"alertes",   icon:"🔔", l:"Alertes", def:"benchmark", subs:[
+      { id:"benchmark", l:"Décisions" },
+      { id:"promotions", l:"Promos & reco" },
+    ] },
   ];
+  // Écrans réservés à l'administration / debug (cachés du menu principal)
+  const ADMIN_SCREENS = [
+    { id:"diag", icon:"🔬", l:"Diagnostic système" },
+    { id:"weeks", icon:"📅", l:"Semaines (legacy)" },
+  ];
+  // Quel module contient l'écran courant ?
+  const moduleForScreen = (scr) => MODULES.find(m => m.def===scr || m.subs.some(s=>s.id===scr)) || (ADMIN_SCREENS.some(a=>a.id===scr) ? { id:"admin", subs:[] } : MODULES[0]);
+  const activeModule = moduleForScreen(screen);
+
   const goScreen=id=>{ setScreen(id); setCM(null); setIaText(null); setPasteEdit(null); };
+  const goModule=m=>{ goScreen(m.def); };
+
+  // Barre mobile : 5 modules
   const BNav=()=>isMobile?(
     <div style={{ position:"sticky", bottom:0, background:C.white, borderTop:`0.5px solid ${C.grayM}`, display:"flex", padding:"6px 0 16px", zIndex:10 }}>
-      {NAV.map(n=>(
-        <button key={n.id} onClick={()=>goScreen(n.id)} style={{ flex:1, background:"none", border:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:1 }}>
-          <span style={{ fontSize:16 }}>{n.icon}</span>
-          <span style={{ fontSize:12, fontWeight:screen===n.id?700:400, color:screen===n.id?C.blue:C.gray }}>{n.l}</span>
+      {MODULES.map(m=>{ const on=activeModule.id===m.id; return (
+        <button key={m.id} onClick={()=>goModule(m)} style={{ flex:1, background:"none", border:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:1 }}>
+          <span style={{ fontSize:16 }}>{m.icon}</span>
+          <span style={{ fontSize:11, fontWeight:on?700:400, color:on?C.blue:C.gray }}>{m.l}</span>
         </button>
-      ))}
+      ); })}
     </div>
   ):null;
+
+  // Sous-navigation (onglets) affichée en haut du contenu si le module a >1 sous-vue
+  const SubNav=()=>{
+    if (!activeModule.subs || activeModule.subs.length<2) return null;
+    return (
+      <div style={{ display:"flex", gap:4, background:C.grayL, padding:3, borderRadius:10, margin:"0 0 4px", overflowX:"auto" }}>
+        {activeModule.subs.map(s=>{ const on=screen===s.id; return (
+          <button key={s.id} onClick={()=>goScreen(s.id)} style={{ flex:"1 0 auto", whiteSpace:"nowrap", padding:"7px 12px", fontSize:13, fontWeight:on?700:500, color:on?C.white:C.blueL, background:on?C.blue:"transparent", border:"none", borderRadius:8, cursor:"pointer" }}>{s.l}</button>
+        ); })}
+      </div>
+    );
+  };
+
+  const NAV_GROUPS=null; // (déprécié — remplacé par MODULES)
   const SideNav=()=>(
     <div style={{ background:C.blue, borderRadius:16, padding:"16px 12px", position:"sticky", top:18, minHeight:"calc(100vh - 36px)", display:"flex", flexDirection:"column" }}>
       <div style={{ display:"flex", alignItems:"center", gap:9, padding:"0 6px 16px" }}>
         <div style={{ width:34, height:34, background:"rgba(255,255,255,0.14)", borderRadius:10, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}><span style={{ fontSize:18 }}>⛰</span></div>
         <div style={{ minWidth:0 }}>
           <p style={{ margin:0, fontSize:16, fontWeight:700, color:C.white, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>Les Cimes</p>
-          <p style={{ margin:0, fontSize:10, color:"rgba(255,255,255,0.55)" }}>Benchmark</p>
+          <p style={{ margin:0, fontSize:10, color:"rgba(255,255,255,0.55)" }}>Cockpit tarifaire</p>
         </div>
       </div>
-      {NAV_GROUPS.map((grp,gi)=>(
-        <div key={grp.label} style={{ marginBottom:gi<NAV_GROUPS.length-1?6:0 }}>
-          <p style={{ margin:"8px 8px 5px", fontSize:11, fontWeight:700, color:"rgba(255,255,255,0.45)", letterSpacing:"0.12em", textTransform:"uppercase" }}>{grp.label}</p>
-          {grp.items.map(n=>{
-            const active = screen===n.id;
-            return (
-              <button key={n.id} onClick={()=>goScreen(n.id)} style={{ width:"100%", display:"flex", alignItems:"center", gap:11, padding:"9px 11px", marginBottom:2, background:active?"rgba(255,255,255,0.16)":"transparent", border:"none", borderRadius:10, cursor:"pointer", textAlign:"left" }}>
-                <span style={{ fontSize:15, width:18, textAlign:"center" }}>{n.icon}</span>
-                <span style={{ fontSize:14, fontWeight:active?700:500, color:active?C.white:"rgba(255,255,255,0.8)" }}>{n.l}</span>
-              </button>
-            );
-          })}
-        </div>
-      ))}
+      {/* 5 modules */}
+      {MODULES.map(m=>{
+        const on=activeModule.id===m.id;
+        return (
+          <div key={m.id}>
+            <button onClick={()=>goModule(m)} style={{ width:"100%", display:"flex", alignItems:"center", gap:11, padding:"10px 11px", marginBottom:2, background:on?"rgba(255,255,255,0.16)":"transparent", border:"none", borderRadius:10, cursor:"pointer", textAlign:"left" }}>
+              <span style={{ fontSize:16, width:20, textAlign:"center" }}>{m.icon}</span>
+              <span style={{ fontSize:14, fontWeight:on?700:500, color:on?C.white:"rgba(255,255,255,0.8)" }}>{m.l}</span>
+            </button>
+            {/* sous-vues du module actif */}
+            {on && m.subs.length>1 && (
+              <div style={{ margin:"0 0 6px 30px" }}>
+                {m.subs.map(s=>{ const sa=screen===s.id; return (
+                  <button key={s.id} onClick={()=>goScreen(s.id)} style={{ width:"100%", textAlign:"left", padding:"6px 10px", marginBottom:1, fontSize:13, fontWeight:sa?700:400, color:sa?C.white:"rgba(255,255,255,0.65)", background:sa?"rgba(255,255,255,0.10)":"transparent", border:"none", borderRadius:8, cursor:"pointer" }}>{s.l}</button>
+                ); })}
+              </div>
+            )}
+          </div>
+        );
+      })}
       <div style={{ marginTop:"auto", paddingTop:12 }}>
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:6, padding:"0 6px" }}>
+        {/* Accès Admin / Debug discret */}
+        <button onClick={()=>setAdminOpen(o=>!o)} style={{ width:"100%", textAlign:"left", padding:"6px 11px", fontSize:12, color:"rgba(255,255,255,0.45)", background:"none", border:"none", cursor:"pointer" }}>⚙︎ Admin / Debug {adminOpen?"▾":"▸"}</button>
+        {adminOpen && ADMIN_SCREENS.map(a=>{ const sa=screen===a.id; return (
+          <button key={a.id} onClick={()=>goScreen(a.id)} style={{ width:"100%", textAlign:"left", padding:"6px 11px 6px 24px", marginBottom:1, fontSize:13, fontWeight:sa?700:400, color:sa?C.white:"rgba(255,255,255,0.6)", background:sa?"rgba(255,255,255,0.10)":"transparent", border:"none", borderRadius:8, cursor:"pointer" }}>{a.icon} {a.l}</button>
+        ); })}
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:6, padding:"10px 6px 0" }}>
           <Badge label={SB_READY?"SUPABASE":"LOCAL"} color={SB_READY?C.green:C.gold} bg={SB_READY?C.greenL:C.goldL} size={9}/>
           {user&&<button onClick={handleLogout} style={{ fontSize:10, color:"rgba(255,255,255,0.6)", background:"none", border:"none", cursor:"pointer" }}>Déco.</button>}
         </div>
         {user&&<p style={{ margin:"6px 6px 0", fontSize:12, color:"rgba(255,255,255,0.5)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{user.email}</p>}
-        <div style={{ display:"flex", alignItems:"center", gap:7, margin:"10px 6px 0", padding:"7px 9px", background:"rgba(255,255,255,0.08)", borderRadius:9 }}>
-          <span style={{ fontSize:14 }}>🖥️</span>
-          <div><p style={{ margin:0, fontSize:10, fontWeight:700, color:C.white }}>Optimisé desktop</p><p style={{ margin:0, fontSize:11, color:"rgba(255,255,255,0.5)" }}>Interface responsive</p></div>
-        </div>
       </div>
     </div>
   );
@@ -5938,6 +6093,15 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
               <p style={sml}>Sources Les Cimes suivies</p>
               <button onClick={()=>setOnlineForm({ source_name:"", source_type:"booking", source_url:"", is_active:true, notes:"" })} style={{ fontSize:11, fontWeight:700, color:C.white, background:C.blue, border:"none", borderRadius:7, padding:"6px 11px", cursor:"pointer" }}>+ Ajouter source Les Cimes</button>
             </div>
+            {/* Import CSV des tarifs Les Cimes constatés en ligne */}
+            <details style={{ ...cd(10), padding:"9px 12px", marginBottom:8 }}>
+              <summary style={{ fontSize:12, fontWeight:700, color:C.green, cursor:"pointer" }}>📥 Importer des relevés en ligne (CSV)</summary>
+              <p style={{ margin:"6px 0", fontSize:10, color:C.gray, lineHeight:1.5 }}>Colonnes : <code>source_name;source_type;period_start;period_end;stay_nights;accommodation_type;capacity;online_price;notes</code>. Le prix attendu (officiel + promo) et l'écart sont recalculés automatiquement — aucun prix inventé.</p>
+              <button onClick={()=>{ const tmpl=["source_name;source_type;period_start;period_end;stay_nights;accommodation_type;capacity;online_price;notes","Booking;booking;2026-08-01;2026-08-08;7;3P8;8;855;relevé manuel","Maeva;tour_operator;2026-08-01;2026-08-08;7;3P8;8;831;OK"].join("\n"); const b=new Blob([tmpl],{type:"text/csv;charset=utf-8"}); const u=URL.createObjectURL(b); const a=document.createElement("a"); a.href=u; a.download="modele_tarifs_en_ligne.csv"; a.click(); }} style={{ ...btn(false,C.grayL,C.green), margin:"0 0 6px", border:`1px solid ${C.green}`, fontSize:11 }}>⬇ Modèle CSV</button>
+              <textarea value={onlineCsv} onChange={e=>setOnlineCsv(e.target.value)} placeholder="Collez le contenu CSV ici…" style={{ ...inp(), minHeight:70, resize:"vertical", marginBottom:6, fontFamily:"monospace", fontSize:11 }}/>
+              {onlineCsvMsg&&<p style={{ margin:"0 0 6px", fontSize:11, color:onlineCsvMsg.startsWith("ok")?C.green:C.red, fontWeight:600 }}>{onlineCsvMsg.startsWith("ok")?"✓ "+onlineCsvMsg.slice(3):"✗ "+onlineCsvMsg.slice(4)}</p>}
+              <button onClick={handleImportOnlineCsv} disabled={!onlineCsv.trim()} style={{ ...btn(!onlineCsv.trim(),C.green), margin:0 }}>Importer le CSV</button>
+            </details>
             {onlineForm&&(
               <div style={{ ...cd(11), padding:"11px 13px", border:`1px solid ${C.blue}`, marginBottom:8 }}>
                 <p style={{ margin:"0 0 6px", fontSize:12, fontWeight:700, color:C.blue }}>{onlineForm.id?"Modifier la source":"Nouvelle source Les Cimes"}</p>
@@ -6954,6 +7118,7 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
         <div style={mainGrid}>
           <SideNav/>
           <div style={ph}>
+            <div style={{ marginBottom:6 }}><SubNav/></div>
             {screen === "dashboard" && Dashboard()}
             {screen === "weeks" && Weeks()}
             {screen === "week" && WeekDetail()}
@@ -6974,6 +7139,7 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
 
       {user && isMobile && (
         <div style={ph}>
+          <div style={{ padding:"8px 14px 0" }}><SubNav/></div>
           {screen === "dashboard" && Dashboard()}
           {screen === "weeks" && Weeks()}
           {screen === "week" && WeekDetail()}
