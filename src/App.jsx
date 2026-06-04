@@ -5,7 +5,9 @@ import { fmt, fmtPct, median } from "./utils/money.js";
 import { parseCsv, parseCsvNumber, downloadCsv } from "./utils/csv.js";
 import { OUR_PROMOTIONS_LS, PROMO_CHANNELS, PROMO_TYPES, normalizePromotion, getActivePromoForContext } from "./domain/promotions.js";
 import { isOwnProperty, competitorSegment, isPrivateCompetitor, SOURCE_TYPES, sourceBadgeMeta } from "./domain/comparability.js";
-import { ACCOMMODATION_TYPES, ACCOMMODATION_ORDER, ACCOMMODATION_SHORT, ACCOMMODATION_CAPACITIES, FILTER_CAPACITIES, OUR_TARIFS_BY_TYPE, OUR_TARIFS, OUR_TARIFS_META, accommodationTypesForCapacity, defaultAccommodationForCapacity, migrateCapacityToAccommodation, accommodationMeta, fallbackTarifForType, normalizeAccommodationType, inferAccommodationType, findRateForGridCell } from "./domain/accommodations.js";
+import { ACCOMMODATION_TYPES, ACCOMMODATION_ORDER, ACCOMMODATION_SHORT, ACCOMMODATION_CAPACITIES, FILTER_CAPACITIES, OUR_TARIFS_BY_TYPE, OUR_TARIFS, OUR_TARIFS_META, accommodationTypesForCapacity, defaultAccommodationForCapacity, migrateCapacityToAccommodation, accommodationMeta, fallbackTarifForType, normalizeAccommodationType, inferAccommodationType, findRateForGridCell, getOurRateForContext } from "./domain/accommodations.js";
+import { ONLINE_SOURCE_TYPES, ONLINE_PLATFORMS, getExpectedOurOnlinePrice, onlineRateStatus } from "./domain/onlineRates.js";
+import { ONLINE_SOURCES_LS, ONLINE_RATES_LS, getOurOnlineSources, saveOurOnlineSource, deleteOurOnlineSource, getOurOnlineRates, saveOurOnlineRate, importOurOnlineRatesCsv } from "./services/ownOnlineRatesService.js";
 import { OUR_RATES_LS, getOurRates, saveOurRate, deleteOurRate } from "./services/officialRatesService.js";
 
 // ══ CONFIG ══════════════════════════════════════════════════════
@@ -519,51 +521,6 @@ async function getOurRate(periodId, capacity, stayNights=7) {
 }
 
 // Récupère le tarif Les Cimes correspondant au contexte : priorité aux dates réelles, puis period_id
-function getOurRateForContext(ourRates, ctx, accommodationType) {
-  if (!ourRates?.length || !ctx) return null;
-  const capacity = Number(ctx.capacity);
-  const stayNights = Number(ctx.stayNights || ctx.stay_nights || 7);
-  const start = ctx.checkin || ctx.period_start || ctx.week_start;
-  const end = ctx.checkout || ctx.period_end;
-  const active = ourRates.filter(r => r.is_active !== false);
-  const accType = String(accommodationType || "");
-  // 1. Priorité absolue : dates + durée + capacité + typologie
-  if (accType) {
-    const byDatesAndType = active.find(r =>
-      String(r.period_start || "") === String(start || "") &&
-      String(r.period_end || "") === String(end || "") &&
-      Number(r.capacity) === capacity &&
-      Number(r.stay_nights || 7) === stayNights &&
-      String(r.accommodation_type || "") === accType
-    );
-    if (byDatesAndType) return { ...byDatesAndType, match_type: "dates+typologie" };
-  }
-  // 2. Fallback : dates + capacité + durée (sans typologie)
-  const byDates = active.find(r =>
-    String(r.period_start || "") === String(start || "") &&
-    String(r.period_end || "") === String(end || "") &&
-    Number(r.capacity) === capacity &&
-    Number(r.stay_nights || 7) === stayNights
-  );
-  if (byDates) return { ...byDates, match_type: "dates" };
-  // 3. Fallback : period_id + capacité + durée (+ typologie si fournie)
-  if (accType) {
-    const byPeriodIdAndType = active.find(r =>
-      String(r.period_id || "") === String(ctx.periodId || ctx.period_id || "") &&
-      Number(r.capacity) === capacity &&
-      Number(r.stay_nights || 7) === stayNights &&
-      String(r.accommodation_type || "") === accType
-    );
-    if (byPeriodIdAndType) return { ...byPeriodIdAndType, match_type: "period_id+typologie" };
-  }
-  const byPeriodId = active.find(r =>
-    String(r.period_id || "") === String(ctx.periodId || ctx.period_id || "") &&
-    Number(r.capacity) === capacity &&
-    Number(r.stay_nights || 7) === stayNights
-  );
-  if (byPeriodId) return { ...byPeriodId, match_type: "period_id" };
-  return null;
-}
 
 
 // Normalise une promo lue (accepte public_price/promo_price OU price_public/price_promo, etc.)
@@ -577,149 +534,8 @@ async function getOurPromotions() {
   return (ls.get(OUR_PROMOTIONS_LS)||[]).map(normalizePromotion);
 }
 // ══ NOS TARIFS EN LIGNE (contrôle diffusion partenaires) ════════
-const ONLINE_SOURCES_LS = "lescimes_online_sources";
-const ONLINE_RATES_LS   = "lescimes_online_rates";
-const ONLINE_SOURCE_TYPES = { booking:"Booking", direct:"Site direct", tour_operator:"Tour-opérateur", marketplace:"Marketplace", other:"Autre" };
 // Plateformes proposées en saisie rapide (libellé → type de canal)
-const ONLINE_PLATFORMS = [
-  { name:"Booking",            type:"booking" },
-  { name:"Maeva",              type:"tour_operator" },
-  { name:"Ski Planet",         type:"tour_operator" },
-  { name:"Travelski",          type:"tour_operator" },
-  { name:"Carrefour Voyages",  type:"tour_operator" },
-  { name:"Site officiel",      type:"direct" },
-  { name:"Autre",              type:"other" },
-];
 
-async function getOurOnlineSources() {
-  if (SB_READY) {
-    try { const r = await sb.select("our_online_sources", "select=*&order=source_name.asc"); return r || []; }
-    catch (e) { console.warn("getOurOnlineSources:", e?.message); return ls.get(ONLINE_SOURCES_LS) || []; }
-  }
-  return ls.get(ONLINE_SOURCES_LS) || [];
-}
-async function saveOurOnlineSource(s) {
-  const payload = {
-    source_name: String(s.source_name||"").trim(),
-    source_type: s.source_type || "channel",
-    source_url:  s.source_url || null,
-    is_active:   s.is_active !== false,
-    notes:       s.notes || null,
-    updated_at:  new Date().toISOString(),
-  };
-  if (!payload.source_name) throw new Error("Nom de source requis.");
-  if (SB_READY) {
-    try {
-      if (s.id && !String(s.id).startsWith("local_")) { await sb.update("our_online_sources", `id=eq.${s.id}`, payload); return { ...payload, id:s.id }; }
-      const ins = await sb.insert("our_online_sources", payload); return Array.isArray(ins)?ins[0]:ins;
-    } catch (e) {
-      const all = ls.get(ONLINE_SOURCES_LS)||[]; const row={ ...payload, id:s.id||"local_"+Date.now() };
-      const i=all.findIndex(x=>x.id===row.id); if(i>=0)all[i]=row; else all.unshift(row); ls.set(ONLINE_SOURCES_LS, all); return row;
-    }
-  }
-  const all = ls.get(ONLINE_SOURCES_LS)||[]; const row={ ...payload, id:s.id||"local_"+Date.now() };
-  const i=all.findIndex(x=>x.id===row.id); if(i>=0)all[i]=row; else all.unshift(row); ls.set(ONLINE_SOURCES_LS, all); return row;
-}
-async function deleteOurOnlineSource(id) {
-  if (SB_READY && !String(id).startsWith("local_")) { try { await sb.delete("our_online_sources", `id=eq.${id}`); return; } catch {} }
-  const all = (ls.get(ONLINE_SOURCES_LS)||[]).filter(x=>x.id!==id); ls.set(ONLINE_SOURCES_LS, all);
-}
-async function getOurOnlineRates() {
-  if (SB_READY) {
-    try { const r = await sb.select("our_online_rates", "select=*&order=collected_at.desc&limit=500"); return r || []; }
-    catch (e) { console.warn("getOurOnlineRates:", e?.message); return ls.get(ONLINE_RATES_LS) || []; }
-  }
-  return ls.get(ONLINE_RATES_LS) || [];
-}
-async function saveOurOnlineRate(r) {
-  const expected = Number(r.expected_price || 0);
-  const validated = r.validated_price != null ? Number(r.validated_price) : null;
-  const gapAmount = (validated != null && expected > 0) ? Math.round(validated - expected) : null;
-  const gapPct = (validated != null && expected > 0) ? Math.round((gapAmount / expected) * 100) : null;
-  const payload = {
-    source_id:             r.source_id || null,
-    source_name:           r.source_name || null,
-    source_type:           r.source_type || null,
-    source_url:            r.source_url || null,
-    period_start:          r.period_start || null,
-    period_end:            r.period_end || null,
-    stay_nights:           Number(r.stay_nights || 7),
-    accommodation_type:    r.accommodation_type || null,
-    capacity:              r.capacity != null ? Number(r.capacity) : null,
-    expected_public_price: r.expected_public_price != null ? Number(r.expected_public_price) : null,
-    expected_promo_price:  r.expected_promo_price != null ? Number(r.expected_promo_price) : null,
-    expected_price:        expected || null,
-    detected_price:        r.detected_price != null ? Number(r.detected_price) : null,
-    validated_price:       validated,
-    gap_amount:            gapAmount,
-    gap_pct:               gapPct,
-    status:                r.status || "à vérifier",
-    reliability_status:    r.reliability_status || "validé",
-    collected_at:          r.collected_at || dateObjToISO(new Date()),
-    validated_at:          new Date().toISOString(),
-    notes:                 r.notes || null,
-  };
-  if (SB_READY) {
-    try { const ins = await sb.insert("our_online_rates", payload); return Array.isArray(ins)?ins[0]:ins; }
-    catch (e) { const all=ls.get(ONLINE_RATES_LS)||[]; const row={ ...payload, id:"local_"+Date.now() }; all.unshift(row); ls.set(ONLINE_RATES_LS, all); return row; }
-  }
-  const all=ls.get(ONLINE_RATES_LS)||[]; const row={ ...payload, id:"local_"+Date.now() }; all.unshift(row); ls.set(ONLINE_RATES_LS, all); return row;
-}
-// Import CSV des tarifs Les Cimes constatés en ligne (domaine online_own).
-// Colonnes : source_name;source_type;period_start;period_end;stay_nights;accommodation_type;capacity;online_price[;notes]
-// Le prix attendu (officiel/promo) est recalculé ici à partir de our_rates + our_promotions.
-async function importOurOnlineRatesCsv(csvText, { ourRates = [], ourPromotions = [] } = {}) {
-  const { rows } = parseCsv(csvText);
-  let ok = 0, errors = 0;
-  for (const row of rows) {
-    const get = name => row[name] || "";
-    const accType = normalizeAccommodationType(get("accommodation_type")) || get("accommodation_type") || null;
-    const capacity = parseInt(get("capacity")) || (accType ? ACCOMMODATION_TYPES[accType]?.capacity : null);
-    const stayNights = parseInt(get("stay_nights")) || 7;
-    const periodStart = get("period_start") || null;
-    const periodEnd = get("period_end") || (periodStart ? addDaysStr(periodStart, stayNights) : null);
-    const onlinePrice = parseCsvNumber(get("online_price") || get("validated_price") || get("price"));
-    if (!periodStart || !onlinePrice) { errors++; continue; }
-    // Prix attendu recalculé (jamais inventé) à partir des 2 sources internes
-    const ctx = { checkin: periodStart, checkout: periodEnd, capacity, stayNights, period_start: periodStart, period_end: periodEnd };
-    const publicRate = getOurRateForContext(ourRates, ctx, accType);
-    const activePromo = getActivePromoForContext(ourPromotions, ctx, accType);
-    const exp = getExpectedOurOnlinePrice({ publicRate, activePromo });
-    const status = onlineRateStatus({ validated: onlinePrice, expected: exp.expected_price, expectedPublic: exp.expected_public_price, expectedPromo: exp.expected_promo_price });
-    try {
-      await saveOurOnlineRate({
-        source_name: get("source_name") || "Import CSV", source_type: get("source_type") || "other",
-        period_start: periodStart, period_end: periodEnd, stay_nights: stayNights,
-        accommodation_type: accType, capacity,
-        expected_public_price: exp.expected_public_price, expected_promo_price: exp.expected_promo_price, expected_price: exp.expected_price,
-        validated_price: onlinePrice, status, reliability_status: "importé CSV",
-        notes: get("notes") || null,
-      });
-      ok++;
-    } catch { errors++; }
-  }
-  return { ok, errors };
-}
-// Prix attendu = promo active si présente, sinon tarif public
-function getExpectedOurOnlinePrice({ publicRate, activePromo }) {
-  const publicPrice = Number(publicRate?.price_total || publicRate?.price_week || 0);
-  if (activePromo && (activePromo.price_promo || activePromo.promo_price)) {
-    const promoPrice = Number(activePromo.price_promo || activePromo.promo_price);
-    return { expected_price: promoPrice, expected_public_price: publicPrice, expected_promo_price: promoPrice, mode:"promo" };
-  }
-  return { expected_price: publicPrice, expected_public_price: publicPrice, expected_promo_price: null, mode:"public" };
-}
-// Statut diffusion à partir du prix vérifié vs attendu
-function onlineRateStatus({ validated, expected, expectedPublic, expectedPromo }) {
-  if (validated == null || validated <= 0) return "non trouvé";
-  if (!expected) return "à vérifier";
-  const gapPct = Math.round(((validated - expected) / expected) * 100);
-  // Promo attendue mais prix en ligne ≈ prix public → promo absente
-  if (expectedPromo && expectedPublic && Math.abs(validated - expectedPublic) <= expectedPublic*0.02 && validated > expectedPromo*1.02) return "promo absente";
-  if (gapPct > 2) return "trop haut";
-  if (gapPct < -2) return "trop bas";
-  return "OK";
-}
 
 // ══════════════════════════════════════════════════════════════════
 // ══ MOTEUR D'ALERTES — 6 règles simples (fonction pure) ═══════════
