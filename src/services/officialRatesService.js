@@ -48,6 +48,10 @@ export async function saveOurRate(rate) {
   if (!rate.period_id || !rate.capacity) throw new Error("Période et capacité requises.");
 
   const apartmentType = rate.apartment_type || rate.accommodation_type || null;
+  // source doit respecter le CHECK ('saisie','import','api'). Tout libellé de
+  // saisie (grille, dashboard…) est ramené à 'saisie'.
+  const src = String(rate.source || "").toLowerCase();
+  const source = src.includes("import") ? "import" : (src === "api" ? "api" : "saisie");
 
   if (SB_READY) {
     const periodUuid = await resolvePeriodUuid(rate.period_id);
@@ -60,7 +64,7 @@ export async function saveOurRate(rate) {
       capacity:       Number(rate.capacity),
       stay_nights:    stayNights,
       price_total:    priceTotal,
-      source:         rate.source || "saisie",
+      source:         source,
       is_active:      true,
     };
 
@@ -87,7 +91,7 @@ export async function saveOurRate(rate) {
     stay_nights:    stayNights,
     price_total:    priceTotal,
     price_night:    rate.price_night ? Number(rate.price_night) : Math.round(priceTotal / stayNights),
-    source:         rate.source || "saisie",
+    source:         source,
     is_active:      true,
   };
   const all = ls.get(OUR_RATES_LS);
