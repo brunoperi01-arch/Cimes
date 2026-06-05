@@ -27,8 +27,8 @@ export function normalizePromotion(p) {
   const price_public = p.price_public ?? p.public_price ?? null;
   const price_promo = p.price_promo ?? p.promo_price ?? null;
   const channel = p.channel ?? p.promo_channel ?? "direct";
-  const date_start = p.date_start ?? p.start_date ?? null;
-  const date_end = p.date_end ?? p.end_date ?? null;
+  const date_start = p.date_start ?? p.sale_start ?? p.start_date ?? null;
+  const date_end = p.date_end ?? p.sale_end ?? p.end_date ?? null;
   const pub = Number(price_public || 0), pp = Number(price_promo || 0);
   const discount_pct = p.discount_pct != null ? p.discount_pct : (pub > 0 && pp > 0 ? Math.round((1 - pp / pub) * 100) : 0);
   return {
@@ -36,8 +36,8 @@ export function normalizePromotion(p) {
     price_public, public_price: price_public,
     price_promo, promo_price: price_promo,
     channel, promo_channel: channel,
-    date_start, start_date: date_start,
-    date_end, end_date: date_end,
+    date_start, start_date: date_start, sale_start: date_start,
+    date_end, end_date: date_end, sale_end: date_end,
     discount_pct,
     promo_type: p.promo_type || "promo",
     promo_label: p.promo_label || p.period_label || null,
