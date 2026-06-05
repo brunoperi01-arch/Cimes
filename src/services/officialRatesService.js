@@ -31,11 +31,32 @@ async function resolvePeriodUuid(periodIdOrKey) {
   } catch { return null; }
 }
 
-// Lecture de tous les tarifs officiels actifs
+// Lecture de tous les tarifs officiels actifs.
+// On joint periods pour ré-hydrater period_start/period_end/stay_nights
+// (la grille raisonne sur les dates), et on expose accommodation_type
+// (alias de apartment_type) pour compat avec l'UI historique.
 export async function getOurRates() {
   if (SB_READY) {
-    try { return await sb.select("official_rates", "is_active=eq.true&order=updated_at.desc&select=*"); }
-    catch { return []; }
+    try {
+      const rows = await sb.select("official_rates",
+        "is_active=eq.true&order=updated_at.desc&select=*,periods(period_id,period_start,period_end,stay_nights,season,category,label)");
+      return (rows || []).map(r => {
+        const p = r.periods || {};
+        return {
+          ...r,
+          accommodation_type: r.apartment_type,
+          period_key:         p.period_id || null,
+          period_start:       r.period_start || p.period_start || null,
+          period_end:         r.period_end || p.period_end || null,
+          stay_nights:        r.stay_nights || p.stay_nights || 7,
+          season:             r.season || p.season || null,
+          period_label:       r.period_label || p.label || null,
+        };
+      });
+    } catch (e) {
+      try { return await sb.select("official_rates", "is_active=eq.true&order=updated_at.desc&select=*"); }
+      catch { return []; }
+    }
   }
   return ls.get(OUR_RATES_LS);
 }
