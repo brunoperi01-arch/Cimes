@@ -1,92 +1,110 @@
 // ══════════════════════════════════════════════════════════════════
 // src/services/officialRatesService.js
-// Domaine "official" — tarifs officiels décidés par Les Cimes (our_rates).
-// Persistance Supabase + repli localStorage. Ne touche QUE our_rates.
+// Domaine "official" — tarifs officiels décidés par Les Cimes.
+// Câblé sur la table official_rates (nouveau schéma 9B).
+//
+// Schéma cible official_rates :
+//   id uuid | period_id uuid FK→periods | apartment_type text FK→apartment_types
+//   capacity | stay_nights | price_total | price_night (GÉNÉRÉ) | source | is_active
+//
+// Points clés du câblage :
+//   - period_id côté UI = clé métier texte → on résout vers l'uuid de periods
+//   - price_night est une colonne générée → JAMAIS envoyée
+//   - les champs dénormalisés (period_label, surfaces…) ne sont plus stockés ici
+//   - unicité : index partiel (period_id, apartment_type, stay_nights) WHERE is_active
 // ══════════════════════════════════════════════════════════════════
-import { sb, ls, SB_READY, isMissingColumnError } from "./supabaseClient.js";
-import { ACCOMMODATION_TYPES } from "../domain/accommodations.js";
+import { sb, ls, SB_READY } from "./supabaseClient.js";
 
-export const OUR_RATES_LS = "our_rates";
+export const OUR_RATES_LS = "official_rates";
+
+// ── Résolution period_id : accepte un uuid OU une clé métier texte ──────────
+// Renvoie l'uuid de la période (colonne periods.id), ou null si introuvable.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+async function resolvePeriodUuid(periodIdOrKey) {
+  if (!periodIdOrKey) return null;
+  const v = String(periodIdOrKey);
+  if (UUID_RE.test(v)) return v;                 // déjà un uuid
+  if (!SB_READY) return v;                        // hors-ligne : on garde tel quel
+  try {
+    const rows = await sb.select("periods", `period_id=eq.${encodeURIComponent(v)}&select=id`);
+    return rows?.[0]?.id || null;
+  } catch { return null; }
+}
 
 // Lecture de tous les tarifs officiels actifs
 export async function getOurRates() {
   if (SB_READY) {
-    try { return await sb.select("our_rates", "is_active=eq.true&order=updated_at.desc&select=*"); }
+    try { return await sb.select("official_rates", "is_active=eq.true&order=updated_at.desc&select=*"); }
     catch { return []; }
   }
   return ls.get(OUR_RATES_LS);
 }
 
-// Upsert d'un tarif officiel (par period_id + capacité + durée)
+// Upsert d'un tarif officiel (clé : period_id + apartment_type + stay_nights)
 export async function saveOurRate(rate) {
   const stayNights = Number(rate.stay_nights || 7);
   const priceTotal = Number(rate.price_total || 0);
   if (!priceTotal) throw new Error("Prix total manquant.");
   if (!rate.period_id || !rate.capacity) throw new Error("Période et capacité requises.");
-  const priceNight = rate.price_night ? Number(rate.price_night) : Math.round(priceTotal / stayNights);
-  const basePayload = {
-    period_id:    rate.period_id,
-    period_label: rate.period_label || null,
-    period_start: rate.period_start || null,
-    period_end:   rate.period_end || null,
-    season:       rate.season || "ete",
-    stay_nights:  stayNights,
-    capacity:     Number(rate.capacity),
-    price_total:  priceTotal,
-    price_night:  priceNight,
-    source:       rate.source || "saisie",
-    notes:        rate.notes || null,
-    is_active:    true,
-  };
-  // Champs typologie (optionnels, dérivés de accommodation_type si fourni)
-  const meta = rate.accommodation_type ? ACCOMMODATION_TYPES[rate.accommodation_type] : null;
-  const payload = {
-    ...basePayload,
-    ...(rate.accommodation_type && {
-      accommodation_type:    rate.accommodation_type,
-      accommodation_label:   rate.accommodation_label || meta?.label || rate.accommodation_type,
-      surface_min:           rate.surface_min ?? meta?.surfaceMin ?? null,
-      surface_max:           rate.surface_max ?? meta?.surfaceMax ?? null,
-      target_occupancy_min:  rate.target_occupancy_min ?? meta?.targetMin ?? null,
-      target_occupancy_max:  rate.target_occupancy_max ?? meta?.targetMax ?? null,
-      comfort_level:         rate.comfort_level || meta?.comfort || "standard",
-    }),
-  };
+
+  const apartmentType = rate.apartment_type || rate.accommodation_type || null;
 
   if (SB_READY) {
-    const filter = [
-      `period_id=eq.${encodeURIComponent(payload.period_id)}`,
-      `capacity=eq.${encodeURIComponent(payload.capacity)}`,
-      `stay_nights=eq.${encodeURIComponent(payload.stay_nights)}`,
+    const periodUuid = await resolvePeriodUuid(rate.period_id);
+    if (!periodUuid) throw new Error("Période introuvable dans la table periods.");
+
+    // payload aligné sur official_rates — price_night OMIS (colonne générée)
+    const payload = {
+      period_id:      periodUuid,
+      apartment_type: apartmentType,
+      capacity:       Number(rate.capacity),
+      stay_nights:    stayNights,
+      price_total:    priceTotal,
+      source:         rate.source || "saisie",
+      is_active:      true,
+    };
+
+    // Upsert via l'index unique partiel (cellule active)
+    const filterParts = [
+      `period_id=eq.${encodeURIComponent(periodUuid)}`,
+      `stay_nights=eq.${encodeURIComponent(stayNights)}`,
+      `is_active=eq.true`,
       `select=id`,
-    ].join("&");
-    try {
-      const existing = await sb.select("our_rates", filter);
-      if (existing?.length) return await sb.update("our_rates", `id=eq.${existing[0].id}`, payload);
-      return await sb.insert("our_rates", payload);
-    } catch (e) {
-      // Si les colonnes typologie manquent encore en base, on enregistre sans
-      if (isMissingColumnError(e)) {
-        const existing = await sb.select("our_rates", filter);
-        if (existing?.length) return await sb.update("our_rates", `id=eq.${existing[0].id}`, basePayload);
-        return await sb.insert("our_rates", basePayload);
-      }
-      throw e;
-    }
+    ];
+    if (apartmentType) filterParts.splice(1, 0, `apartment_type=eq.${encodeURIComponent(apartmentType)}`);
+    const filter = filterParts.join("&");
+
+    const existing = await sb.select("official_rates", filter);
+    if (existing?.length) return await sb.update("official_rates", `id=eq.${existing[0].id}`, payload);
+    return await sb.insert("official_rates", payload);
   }
 
-  // localStorage : upsert par period_id + capacity + stay_nights
+  // ── Repli localStorage (price_night calculé localement, pas généré) ───────
+  const payloadLs = {
+    period_id:      rate.period_id,
+    apartment_type: apartmentType,
+    capacity:       Number(rate.capacity),
+    stay_nights:    stayNights,
+    price_total:    priceTotal,
+    price_night:    rate.price_night ? Number(rate.price_night) : Math.round(priceTotal / stayNights),
+    source:         rate.source || "saisie",
+    is_active:      true,
+  };
   const all = ls.get(OUR_RATES_LS);
-  const idx = all.findIndex(r => r.period_id === payload.period_id && Number(r.capacity) === payload.capacity && Number(r.stay_nights || 7) === payload.stay_nights);
-  if (idx >= 0) { all[idx] = { ...all[idx], ...payload, updated_at: new Date().toISOString() }; }
-  else { all.push({ ...payload, id: "or_" + Date.now(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() }); }
+  const idx = all.findIndex(r =>
+    r.period_id === payloadLs.period_id &&
+    (r.apartment_type || null) === (apartmentType || null) &&
+    Number(r.stay_nights || 7) === stayNights
+  );
+  if (idx >= 0) { all[idx] = { ...all[idx], ...payloadLs, updated_at: new Date().toISOString() }; }
+  else { all.push({ ...payloadLs, id: "or_" + Date.now(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() }); }
   ls.set(OUR_RATES_LS, all);
   return all;
 }
 
 // Suppression d'un tarif officiel
 export async function deleteOurRate(id) {
-  if (SB_READY) return sb.delete("our_rates", `id=eq.${id}`);
+  if (SB_READY) return sb.delete("official_rates", `id=eq.${id}`);
   ls.set(OUR_RATES_LS, ls.get(OUR_RATES_LS).filter(r => r.id !== id));
   return true;
 }
