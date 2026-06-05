@@ -5,6 +5,7 @@ import { fmt, fmtPct, median } from "./utils/money.js";
 import { parseCsv, parseCsvNumber, downloadCsv } from "./utils/csv.js";
 import { OUR_PROMOTIONS_LS, PROMO_CHANNELS, PROMO_TYPES, normalizePromotion, getActivePromoForContext } from "./domain/promotions.js";
 import { getOurPromotions, saveOurPromotion, deleteOurPromotion } from "./services/promotionsService.js";
+import { getPeriods } from "./services/periodsService.js";
 import { DEFAULT_COMPETITORS, CATALOG_LS, SOURCES_LS, enrichRates, getCompetitorRates, saveCompetitorRate, deleteCompetitorRate, getHistoricalRates, getCompetitorCatalog, saveCompetitorCatalogItem, deleteCompetitorCatalogItem, getCompetitorSources, saveCompetitorSource, deleteCompetitorSource, getAllCompetitorRatesHistory, correctCompetitorRate } from "./services/competitorRatesService.js";
 import { C, CAT_C, CAT_L } from "./components/theme.js";
 import { makeStyles } from "./components/ui.js";
@@ -209,10 +210,13 @@ const WINTER_PERIODS = [
 
 // Périodes combinées (été normalisé + hiver) pour selWeek lookup
 function _d(s,n){ const d=new Date(s+"T12:00:00Z"); d.setUTCDate(d.getUTCDate()+n); return d.toISOString().slice(0,10); }
-const ALL_PERIODS = [
+// ALL_PERIODS : liste de référence. Sert de FALLBACK ; au démarrage, l'app
+// la remplace par le contenu de la table Supabase `periods` (source de vérité).
+let ALL_PERIODS = [
   ...STATIC_WEEKS.map(w=>({ ...w, season:"ete", stay_nights:7, period_start:w.week_start, period_end:_d(w.week_start,7), subtitle:w.label })),
   ...WINTER_PERIODS,
 ];
+const FALLBACK_PERIODS = ALL_PERIODS;
 
 // ══ HELPERS ══════════════════════════════════════════════════════
 
@@ -1136,6 +1140,7 @@ export default function App() {
 
   // ── Tarifs Les Cimes (our_rates) ──────────────────────────────
   const [ourRates, setOurRates]           = useState([]);
+  const [periodsLoaded, setPeriodsLoaded] = useState(0);
   const [ourPromotions, setOurPromotions] = useState([]);
   const [radarResults, setRadarResults]   = useState([]);
   const [radarFilters, setRadarFilters]   = useState({ season:"ete", periodId:"", stay_nights:7, capacity:6, accType:"2P6", zone:"La Foux d'Allos" });
@@ -1364,6 +1369,7 @@ export default function App() {
   useEffect(()=>{ if(user) loadRates(); },[loadRates,user]);
   useEffect(()=>{ if(user) getImports().then(setImports).catch(()=>{}); },[user]);
   useEffect(()=>{ if(user) getOurRates().then(setOurRates).catch(()=>{}); },[user]);
+  useEffect(()=>{ if(user) getPeriods(FALLBACK_PERIODS).then(ps=>{ if(ps&&ps.length){ ALL_PERIODS = ps; setPeriodsLoaded(n=>n+1); } }).catch(()=>{}); },[user]);
   useEffect(()=>{ if(user) getOurPromotions().then(setOurPromotions).catch(()=>{}); },[user]);
   useEffect(()=>{ if(user && (screen==="benchmark"||screen==="promotions"||screen==="tarifs"||screen==="dashboard")) reloadOurPromotions(); /* eslint-disable-next-line */ },[user,screen]);
   useEffect(()=>{ if(user && screen==="radar") reloadRadar(); /* eslint-disable-next-line */ },[user,screen]);
