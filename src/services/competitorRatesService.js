@@ -1,299 +1,296 @@
 // ══════════════════════════════════════════════════════════════════
 // src/services/competitorRatesService.js
-// Domaine "competitor" — tarifs concurrents (competitor_rates +
-// competitor_catalog + competitor_sources).
-// Persistance Supabase + repli localStorage.
+// Domaine "competitor" — relevés concurrents. Câblé sur le nouveau schéma :
+//   competitor_rates  (relevés ; competitor_id + platform_id en FK)
+//   competitors       (catalogue ; ex competitor_catalog)
+//   platforms         (sources ; ex competitor_sources)
+//
+// Filtrage des relevés : par dates exactes (period_start + stay_nights +
+// capacity), conformément à la règle "les concurrents ne suivent pas nos
+// semaines". Corrections de prix : simple update (updated_at via trigger),
+// ancien prix archivé dans legacy_data.
 // ══════════════════════════════════════════════════════════════════
-import { sb, ls, SB_READY, stripUserId, isMissingColumnError } from "./supabaseClient.js";
-import { addDaysStr, dateObjToISO } from "../utils/dates.js";
-import { isOwnProperty } from "../domain/comparability.js";
+import { sb, ls, SB_READY, stripUserId } from "./supabaseClient.js";
+import { addDaysStr } from "../utils/dates.js";
+import { isOwnProperty, competitorSegment } from "../domain/comparability.js";
 
-export const DEFAULT_COMPETITORS = [
-  { id:"cv",        name:"Les Chalets du Verdon", property_type:"résidence",  source:"Vacancéole",      comparability_score:88, has_pool:true,  has_ski_access:true  },
-  { id:"cp",        name:"Central Park",           property_type:"résidence",  source:"Labellemontagne", comparability_score:82, has_pool:false, has_ski_access:false },
-  { id:"goe",       name:"Goélia La Foux",          property_type:"résidence",  source:"Goélia",          comparability_score:85, has_pool:true,  has_ski_access:true  },
-  { id:"ham",       name:"Hôtel du Hameau",          property_type:"hôtel",      source:"Booking",         comparability_score:55, has_pool:false, has_ski_access:true  },
-  { id:"airbnb_lf", name:"Airbnb La Foux",           property_type:"particulier",source:"Airbnb",          comparability_score:60, has_pool:false, has_ski_access:false },
-  { id:"bk_lf",    name:"Booking La Foux",           property_type:"particulier",source:"Booking",         comparability_score:58, has_pool:false, has_ski_access:false },
-  { id:"abr_lf",   name:"Abritel La Foux",           property_type:"particulier",source:"Abritel",         comparability_score:56, has_pool:false, has_ski_access:false },
-  { id:"pap_lf",   name:"PAP Vacances",              property_type:"particulier",source:"PAP",             comparability_score:48, has_pool:false, has_ski_access:false },
-];
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export const CATALOG_LS = "competitor_catalog";
 export const SOURCES_LS = "competitor_sources";
+export const DEFAULT_COMPETITORS = [];
 
+// ── Helpers internes (auparavant dans App.jsx) ──────────────────────────────
+function normalizeBookingBaseUrl(url) {
+  if (!url) return url;
+  try { const u = new URL(url); return `${u.origin}${u.pathname}`; } catch { return url; }
+}
+function normalizeLfdnasBaseUrl(url) {
+  if (!url) return url;
+  try { const u = new URL(url); return `${u.origin}${u.pathname}`; } catch { return url; }
+}
+function isDuplicate(list, row) {
+  return (list || []).some(r =>
+    r.competitor_id === row.competitor_id &&
+    String(r.period_start) === String(row.period_start) &&
+    Number(r.capacity) === Number(row.capacity) &&
+    Number(r.price_total) === Number(row.price_total) &&
+    String(r.collected_at).slice(0,10) === String(row.collected_at).slice(0,10)
+  );
+}
+
+// reliability valides (CHECK competitor_rates)
+const RELIA_MAP = { "réel":"reel","reel":"reel","validé":"valide","valide":"valide",
+  "saisi manuellement":"saisi_manuellement","saisi_manuellement":"saisi_manuellement",
+  "importé csv":"importe_csv","importe csv":"importe_csv","importe_csv":"importe_csv",
+  "à vérifier":"valide","a verifier":"valide" };
+function normalizeReliability(s) { return RELIA_MAP[String(s||"").toLowerCase()] || "valide"; }
+
+// Résout un nom de concurrent → competitor_id (uuid), en le créant si absent.
+async function resolveCompetitorId(name, hints = {}) {
+  if (!name) return null;
+  if (UUID_RE.test(String(name))) return name;
+  if (!SB_READY) return null;
+  try {
+    const found = await sb.select("competitors", `name=eq.${encodeURIComponent(name)}&select=id`);
+    if (found?.length) return found[0].id;
+    // créer le concurrent manquant
+    const seg = competitorSegment(hints) === "private" ? "private" : "residence";
+    const ins = await sb.insert("competitors", { name: String(name).trim(), segment: seg, property_type: hints.property_type || null, is_active: true });
+    const row = Array.isArray(ins) ? ins[0] : ins;
+    return row?.id || null;
+  } catch { return null; }
+}
+
+// Résout un nom de source → platform_id (uuid), en la créant si absente.
+async function resolvePlatformId(name) {
+  if (!name) return null;
+  if (UUID_RE.test(String(name))) return name;
+  if (!SB_READY) return null;
+  try {
+    const found = await sb.select("platforms", `name=eq.${encodeURIComponent(name)}&select=id`);
+    if (found?.length) return found[0].id;
+    const ins = await sb.insert("platforms", { name: String(name).trim(), channel_type: "other", is_active: true });
+    const row = Array.isArray(ins) ? ins[0] : ins;
+    return row?.id || null;
+  } catch { return null; }
+}
+
+// period_start à partir d'une clé période (date ISO directe, ou uuid/clé → periods)
+async function resolvePeriodStart(weekId) {
+  if (!weekId) return null;
+  const v = String(weekId);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;        // déjà une date ISO
+  if (!SB_READY) return null;
+  try {
+    const q = UUID_RE.test(v) ? `id=eq.${v}` : `period_id=eq.${encodeURIComponent(v)}`;
+    const rows = await sb.select("periods", `${q}&select=period_start`);
+    return rows?.[0]?.period_start || null;
+  } catch { return null; }
+}
+
+// Enrichit les lignes lues (compat champs UI : price_week, property_name, etc.)
 export function enrichRates(rawRates, competitors) {
-  return (rawRates||[]).map(r=>{
-    const priceWeek=Number(r.price_week??r.price??0);
-    const priceNight=Number(r.price_night??(priceWeek?Math.round(priceWeek/7):0));
-    const comp=competitors.find(c=>c.id===r.competitor_id||c.source===r.source||c.name===r.competitor||c.name===r.property_name);
-    return { ...r, price_week:priceWeek, price_night:priceNight, property_name:r.property_name??r.competitor??r.source, competitor_name:r.competitor_name??r.property_name??r.competitor??comp?.name??r.source, competitor:r.competitor??r.property_name??r.source, price:Number(r.price??r.price_week??0), source_url:r.source_url??r.url??"", comparability_score:r.competitors?.comparability_score??comp?.comparability_score??50, property_type:r.competitors?.property_type??comp?.property_type??r.property_type??r.type??"particulier", reliability_status:r.reliability_status??"à vérifier", collection_type:r.collection_type??"scraping" };
+  return (rawRates || []).map(r => {
+    const priceTotal = Number(r.price_total ?? r.price_week ?? r.price ?? 0);
+    const stayNights = Number(r.stay_nights || 7);
+    const priceNight = Number(r.price_night ?? (priceTotal ? Math.round(priceTotal / stayNights) : 0));
+    const comp = (competitors || []).find(c => c.id === r.competitor_id || c.name === r.competitor || c.name === r.property_name);
+    const name = comp?.name || r.competitor || r.property_name || "Concurrent";
+    return {
+      ...r,
+      price_total: priceTotal, price_week: priceTotal, price: priceTotal, price_night: priceNight,
+      property_name: name, competitor_name: name, competitor: name,
+      source_url: r.source_url ?? r.url ?? "",
+      property_type: comp?.property_type ?? r.property_type ?? r.competitor_accommodation ?? "particulier",
+      segment: r.segment ?? (comp ? competitorSegment(comp) : "residence"),
+      reliability_status: r.reliability_status ?? "valide",
+    };
   });
 }
 
-export async function getCompetitorRates({ weekId, capacity, showExamples=false }, allCompetitors) {
-  let raw=[];
+// Lecture des relevés d'une période (filtre dates exactes + capacité)
+export async function getCompetitorRates({ weekId, capacity, showExamples = false }, allCompetitors) {
+  let raw = [];
   if (SB_READY) {
-    const q=[`week_id=eq.${encodeURIComponent(weekId)}`,`capacity=eq.${encodeURIComponent(capacity)}`,`order=collected_at.desc`,`select=*`].join("&");
-    raw=await sb.select("competitor_rates",q);
-    if (!showExamples) raw=(raw||[]).filter(r=>r.is_example!==true);
+    const periodStart = await resolvePeriodStart(weekId);
+    const parts = [`order=collected_at.desc`, `select=*`];
+    if (periodStart) parts.unshift(`period_start=eq.${encodeURIComponent(periodStart)}`);
+    if (capacity != null) parts.unshift(`capacity=eq.${encodeURIComponent(capacity)}`);
+    raw = await sb.select("competitor_rates", parts.join("&"));
+    if (!showExamples) raw = (raw || []).filter(r => r.is_example !== true);
   } else {
-    raw=ls.get(`rates_${weekId}_${capacity}`).filter(r=>showExamples||!r.is_example);
+    raw = (ls.get(`rates_${weekId}_${capacity}`) || []).filter(r => showExamples || !r.is_example);
   }
-  return enrichRates(raw||[],allCompetitors);
+  return enrichRates(raw || [], allCompetitors);
 }
 
+// Création d'un relevé concurrent (résout competitor_id + platform_id)
 export async function saveCompetitorRate(rate, allCompetitors) {
   const clean = stripUserId(rate);
-
-  const competitorName =
-    clean.competitor ||
-    clean.property_name ||
-    clean.competitor_name ||
-    clean.source ||
-    "Concurrent";
-
-  const priceValue = Number(
-    clean.price_total ??
-    clean.price ??
-    clean.price_week ??
-    clean.priceWeek ??
-    0
-  );
-
+  const competitorName = clean.competitor || clean.property_name || clean.competitor_name || clean.source || "Concurrent";
+  const priceValue = Number(clean.price_total ?? clean.price ?? clean.price_week ?? 0);
   const stayNights = Number(clean.stay_nights || 7);
+  const collectedAt = clean.collected_at || clean.collectedAt || new Date().toISOString();
+  const sourceName = clean.source || clean.platform || null;
+  const sourceUrl = clean.source_url || clean.url || null;
+  if (!priceValue) throw new Error("Prix manquant : impossible d'enregistrer ce relevé.");
 
-  const priceNight = Number(
-    clean.price_night ??
-    (priceValue ? Math.round(priceValue / stayNights) : 0)
-  );
-
-  const priceWeekEquiv = Number(
-    clean.price_week_equiv ??
-    (priceNight ? Math.round(priceNight * 7) : 0)
-  );
-
-  const collectedAt =
-    clean.collected_at ||
-    clean.collectedAt ||
-    new Date().toISOString().slice(0, 10);
-
-  const sourceValue =
-    clean.source ||
-    clean.platform ||
-    clean.collection_type ||
-    "Scraping";
-
-  const sourceUrl = clean.source_url || clean.url || "";
-  const propertyType = clean.property_type || clean.type || "particulier";
-
-  if (!priceValue) {
-    throw new Error("Prix manquant : impossible d'enregistrer ce relevé.");
-  }
+  const periodStart = clean.period_start || (await resolvePeriodStart(clean.week_id));
+  if (!periodStart) throw new Error("Date de séjour (period_start) requise.");
+  const periodEnd = clean.period_end || addDaysStr(periodStart, stayNights);
 
   if (SB_READY) {
-    const dupQ = [
-      `week_id=eq.${encodeURIComponent(clean.week_id)}`,
-      `capacity=eq.${encodeURIComponent(clean.capacity)}`,
-      `competitor=eq.${encodeURIComponent(competitorName)}`,
-      `source=eq.${encodeURIComponent(sourceValue)}`,
-      `collected_at=eq.${encodeURIComponent(collectedAt)}`,
-      `select=id`,
-    ].join("&");
-
-    const existing = await sb.select("competitor_rates", dupQ);
-    if (existing?.length) throw new Error("DUPLICATE");
-
-    const basePayload = {
-      week_id: clean.week_id,
-      capacity: Number(clean.capacity),
-      competitor: competitorName,
-      price: priceValue,
-      source: sourceValue,
+    const competitor_id = await resolveCompetitorId(competitorName, clean);
+    const platform_id = sourceName ? await resolvePlatformId(sourceName) : null;
+    const payload = {
+      competitor_id,
+      platform_id,
+      period_id: null,                          // FK nullable : comparaison par dates
+      period_start: periodStart,
+      period_end: periodEnd,
+      stay_nights: stayNights,
+      capacity: clean.capacity != null ? Number(clean.capacity) : null,
+      competitor_accommodation: clean.competitor_accommodation || clean.detected_rooms || clean.property_type || null,
+      price_total: priceValue,                  // price_night est GÉNÉRÉ → omis
+      segment: competitorSegment(clean) === "private" ? "private" : "residence",
+      reliability_status: normalizeReliability(clean.reliability_status),
+      is_example: clean.is_example ?? false,
+      source_type: clean.source_type || clean.collection_type || sourceName || null,
       source_url: sourceUrl,
       collected_at: collectedAt,
+      notes: clean.notes || null,
     };
-
-    const fullPayload = {
-      ...basePayload,
-      property_type: propertyType,
-      collection_type: clean.collection_type || "scraping-batch",
-      reliability_status: clean.reliability_status || "à vérifier",
-      is_example: clean.is_example ?? false,
-      price_total: priceValue,
-      price_night: priceNight,
-      price_week_equiv: priceWeekEquiv,
-      stay_nights: stayNights,
-      ...(clean.period_start && { period_start: clean.period_start }),
-      ...(clean.period_end && { period_end: clean.period_end }),
-      ...(clean.season && { season: clean.season }),
-      ...(clean.source_search_url && { source_search_url: clean.source_search_url }),
-      ...(clean.validation_notes && { validation_notes: clean.validation_notes }),
-      ...(clean.validated_at && { validated_at: clean.validated_at }),
-      ...(clean.source_channel && { source_channel: clean.source_channel }),
-      ...(clean.source_label && { source_label: clean.source_label }),
-      ...(clean.original_detected_price != null && { original_detected_price: clean.original_detected_price }),
-      ...(clean.market_segment && { market_segment: clean.market_segment }),
-      ...(clean.is_private_rental != null && { is_private_rental: clean.is_private_rental }),
-    };
-
-    try {
-      return await sb.insert("competitor_rates", fullPayload);
-    } catch (e) {
-      // Si une colonne V2 manque encore dans Supabase, on sauvegarde au minimum.
-      if (isMissingColumnError(e)) {
-        return await sb.insert("competitor_rates", basePayload);
-      }
-      throw e;
-    }
+    // anti-doublon : même concurrent + dates + capacité + jour de relevé
+    const dupParts = [`period_start=eq.${encodeURIComponent(periodStart)}`, `select=id`];
+    if (competitor_id) dupParts.unshift(`competitor_id=eq.${competitor_id}`);
+    if (payload.capacity != null) dupParts.unshift(`capacity=eq.${payload.capacity}`);
+    const existing = await sb.select("competitor_rates", dupParts.join("&"));
+    if (existing?.length) throw new Error("DUPLICATE");
+    const ins = await sb.insert("competitor_rates", payload);
+    return Array.isArray(ins) ? ins[0] : ins;
   }
 
+  // Repli localStorage
   const id = "r_" + Date.now();
   const full = {
-    ...clean,
-    id,
-    competitor: competitorName,
-    property_name: competitorName,
-    property_type: propertyType,
-    price: priceValue,
-    price_week: priceValue,
-    price_total: priceValue,
-    price_night: priceNight,
-    price_week_equiv: priceWeekEquiv,
-    stay_nights: stayNights,
-    source: sourceValue,
-    source_url: sourceUrl,
-    url: sourceUrl,
-    collected_at: collectedAt,
+    ...clean, id, competitor: competitorName, property_name: competitorName,
+    competitor_id: clean.competitor_id || null,
+    period_start: periodStart, period_end: periodEnd, stay_nights: stayNights,
+    price_total: priceValue, price: priceValue, price_week: priceValue,
+    price_night: Math.round(priceValue / stayNights),
+    segment: competitorSegment(clean) === "private" ? "private" : "residence",
+    reliability_status: normalizeReliability(clean.reliability_status),
+    source_url: sourceUrl, collected_at: collectedAt,
   };
-
-  const key = `rates_${clean.week_id}_${clean.capacity}`;
-  const existingLocal = ls.get(key);
-  if (isDuplicate(existingLocal, full)) throw new Error("DUPLICATE");
+  const key = `rates_${clean.week_id || periodStart}_${clean.capacity}`;
+  if (isDuplicate(ls.get(key) || [], full)) throw new Error("DUPLICATE");
   ls.push(key, full);
   return full;
 }
 
 export async function deleteCompetitorRate(id, weekId, capacity) {
-  if (SB_READY) return sb.delete("competitor_rates",`id=eq.${id}`);
-  const key=`rates_${weekId}_${capacity}`;
-  ls.set(key,ls.get(key).filter(r=>r.id!==id));
+  if (SB_READY) return sb.delete("competitor_rates", `id=eq.${id}`);
+  const key = `rates_${weekId}_${capacity}`;
+  ls.set(key, (ls.get(key) || []).filter(r => r.id !== id));
 }
 
+// Historique d'un concurrent sur une période (par dates + capacité)
 export async function getHistoricalRates({ weekId, competitorId, capacity }) {
-  if (SB_READY) return sb.select("competitor_rates",`week_id=eq.${weekId}&competitor_id=eq.${competitorId}&capacity=eq.${capacity}&order=collected_at.asc&select=*,competitors(name)`);
-  return ls.get(`rates_${weekId}_${capacity}`).filter(r=>r.competitor_id===competitorId).sort((a,b)=>a.collected_at.localeCompare(b.collected_at));
+  if (SB_READY) {
+    const periodStart = await resolvePeriodStart(weekId);
+    const parts = [`order=collected_at.asc`, `select=*,competitors(name)`];
+    if (periodStart) parts.unshift(`period_start=eq.${encodeURIComponent(periodStart)}`);
+    if (competitorId) parts.unshift(`competitor_id=eq.${competitorId}`);
+    if (capacity != null) parts.unshift(`capacity=eq.${capacity}`);
+    return sb.select("competitor_rates", parts.join("&"));
+  }
+  return (ls.get(`rates_${weekId}_${capacity}`) || []).filter(r => r.competitor_id === competitorId)
+    .sort((a, b) => String(a.collected_at).localeCompare(String(b.collected_at)));
 }
 
+// ── CATALOGUE → table competitors ───────────────────────────────────────────
 export async function getCompetitorCatalog() {
   let rows = [];
   if (SB_READY) {
-    try { rows = await sb.select("competitor_catalog", "is_active=eq.true&order=property_type.asc,name.asc&select=*"); }
+    try { rows = await sb.select("competitors", "is_active=eq.true&order=name.asc&select=*"); }
     catch { rows = []; }
   } else {
-    rows = ls.get(CATALOG_LS).filter(r=>r.is_active!==false);
+    rows = (ls.get(CATALOG_LS) || []).filter(r => r.is_active !== false);
   }
-  return (rows||[]).filter(r=>!isOwnProperty(r.name));
+  return (rows || []).filter(r => !isOwnProperty(r.name) && !r.is_own_property);
 }
 
 export async function saveCompetitorCatalogItem(item) {
   if (!item.name) throw new Error("Nom du concurrent requis.");
   if (isOwnProperty(item.name)) throw new Error("Les Cimes ne peut pas être enregistré comme concurrent.");
-  const isPrivate = item.is_private_rental === true || item.market_segment === "private" || item.property_type === "particulier" || item.property_type === "studio";
-  const PRIVATE_SUBTYPES = ["particulier","studio"];
-  const basePayload = {
-    name:                String(item.name).trim(),
-    property_type:       isPrivate ? (PRIVATE_SUBTYPES.includes(item.property_type) ? item.property_type : "particulier") : (item.property_type || "résidence"),
-    platform:            item.platform || "Booking.com",
-    booking_url:         item.booking_url ? normalizeBookingBaseUrl(item.booking_url) : null,
-    search_location:     item.search_location || "La Foux d'Allos",
-    comparability_score: Number(item.comparability_score || (isPrivate ? 60 : 80)),
-    notes:               item.notes || null,
-    is_active:           item.is_active !== false,
-  };
+  const isPrivate = competitorSegment(item) === "private";
+  const PRIVATE_SUBTYPES = ["particulier", "studio"];
   const payload = {
-    ...basePayload,
-    direct_url:          item.direct_url || null,
-    preferred_channel:   item.preferred_channel || "booking",
-    market_segment:      isPrivate ? "private" : "residence",
-    is_private_rental:   isPrivate,
-    ...(item.detected_capacity != null && item.detected_capacity !== "" && { detected_capacity: Number(item.detected_capacity) }),
-    ...(item.detected_rooms && { detected_rooms: item.detected_rooms }),
-    ...(item.detected_surface != null && item.detected_surface !== "" && { detected_surface: Number(item.detected_surface) }),
+    name:          String(item.name).trim(),
+    segment:       isPrivate ? "private" : "residence",
+    property_type: isPrivate ? (PRIVATE_SUBTYPES.includes(item.property_type) ? item.property_type : "particulier") : (item.property_type || "residence"),
+    source_type:   item.source_type || item.platform || item.preferred_channel || null,
+    location:      item.search_location || item.location || null,
+    url:           item.booking_url ? normalizeBookingBaseUrl(item.booking_url) : (item.url || item.direct_url || null),
+    is_active:     item.is_active !== false,
+    notes:         item.notes || null,
   };
   if (SB_READY) {
-    try {
-      if (item.id) return await sb.update("competitor_catalog", `id=eq.${item.id}`, { ...payload, updated_at:new Date().toISOString() });
-      return await sb.insert("competitor_catalog", payload);
-    } catch (e) {
-      // Si direct_url / preferred_channel manquent encore en base, on enregistre sans.
-      if (isMissingColumnError(e)) {
-        if (item.id) return await sb.update("competitor_catalog", `id=eq.${item.id}`, { ...basePayload, updated_at:new Date().toISOString() });
-        return await sb.insert("competitor_catalog", basePayload);
-      }
-      throw e;
-    }
+    if (item.id) { await sb.update("competitors", `id=eq.${item.id}`, payload); return { ...payload, id: item.id }; }
+    const existing = await sb.select("competitors", `name=eq.${encodeURIComponent(payload.name)}&select=id`);
+    if (existing?.length) { await sb.update("competitors", `id=eq.${existing[0].id}`, payload); return { ...payload, id: existing[0].id }; }
+    const ins = await sb.insert("competitors", payload); return Array.isArray(ins) ? ins[0] : ins;
   }
   const all = ls.get(CATALOG_LS);
-  if (item.id) {
-    const idx = all.findIndex(r=>r.id===item.id);
-    if (idx>=0) { all[idx] = { ...all[idx], ...payload, updated_at:new Date().toISOString() }; ls.set(CATALOG_LS, all); return all[idx]; }
-  }
-  const created = { ...payload, id:"cc_"+Date.now(), created_at:new Date().toISOString(), updated_at:new Date().toISOString() };
+  if (item.id) { const i = all.findIndex(r => r.id === item.id); if (i >= 0) { all[i] = { ...all[i], ...payload }; ls.set(CATALOG_LS, all); return all[i]; } }
+  const created = { ...payload, id: "cc_" + Date.now() };
   all.push(created); ls.set(CATALOG_LS, all); return created;
 }
 
 export async function deleteCompetitorCatalogItem(id) {
-  if (SB_READY) return sb.delete("competitor_catalog", `id=eq.${id}`);
-  ls.set(CATALOG_LS, ls.get(CATALOG_LS).filter(r=>r.id!==id));
+  if (SB_READY) return sb.update("competitors", `id=eq.${id}`, { is_active: false });
+  ls.set(CATALOG_LS, (ls.get(CATALOG_LS) || []).filter(r => r.id !== id));
   return true;
 }
 
+// ── SOURCES → table platforms (par concurrent : on stocke l'URL côté competitors)
+// Dans le nouveau modèle, une "source" = une plateforme. On crée/active la
+// plateforme ; le lien fin concurrent↔URL n'a plus de table dédiée.
 export async function getCompetitorSources() {
   if (SB_READY) {
-    try { return await sb.select("competitor_sources", "is_active=eq.true&order=source_type.asc&select=*"); }
+    try { return await sb.select("platforms", "is_active=eq.true&order=name.asc&select=*"); }
     catch { return []; }
   }
-  return ls.get(SOURCES_LS).filter(r=>r.is_active!==false);
+  return (ls.get(SOURCES_LS) || []).filter(r => r.is_active !== false);
 }
 
 export async function saveCompetitorSource(source) {
-  if (!source.competitor_id) throw new Error("Concurrent requis.");
-  if (!source.source_url) throw new Error("URL de la source requise.");
-  // Nettoyage spécifique La France du Nord au Sud : on stocke une URL vierge (sans dates)
-  const isLfdnas = String(source.source_name||"").toLowerCase().includes("france du nord") || String(source.source_url||"").toLowerCase().includes("lafrancedunordausud.fr");
-  const cleanedUrl = isLfdnas ? normalizeLfdnasBaseUrl(source.source_url) : source.source_url;
+  const name = source.source_name || source.name || "Autre";
+  const isLfdnas = String(name).toLowerCase().includes("france du nord") || String(source.source_url || "").toLowerCase().includes("lafrancedunordausud.fr");
+  const cleanedUrl = isLfdnas ? normalizeLfdnasBaseUrl(source.source_url) : (source.source_url || null);
   const payload = {
-    competitor_id: source.competitor_id,
-    source_name:   source.source_name || "Autre",
-    source_type:   source.source_type || "other",
-    source_url:    cleanedUrl,
-    notes:         source.notes || null,
-    is_active:     source.is_active !== false,
+    name: String(name).trim(),
+    channel_type: source.source_type || "other",
+    url: cleanedUrl,
+    is_active: source.is_active !== false,
+    notes: source.notes || null,
   };
   if (SB_READY) {
-    if (source.id) return await sb.update("competitor_sources", `id=eq.${source.id}`, { ...payload, updated_at:new Date().toISOString() });
-    // Anti-doublon : même concurrent + type + URL → mise à jour
-    try {
-      const existing = await sb.select("competitor_sources", `competitor_id=eq.${source.competitor_id}&source_type=eq.${encodeURIComponent(source.source_type||"other")}&source_url=eq.${encodeURIComponent(cleanedUrl)}&select=id`);
-      if (existing && existing.length) return await sb.update("competitor_sources", `id=eq.${existing[0].id}`, { ...payload, updated_at:new Date().toISOString() });
-    } catch { /* si la requête échoue on insère */ }
-    return await sb.insert("competitor_sources", payload);
+    if (source.id && UUID_RE.test(String(source.id))) { await sb.update("platforms", `id=eq.${source.id}`, payload); return { ...payload, id: source.id }; }
+    const existing = await sb.select("platforms", `name=eq.${encodeURIComponent(payload.name)}&select=id`);
+    if (existing?.length) { await sb.update("platforms", `id=eq.${existing[0].id}`, payload); return { ...payload, id: existing[0].id }; }
+    const ins = await sb.insert("platforms", payload); return Array.isArray(ins) ? ins[0] : ins;
   }
   const all = ls.get(SOURCES_LS);
-  if (source.id) {
-    const idx = all.findIndex(r=>r.id===source.id);
-    if (idx>=0) { all[idx] = { ...all[idx], ...payload, updated_at:new Date().toISOString() }; ls.set(SOURCES_LS, all); return all[idx]; }
-  }
-  const dupIdx = all.findIndex(r=>r.competitor_id===source.competitor_id && r.source_type===payload.source_type && r.source_url===payload.source_url);
-  if (dupIdx>=0) { all[dupIdx] = { ...all[dupIdx], ...payload, updated_at:new Date().toISOString() }; ls.set(SOURCES_LS, all); return all[dupIdx]; }
-  const created = { ...payload, id:"cs_"+Date.now(), created_at:new Date().toISOString(), updated_at:new Date().toISOString() };
+  if (source.id) { const i = all.findIndex(r => r.id === source.id); if (i >= 0) { all[i] = { ...all[i], ...payload }; ls.set(SOURCES_LS, all); return all[i]; } }
+  const created = { ...payload, id: "cs_" + Date.now() };
   all.push(created); ls.set(SOURCES_LS, all); return created;
 }
 
 export async function deleteCompetitorSource(id) {
-  if (SB_READY) return sb.delete("competitor_sources", `id=eq.${id}`);
-  ls.set(SOURCES_LS, ls.get(SOURCES_LS).filter(r=>r.id!==id));
+  if (SB_READY) return sb.update("platforms", `id=eq.${id}`, { is_active: false });
+  ls.set(SOURCES_LS, (ls.get(SOURCES_LS) || []).filter(r => r.id !== id));
   return true;
 }
 
@@ -302,49 +299,26 @@ export async function getAllCompetitorRatesHistory() {
     try { return await sb.select("competitor_rates", "order=collected_at.desc&limit=1000&select=*"); }
     catch { return []; }
   }
-  const keys = Object.keys(localStorage).filter(k=>k.startsWith("rates_"));
-  const all = keys.flatMap(k=>ls.get(k));
-  return all.sort((a,b)=>String(b.collected_at).localeCompare(String(a.collected_at))).slice(0,1000);
+  const keys = Object.keys(localStorage).filter(k => k.startsWith("rates_"));
+  const all = keys.flatMap(k => ls.get(k) || []);
+  return all.sort((a, b) => String(b.collected_at).localeCompare(String(a.collected_at))).slice(0, 1000);
 }
 
+// Correction de prix : simple update (updated_at via trigger).
+// L'ancien prix est archivé dans legacy_data (pas de table d'historique).
 export async function correctCompetitorRate(rate, newPriceTotal, reason) {
   const newTotal = Number(newPriceTotal) || 0;
   if (!newTotal) throw new Error("Prix corrigé invalide.");
-  const stayNights = Number(rate.stay_nights || 7) || 7;
-  const newNight = Math.round(newTotal / stayNights);
   const oldTotal = Number(rate.price_total || rate.price_week || rate.price || 0);
-  const oldNight = Number(rate.price_night || (oldTotal ? Math.round(oldTotal / stayNights) : 0));
-  const editRow = {
-    competitor_rate_id: rate.id,
-    old_price_total: oldTotal, new_price_total: newTotal,
-    old_price_night: oldNight, new_price_night: newNight,
-    edit_reason: reason || null,
-  };
-  const ratePatch = {
-    price_total: newTotal, price: newTotal, price_week: newTotal,
-    price_night: newNight, price_week_equiv: Math.round(newNight * 7),
-    edited_at: new Date().toISOString(), edit_reason: reason || null,
-  };
   if (SB_READY) {
-    try { await sb.insert("competitor_rate_edits", editRow); } catch { /* table peut manquer */ }
-    try { return await sb.update("competitor_rates", `id=eq.${rate.id}`, ratePatch); }
-    catch (e) {
-      if (isMissingColumnError(e)) {
-        const { edited_at, edit_reason, price_week_equiv, ...safe } = ratePatch;
-        return await sb.update("competitor_rates", `id=eq.${rate.id}`, safe);
-      }
-      throw e;
-    }
+    // archive l'ancien prix dans legacy_data sans écraser le reste
+    const legacy = { ...(rate.legacy_data || {}), corrected_from: oldTotal, correction_reason: reason || null, corrected_at: new Date().toISOString() };
+    return await sb.update("competitor_rates", `id=eq.${rate.id}`, { price_total: newTotal, legacy_data: legacy });
   }
-  // localStorage : retrouver la ligne dans son bucket rates_*
-  const keys = Object.keys(localStorage).filter(k=>k.startsWith("rates_"));
+  const keys = Object.keys(localStorage).filter(k => k.startsWith("rates_"));
   for (const k of keys) {
-    const arr = ls.get(k); const i = arr.findIndex(r=>r.id===rate.id);
-    if (i>=0) { arr[i] = { ...arr[i], ...ratePatch }; ls.set(k, arr); break; }
+    const arr = ls.get(k) || []; const i = arr.findIndex(r => r.id === rate.id);
+    if (i >= 0) { arr[i] = { ...arr[i], price_total: newTotal, price: newTotal, price_week: newTotal, price_night: Math.round(newTotal / Number(arr[i].stay_nights || 7)) }; ls.set(k, arr); break; }
   }
-  const edits = ls.get("competitor_rate_edits");
-  edits.push({ ...editRow, id:"cre_"+Date.now(), edited_at:new Date().toISOString() });
-  ls.set("competitor_rate_edits", edits);
   return true;
 }
-
