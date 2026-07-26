@@ -1,5 +1,6 @@
 import { COMPETITORS } from '../constants/competitors'
 import { WEEKS_ALL }   from '../constants/weeks'
+import { dateObjToISO } from './dates.js'
 
 // Matching competitor_id :
 // 1. competitor_id exact  2. property_name exact  3. null
@@ -83,7 +84,7 @@ export function parseCsvText(text, defaultCapacity=6) {
       original_price:parseFloat(o.original_price)||null,
       promo_label:o.promo_label||null, promo_percent:parseFloat(o.promo_percent)||0,
       cleaning_fee:parseFloat(o.cleaning_fee)||0, url:o.url||'',
-      collected_at:o.collected_at||new Date().toISOString().slice(0,10),
+      collected_at:o.collected_at||dateObjToISO(new Date()),
       reliability_status:o.reliability_status||'importé CSV',
       collection_type:'csv', is_example:false,
     }
