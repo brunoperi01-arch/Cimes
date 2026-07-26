@@ -12,8 +12,8 @@ const SB_KEY =
 
 const MAX_STATIONS = 3;            // stations traitées par lancement (coût)
 const MAX_WEB_SEARCH_USES = 2;     // recherches web Claude par station
-const MAX_PROMOS_PER_STATION = 8;
-const MAX_TOKENS = 1400;
+const MAX_PROMOS_PER_STATION = 5;
+const MAX_TOKENS = 2200;
 const CACHE_TTL_DAYS = 2;          // les promos évoluent plus vite que les prix
 const MODEL = "claude-sonnet-4-6";
 
@@ -158,7 +158,9 @@ function buildPrompt(station, operators, stayStart, stayEnd) {
     `${period}\n` +
     `Look for real, currently displayed promotions (percentage discounts, crossed-out prices, ` +
     `last-minute deals, early-booking deals, "buy one week get one free", free booking fees, etc.).\n` +
-    `Return maximum ${MAX_PROMOS_PER_STATION} offers, only for the operators listed above.\n\n` +
+    `Return maximum ${MAX_PROMOS_PER_STATION} offers, only for the operators listed above. ` +
+    `If you find more, return only the ${MAX_PROMOS_PER_STATION} most relevant ones — ` +
+    `always prefer fewer COMPLETE offers over more TRUNCATED ones.\n\n` +
     `Return ONLY valid JSON. No markdown. No comments. No explanations. No trailing commas. ` +
     `The response must start with [ and end with ]. Use double quotes for all keys and string values.\n` +
     `Never invent a price, discount, or date that is not present in the source: use null instead.\n\n` +
@@ -238,7 +240,7 @@ export default async function handler(req, res) {
       const parsed = safeJsonParseArray(text);
 
       if (!parsed.ok) {
-        errors.push({ station, error: "JSON malformé dans la réponse Claude.", parse_error: parsed.error });
+        errors.push({ station, error: "JSON malformé dans la réponse Claude.", parse_error: parsed.error, raw_excerpt: parsed.raw });
         continue;
       }
 
