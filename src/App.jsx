@@ -24,6 +24,8 @@ import { OUR_RATES_LS, getOurRates, saveOurRate, deleteOurRate } from "./service
 
 // ══ CONFIG ══════════════════════════════════════════════════════
 import { sb, ls, SB_READY, SB_URL, SB_KEY, sbErrors, clearStoredSession, storeSession, refreshSessionIfNeeded, stripUserId, isMissingColumnError } from "./services/supabaseClient.js";
+import MarketPromotionsPage from "./components/MarketPromotionsPage.jsx";
+import DashboardPromoCard from "./components/DashboardPromoCard.jsx";
 const IA_ENDPOINT = "/api/analyse-reco";
 
 // ══ DONNÉES STATIQUES ═══════════════════════════════════════════
@@ -1253,7 +1255,7 @@ export default function App() {
   const [dashOurSaving, setDashOurSaving] = useState(false);
   const [dashListFilter, setDashListFilter] = useState({ year:0, cap:0, nights:0 });
 
-  const emptyForm = { weekId:"2026_w7", competitorId:"cv", source:"", type:"résidence", capacity:6, priceWeek:"", priceNight:"", originalPrice:"", promoLabel:"", promoPercent:"", cleaningFee:"", url:"", collectedAt:new Date().toISOString().slice(0,10), notes:"" };
+  const emptyForm = { weekId:"2026_w7", competitorId:"cv", source:"", type:"résidence", capacity:6, priceWeek:"", priceNight:"", originalPrice:"", promoLabel:"", promoPercent:"", cleaningFee:"", url:"", collectedAt:dateObjToISO(new Date()), notes:"" };
   const [form, setForm]               = useState(emptyForm);
   const [pasteSrc, setPasteSrc]       = useState("Booking");
   const [pasteWeekId, setPWId]        = useState("2026_w7");
@@ -1830,7 +1832,7 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
         season:             ctx.season,
         source_url:         sourceUrl,
         source_search_url:  sourceUrl,
-        collected_at:       new Date().toISOString().slice(0,10),
+        collected_at:       dateObjToISO(new Date()),
         collection_type:    isDirect ? "relevé manuel direct" : "relevé manuel Booking",
         reliability_status: "validé",
         validated_at:       new Date().toISOString(),
@@ -2331,7 +2333,7 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
   async function handleSavePaste() {
     if(!pasteEdit?.priceWeek) return; setPasteSaving(true); const comp=competitors.find(c=>c.id===pasteEdit.competitorId);
     try {
-      await saveCompetitorRate({ week_id:pasteWeekId, competitor_id:pasteEdit.competitorId||null, source:pasteEdit.source, property_name:comp?.name||pasteEdit.source, property_type:comp?.property_type||"particulier", capacity:parseInt(pasteEdit.capacity)||pasteCap, price_week:parseFloat(pasteEdit.priceWeek)||0, price_night:parseFloat(pasteEdit.priceNight)||Math.round((parseFloat(pasteEdit.priceWeek)||0)/7), original_price:pasteEdit.originalPrice?parseFloat(pasteEdit.originalPrice):null, promo_label:pasteEdit.promoLabel||null, promo_percent:parseFloat(pasteEdit.promoPercent)||0, cleaning_fee:parseFloat(pasteEdit.cleaningFee)||0, booking_rating:parseFloat(pasteEdit.rating)||null, collected_at:new Date().toISOString().slice(0,10), collection_type:"copier-coller", reliability_status:"à vérifier", is_example:false, notes:`Extrait de ${pasteEdit.source} via copier-coller.` },competitors);
+      await saveCompetitorRate({ week_id:pasteWeekId, competitor_id:pasteEdit.competitorId||null, source:pasteEdit.source, property_name:comp?.name||pasteEdit.source, property_type:comp?.property_type||"particulier", capacity:parseInt(pasteEdit.capacity)||pasteCap, price_week:parseFloat(pasteEdit.priceWeek)||0, price_night:parseFloat(pasteEdit.priceNight)||Math.round((parseFloat(pasteEdit.priceWeek)||0)/7), original_price:pasteEdit.originalPrice?parseFloat(pasteEdit.originalPrice):null, promo_label:pasteEdit.promoLabel||null, promo_percent:parseFloat(pasteEdit.promoPercent)||0, cleaning_fee:parseFloat(pasteEdit.cleaningFee)||0, booking_rating:parseFloat(pasteEdit.rating)||null, collected_at:dateObjToISO(new Date()), collection_type:"copier-coller", reliability_status:"à vérifier", is_example:false, notes:`Extrait de ${pasteEdit.source} via copier-coller.` },competitors);
       setPasteEdit(null); setPasteRaw(""); setFS("ok"); loadRates();
     } catch(e) { setFS(e.message.includes("DUPLICATE")?"duplicate":"error"); }
     setPasteSaving(false); setTimeout(()=>setFS(null),3000);
@@ -2343,7 +2345,7 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
     const lines=csvText.trim().split("\n").filter(l=>l.trim());
     if(lines.length<2){ setCsvResult({ ok:0, dup:0, skipped:0, errors:["Fichier vide"] }); setCsvLoad(false); return; }
     const sep=lines[0].includes(";")?";":","; const headers=lines[0].split(sep).map(h=>h.trim().toLowerCase().replace(/[^a-z_]/g,""));
-    const rows=lines.slice(1).map(line=>{ const vals=line.split(sep).map(v=>v.trim().replace(/^"|"$/g,"")); const o={}; headers.forEach((h,i)=>o[h]=vals[i]||""); const week=STATIC_WEEKS.find(w=>w.week_start===o.week_start||w.id===o.week_id); const pw=parseFloat(o.price_week)||0; const pn=parseFloat(o.price_night)||Math.round(pw/7); const comp=competitors.find(c=>c.name===o.property_name||c.source===o.source); return { week_id:week?.id||"", source:o.source, property_name:o.property_name||o.source, property_type:o.property_type||comp?.property_type||"particulier", competitor_id:comp?.id||null, capacity:parseInt(o.capacity)||capNum, price_week:pw, price_night:pn, original_price:parseFloat(o.original_price)||null, promo_label:o.promo_label||null, promo_percent:parseFloat(o.promo_percent)||0, cleaning_fee:parseFloat(o.cleaning_fee)||0, url:o.url||"", collected_at:o.collected_at||new Date().toISOString().slice(0,10), reliability_status:o.reliability_status||"importé CSV", collection_type:"csv", is_example:false }; }).filter(r=>r.week_id);
+    const rows=lines.slice(1).map(line=>{ const vals=line.split(sep).map(v=>v.trim().replace(/^"|"$/g,"")); const o={}; headers.forEach((h,i)=>o[h]=vals[i]||""); const week=STATIC_WEEKS.find(w=>w.week_start===o.week_start||w.id===o.week_id); const pw=parseFloat(o.price_week)||0; const pn=parseFloat(o.price_night)||Math.round(pw/7); const comp=competitors.find(c=>c.name===o.property_name||c.source===o.source); return { week_id:week?.id||"", source:o.source, property_name:o.property_name||o.source, property_type:o.property_type||comp?.property_type||"particulier", competitor_id:comp?.id||null, capacity:parseInt(o.capacity)||capNum, price_week:pw, price_night:pn, original_price:parseFloat(o.original_price)||null, promo_label:o.promo_label||null, promo_percent:parseFloat(o.promo_percent)||0, cleaning_fee:parseFloat(o.cleaning_fee)||0, url:o.url||"", collected_at:o.collected_at||dateObjToISO(new Date()), reliability_status:o.reliability_status||"importé CSV", collection_type:"csv", is_example:false }; }).filter(r=>r.week_id);
     let ok=0, dup=0, skipped=0; const errors=[];
     for(const row of rows){ if(!row.price_week||!row.source){ skipped++; continue; } try { await saveCompetitorRate(row,competitors); ok++; } catch(e){ if(e.message?.includes("DUPLICATE")) dup++; else errors.push(e.message); } }
     const log={ import_source:"CSV", rows_total:rows.length+skipped, rows_imported:ok, rows_skipped:skipped, rows_duplicate:dup, rows_error:errors.length, status:errors.length===0?"ok":ok>0?"partiel":"erreur" };
@@ -2432,7 +2434,7 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
     const pw=item.price_week?Math.round(item.price_week):item.price_night?Math.round(item.price_night*7):0;
     const pn=item.price_night?Math.round(item.price_night):pw?Math.round(pw/7):0;
     try {
-      await saveCompetitorRate({ week_id:selWeekId, source:item.platform||"Scraping", property_name:item.name, competitor:item.name, property_type:item.property_type||"particulier", competitor_id:null, capacity:capNum, price_week:pw, price:pw, price_night:pn, booking_rating:item.rating||null, url:item.url||"", source_url:item.url||"", collected_at:new Date().toISOString().slice(0,10), collection_type:"scraping-auto", reliability_status:"à vérifier", is_example:false },competitors);
+      await saveCompetitorRate({ week_id:selWeekId, source:item.platform||"Scraping", property_name:item.name, competitor:item.name, property_type:item.property_type||"particulier", competitor_id:null, capacity:capNum, price_week:pw, price:pw, price_night:pn, booking_rating:item.rating||null, url:item.url||"", source_url:item.url||"", collected_at:dateObjToISO(new Date()), collection_type:"scraping-auto", reliability_status:"à vérifier", is_example:false },competitors);
       setScrapeSaved(p=>({ ...p, [idx]:"ok" })); loadRates();
     } catch(e) { setScrapeSaved(p=>({ ...p, [idx]:e.message?.includes("DUPLICATE")?"dup":"err" })); }
   }
@@ -2499,7 +2501,7 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
         url:                item.url||"",
         source_search_url:  safeListingUrl(item, result),
         booking_rating:     item.rating||null,
-        collected_at:       new Date().toISOString().slice(0,10),
+        collected_at:       dateObjToISO(new Date()),
         collection_type:    "scraping-batch",
         reliability_status: verifiedPrice ? "validé" : "à vérifier",
         ...(verifiedPrice && { validated_at:new Date().toISOString(), validation_notes:"Prix vérifié manuellement sur Booking" }),
@@ -2571,6 +2573,7 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
       { id:"track", l:"Suivi prix" },
       { id:"competitors_residence", l:"Résidences" },
       { id:"competitors_private", l:"Particuliers" },
+      { id:"promos_trend", l:"Tendance promos" },
     ] },
     { id:"collecte",  icon:"📥", l:"Collecte", def:"collect", subs:[
       { id:"collect", l:"Saisie / Coller" },
@@ -2797,6 +2800,7 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
 
     return (
     <div><SBar title="Dashboard"/>
+      <DashboardPromoCard cd={cd} onNavigate={()=>goScreen("promos_trend")} />
       {/* Filtres globaux */}
       {!isMobile&&(
         <div style={{ display:"flex", gap:8, alignItems:"flex-end", flexWrap:"wrap", padding:"12px 18px 0" }}>
@@ -4578,7 +4582,7 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
         <input ref={fileRef} type="file" accept=".csv,.txt" onChange={e=>{ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=ev=>setCsvText(ev.target.result); r.readAsText(f,"UTF-8"); }} style={{ display:"none" }}/>
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:6 }}>
           <button onClick={()=>fileRef.current?.click()} style={{ ...btn(false,C.grayL,C.text), margin:0 }}>📂 Fichier .CSV</button>
-          <button onClick={()=>{ const template=["week_start;source;competitor_id;property_name;property_type;capacity;price_week;price_night;original_price;promo_label;promo_percent;cleaning_fee;url;collected_at;reliability_status","2026-08-01;Booking;cv;Les Chalets du Verdon;résidence;6;620;89;680;Genius -10%;10;0;https://booking.com;"+new Date().toISOString().slice(0,10)+";réel"].join("\n"); const b=new Blob([template],{ type:"text/csv;charset=utf-8" }); const u=URL.createObjectURL(b); const a=document.createElement("a"); a.href=u; a.download="template_benchmark_v2.csv"; a.click(); }} style={{ ...btn(false,C.grayL,C.blueL), margin:0, border:`1px solid ${C.blueL}` }}>⬇ Modèle CSV</button>
+          <button onClick={()=>{ const template=["week_start;source;competitor_id;property_name;property_type;capacity;price_week;price_night;original_price;promo_label;promo_percent;cleaning_fee;url;collected_at;reliability_status","2026-08-01;Booking;cv;Les Chalets du Verdon;résidence;6;620;89;680;Genius -10%;10;0;https://booking.com;"+dateObjToISO(new Date())+";réel"].join("\n"); const b=new Blob([template],{ type:"text/csv;charset=utf-8" }); const u=URL.createObjectURL(b); const a=document.createElement("a"); a.href=u; a.download="template_benchmark_v2.csv"; a.click(); }} style={{ ...btn(false,C.grayL,C.blueL), margin:0, border:`1px solid ${C.blueL}` }}>⬇ Modèle CSV</button>
         </div>
         <button style={btn(csvLoading||!csvText.trim())} onClick={handleImportCsv} disabled={csvLoading||!csvText.trim()}>{csvLoading?"Import en cours…":"Importer →"}</button>
         {imports.length>0&&(<><p style={sml}>Imports précédents</p><div style={cd()}>{imports.slice(0,3).map((im,i)=><div key={im.id||i} style={rw(i===Math.min(imports.length,3)-1)}><div><p style={{ margin:0, fontSize:12, fontWeight:500, color:C.text }}>{im.import_source}</p><p style={{ margin:0, fontSize:10, color:C.gray }}>{im.imported_at?.slice(0,10)} · {im.rows_imported} lignes</p></div><Badge label={im.status?.toUpperCase()||"OK"} color={im.status==="ok"?C.green:C.orange} bg={im.status==="ok"?C.greenL:C.orangeL}/></div>)}</div></>)}
@@ -5315,6 +5319,23 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
     <Alerts ourRates={ourRates} onlineRates={onlineRates} histAll={histAll} periods={ALL_PERIODS}
       styles={{ cnt, cd, responsiveGrid }} SBar={SBar} BNav={BNav} onNavigate={setScreen} />
   );
+
+  // ── Tendance promos (veille des promotions marché montagne) ──
+  const PromosTrendScreen=()=>{
+    const nextOurPromo = (ourPromotions||[]).filter(p=>(p.status||"active")==="active")
+      .sort((a,b)=>String(a.period_start||"").localeCompare(String(b.period_start||"")))[0] || null;
+    const cimesActivePromo = nextOurPromo ? {
+      discount_pct: nextOurPromo.discount_pct,
+      starting_price: Number(nextOurPromo.price_promo||nextOurPromo.promo_price||0) || null,
+    } : null;
+    return (
+      <MarketPromotionsPage
+        SBar={SBar} BNav={BNav} isMobile={isMobile}
+        styles={{ cnt, cd, rw, btn, sml, inp, responsiveGrid }}
+        cimesActivePromo={cimesActivePromo}
+      />
+    );
+  };
 
   const BenchmarkDecision=()=>{
     const baseCtx = getTrackedPeriodContext();
@@ -6092,6 +6113,7 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
             {screen === "competitors_residence" && CompetitorsSegmentScreen({ segment: "residence" })}
             {screen === "competitors_private" && CompetitorsSegmentScreen({ segment: "private" })}
             {screen === "track" && TrackPrices()}
+            {screen === "promos_trend" && PromosTrendScreen()}
             {screen === "radar" && RadarScreen()}
             {screen === "our_online_rates" && OurOnlineRates()}
             {screen === "import" && ImportScreen()}
@@ -6114,6 +6136,7 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
             {screen === "competitors_residence" && CompetitorsSegmentScreen({ segment: "residence" })}
             {screen === "competitors_private" && CompetitorsSegmentScreen({ segment: "private" })}
             {screen === "track" && TrackPrices()}
+            {screen === "promos_trend" && PromosTrendScreen()}
           {screen === "radar" && RadarScreen()}
           {screen === "our_online_rates" && OurOnlineRates()}
           {screen === "import" && ImportScreen()}
