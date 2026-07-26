@@ -161,9 +161,18 @@ function buildPrompt(station, operators, stayStart, stayEnd) {
     `Return maximum ${MAX_PROMOS_PER_STATION} offers, only for the operators listed above. ` +
     `If you find more, return only the ${MAX_PROMOS_PER_STATION} most relevant ones — ` +
     `always prefer fewer COMPLETE offers over more TRUNCATED ones.\n\n` +
-    `Return ONLY valid JSON. No markdown. No comments. No explanations. No trailing commas. ` +
-    `The response must start with [ and end with ]. Use double quotes for all keys and string values.\n` +
-    `Never invent a price, discount, or date that is not present in the source: use null instead.\n\n` +
+    `STRICT RULES — read carefully:\n` +
+    `- Return ONLY offers you actually found in the sources you consulted. Do not return anything if you found nothing.\n` +
+    `- Never invent a promotion, a price, a discount, a date, or a URL. Any unknown value must be null, never guessed.\n` +
+    `- A general/nationwide campaign from an operator may only be recorded if the source explicitly states it applies ` +
+    `to mountain destinations or to ${station} specifically. If the source is a generic homepage banner with no such ` +
+    `mention, do not record it.\n` +
+    `- Do not turn a plain pricing/booking page into a promotion. A promotion requires an explicit discount, deadline, ` +
+    `or special condition — not just a price being displayed.\n` +
+    `- percentage and price fields must be plain numbers (e.g. 30, 349) — never include a % sign or a currency symbol.\n\n` +
+    `Return ONLY valid JSON, and no text of any kind outside that JSON structure. No markdown. No comments. ` +
+    `No explanations before or after. No trailing commas. The response must start with [ and end with ]. ` +
+    `Use double quotes for all keys and string values.\n\n` +
     `The field "promotionType" must be exactly one of: ${PROMO_TYPES.join(", ")}.\n\n` +
     `JSON schema:\n` +
     `[{"operatorName":"Vacancéole","stationName":"${station}","propertyName":"Nom du bien ou null",` +
