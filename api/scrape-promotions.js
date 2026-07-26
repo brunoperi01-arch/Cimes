@@ -130,9 +130,48 @@ function extractFirstJsonArray(text) {
   return null;
 }
 
+// ── Récupération d'un tableau JSON tronqué ─────────────────────────────
+// Si la réponse a été coupée en cours de génération (fin de budget de tokens),
+// le tableau ne se referme jamais. On garde les objets top-level déjà complets
+// et on ignore l'objet en cours de troncature plutôt que de tout rejeter.
+function salvageTruncatedJsonArray(text) {
+  if (!text || typeof text !== "string") return null;
+  const cleaned = text.replace(/```json/gi, "").replace(/```/g, "").replace(/[“”]/g, '"').replace(/[‘’]/g, "'").trim();
+  const start = cleaned.indexOf("[");
+  if (start === -1) return null;
+
+  let depth = 0, inString = false, escape = false, lastCompleteEnd = -1;
+  for (let i = start; i < cleaned.length; i++) {
+    const ch = cleaned[i];
+    if (escape) { escape = false; continue; }
+    if (ch === "\\") { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === "[" || ch === "{") { depth++; continue; }
+    if (ch === "]" || ch === "}") {
+      const wasObjectClose = ch === "}" && depth === 2; // objet top-level dans le tableau
+      depth--;
+      if (wasObjectClose && depth === 1) lastCompleteEnd = i + 1; // juste après le "}"
+    }
+  }
+  if (lastCompleteEnd === -1) return null; // aucun objet complet récupérable
+  return cleaned.slice(start, lastCompleteEnd) + "]";
+}
+
 function safeJsonParseArray(text) {
   const jsonText = extractFirstJsonArray(text);
-  if (!jsonText) return { ok: false, error: "Aucun tableau JSON trouvé.", raw: String(text || "").slice(0, 1000) };
+  if (!jsonText) {
+    const salvaged = salvageTruncatedJsonArray(text);
+    if (salvaged) {
+      try {
+        const parsed = JSON.parse(salvaged);
+        if (Array.isArray(parsed) && parsed.length) return { ok: true, data: parsed, salvaged: true };
+      } catch {
+        // tombe dans l'erreur finale ci-dessous
+      }
+    }
+    return { ok: false, error: "Aucun tableau JSON trouvé.", raw: String(text || "").slice(0, 1000) };
+  }
   try {
     const parsed = JSON.parse(jsonText);
     if (!Array.isArray(parsed)) return { ok: false, error: "Le JSON trouvé n'est pas un tableau.", raw: jsonText.slice(0, 1000) };
@@ -144,6 +183,15 @@ function safeJsonParseArray(text) {
       if (!Array.isArray(parsed)) return { ok: false, error: "Le JSON réparé n'est pas un tableau.", raw: repaired.slice(0, 1000) };
       return { ok: true, data: parsed };
     } catch (secondError) {
+      const salvaged = salvageTruncatedJsonArray(jsonText);
+      if (salvaged) {
+        try {
+          const parsed = JSON.parse(salvaged);
+          if (Array.isArray(parsed) && parsed.length) return { ok: true, data: parsed, salvaged: true };
+        } catch {
+          // échec définitif, on retombe sur l'erreur ci-dessous
+        }
+      }
       return { ok: false, error: secondError.message || firstError.message, raw: jsonText.slice(0, 1000) };
     }
   }
@@ -251,6 +299,9 @@ export default async function handler(req, res) {
       if (!parsed.ok) {
         errors.push({ station, error: "JSON malformé dans la réponse Claude.", parse_error: parsed.error, raw_excerpt: parsed.raw });
         continue;
+      }
+      if (parsed.salvaged) {
+        errors.push({ station, error: "Réponse tronquée par Claude — offres complètes récupérées, la dernière offre incomplète a été ignorée.", warning: true });
       }
 
       const normalized = normalizePromotions(parsed.data, station, operators);
