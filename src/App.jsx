@@ -1076,6 +1076,8 @@ function LoginScreen({ loginErr, SB_READY, loginEmail, setLE, loginPwd, setLP, l
 // ══ APP ══════════════════════════════════════════════════════════
 export default function App() {
   const [screen, setScreen]     = useState("login");
+  const [compSegment, setCompSegment] = useState("residence"); // vue unifiée Concurrents : "residence" | "private"
+  const goCompetitors = (segment) => { setCompSegment(segment); setScreen("competitors"); };
   const [adminOpen, setAdminOpen] = useState(false);
   const [user, setUser]         = useState(null);
   const [loginEmail, setLE]     = useState("");
@@ -2572,8 +2574,7 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
     ] },
     { id:"marche",    icon:"📊", l:"Marché", def:"track", subs:[
       { id:"track", l:"Suivi prix" },
-      { id:"competitors_residence", l:"Résidences" },
-      { id:"competitors_private", l:"Particuliers" },
+      { id:"competitors", l:"Concurrents" },
       { id:"promos_trend", l:"Tendance promos" },
     ] },
     { id:"collecte",  icon:"📥", l:"Collecte", def:"collect", subs:[
@@ -2886,7 +2887,7 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
           {(()=>{
             const actions=[];
             if (dfProRates.length<3) actions.push({ ic:"💶", c:C.purple, bg:C.purpleL, t:"Relever les prix concurrents", d:`Moins de 3 relevés pros pour ${dfPeriod?periodOptionLabel(dfPeriod):"cette période"}.`, btn:"Faire le relevé", go:()=>setScreen("track") });
-            if (dfPrivGap!=null&&dfPrivGap>15) actions.push({ ic:"🏠", c:C.orange, bg:C.orangeL, t:"Vérifier les particuliers", d:`Pression particuliers ${dfPrivGap>30?"forte":"moyenne"} (${dfPrivGap>0?"+":""}${dfPrivGap}%).`, btn:"Voir particuliers", go:()=>setScreen("competitors_private") });
+            if (dfPrivGap!=null&&dfPrivGap>15) actions.push({ ic:"🏠", c:C.orange, bg:C.orangeL, t:"Vérifier les particuliers", d:`Pression particuliers ${dfPrivGap>30?"forte":"moyenne"} (${dfPrivGap>0?"+":""}${dfPrivGap}%).`, btn:"Voir particuliers", go:()=>goCompetitors("private") });
             if (dfProGap!=null&&dfProGap<-5) actions.push({ ic:"⬇️", c:C.red, bg:C.redL, t:"Ajuster le tarif", d:`Le marché pro est ${Math.abs(dfProGap)}% au-dessus de votre tarif.`, btn:"Ouvrir Benchmark", go:()=>setScreen("benchmark") });
             if (dfPromoScore>=40) actions.push({ ic:"🎯", c:C.green, bg:C.greenL, t:"Créer une promo court séjour", d:`Opportunité promo ${dfPromoLabel.toLowerCase()} sur cette période.`, btn:"Créer promo", go:()=>{ setPromoStayNights(3); setScreen("promotions"); } });
             if (!dfWeeklyPrice) actions.push({ ic:"📝", c:C.blue, bg:C.bluePale, t:"Compléter les tarifs", d:`Aucun tarif semaine ${dfAcc.label} pour cette période.`, btn:"Gérer les tarifs", go:()=>setScreen("tarifs") });
@@ -2929,7 +2930,7 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
             <div style={card({ background:dfPrivGap!=null&&dfPrivGap>15?"#FFF4E0":C.greenL, borderColor:dfPrivGap!=null&&dfPrivGap>15?"#F5D9A8":"#C9E8D2" })}>
               <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom:4 }}><span style={{ fontSize:15 }}>👁️</span><span style={{ fontSize:12, fontWeight:700, color:dfPrivGap!=null&&dfPrivGap>15?C.orange:C.green }}>Surveiller les particuliers</span></div>
               <p style={{ margin:"0 0 8px", fontSize:10, color:C.text, lineHeight:1.4 }}>{dfPrivGap!=null&&dfPrivGap>15?"Les particuliers exercent une pression prix. Réponse : offre directe ciblée.":"Les prix particuliers sont stables. Restez attentif à l'évolution."}</p>
-              <button onClick={()=>setScreen("competitors_private")} style={{ fontSize:10, fontWeight:700, color:C.white, background:dfPrivGap!=null&&dfPrivGap>15?C.orange:C.green, border:"none", borderRadius:8, padding:"6px 11px", cursor:"pointer" }}>Suivre le marché</button>
+              <button onClick={()=>goCompetitors("private")} style={{ fontSize:10, fontWeight:700, color:C.white, background:dfPrivGap!=null&&dfPrivGap>15?C.orange:C.green, border:"none", borderRadius:8, padding:"6px 11px", cursor:"pointer" }}>Suivre le marché</button>
             </div>
           </div>
         </div>
@@ -3047,13 +3048,13 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
             <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom:5 }}><span style={{ fontSize:15 }}>🏢</span><span style={{ fontSize:13, fontWeight:700, color:C.blue }}>Résidences / Pros</span></div>
             <p style={{ margin:0, fontSize:20, fontWeight:700, color:C.text }}>{prosList.length}<span style={{ fontSize:10, color:C.gray, fontWeight:400 }}> concurrents</span></p>
             <p style={{ margin:"1px 0 0", fontSize:10, color:C.gray }}>{proSourcesCount} sources actives</p>
-            <button onClick={()=>setScreen("competitors_residence")} style={{ ...btn(false,C.blue), marginTop:8, marginBottom:0 }}>Gérer les résidences</button>
+            <button onClick={()=>goCompetitors("residence")} style={{ ...btn(false,C.blue), marginTop:8, marginBottom:0 }}>Gérer les résidences</button>
           </div>
           <div style={card({ background:"#FFF7F7" })}>
             <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom:5 }}><span style={{ fontSize:15 }}>🏠</span><span style={{ fontSize:13, fontWeight:700, color:"#FF5A5F" }}>Particuliers</span></div>
             <p style={{ margin:0, fontSize:20, fontWeight:700, color:C.text }}>{privList.length}<span style={{ fontSize:10, color:C.gray, fontWeight:400 }}> concurrents</span></p>
             <p style={{ margin:"1px 0 0", fontSize:10, color:C.gray }}>{privSourcesCount} sources actives{dfPrivGap!=null?` · pression ${dfPrivGap>30?"forte":dfPrivGap>=15?"moyenne":"faible"}`:""}</p>
-            <button onClick={()=>setScreen("competitors_private")} style={{ ...btn(false,"#FF5A5F"), marginTop:8, marginBottom:0 }}>Gérer les particuliers</button>
+            <button onClick={()=>goCompetitors("private")} style={{ ...btn(false,"#FF5A5F"), marginTop:8, marginBottom:0 }}>Gérer les particuliers</button>
           </div>
         </div>
 
@@ -3719,9 +3720,9 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
     );
   };
 
-  // Page dédiée concurrents par segment (résidences/pros ou particuliers)
-  const CompetitorsSegmentScreen = ({ segment }) => {
-    const isPrivate = segment === "private";
+  // Page unifiée concurrents (résidences/pros + particuliers, bascule in-page)
+  const CompetitorsSegmentScreen = () => {
+    const isPrivate = compSegment === "private";
     const title = isPrivate ? "🏠 Concurrents suivis — Particuliers" : "🏢 Concurrents suivis — Résidences / Pros";
     const description = isPrivate
       ? "Les particuliers servent à mesurer la pression prix. Ils ne doivent pas piloter seuls la grille tarifaire."
@@ -3740,8 +3741,12 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
       : [["booking","booking","Booking.com","+ Booking"],["direct","direct","Site direct","+ Direct"],["tour_operator","tour_operator",TOUR_OPERATORS[0],"+ TO"],["marketplace","marketplace",MARKETPLACES[0],"+ OTA"],["other","other","","+ Autre"]];
 
     return (
-      <div><SBar title={isPrivate?"Concurrents Particuliers":"Concurrents Résidences"}/>
+      <div><SBar title="Concurrents"/>
         <div style={cnt}>
+          <div style={{ display:"flex", gap:6, marginTop:8, marginBottom:2 }}>
+            <button onClick={()=>setCompSegment("residence")} style={{ flex:1, fontSize:12, fontWeight:700, color:!isPrivate?C.white:C.blue, background:!isPrivate?C.blue:C.bluePale, border:"none", borderRadius:9, padding:"9px 10px", cursor:"pointer" }}>🏢 Résidences / Pros</button>
+            <button onClick={()=>setCompSegment("private")} style={{ flex:1, fontSize:12, fontWeight:700, color:isPrivate?C.white:"#FF5A5F", background:isPrivate?"#FF5A5F":"#FFE9EA", border:"none", borderRadius:9, padding:"9px 10px", cursor:"pointer" }}>🏠 Particuliers</button>
+          </div>
           <div style={{ ...cd(11), padding:"11px 13px", background:isPrivate?"#FFE9EA":C.bluePale, marginTop:8, borderLeft:`3px solid ${accent}` }}>
             <p style={{ margin:0, fontSize:13, fontWeight:700, color:accent }}>{title}</p>
             <p style={{ margin:"3px 0 0", fontSize:10, color:isPrivate?"#C2185B":C.blueL, lineHeight:1.4 }}>{description}</p>
@@ -6127,8 +6132,7 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
             {screen === "benchmark" && BenchmarkDecision()}
             {screen === "promotions" && Promotions()}
             {screen === "tarifs" && TarifsLesCimes()}
-            {screen === "competitors_residence" && CompetitorsSegmentScreen({ segment: "residence" })}
-            {screen === "competitors_private" && CompetitorsSegmentScreen({ segment: "private" })}
+            {screen === "competitors" && CompetitorsSegmentScreen()}
             {screen === "track" && TrackPrices()}
             {screen === "promos_trend" && PromosTrendScreen()}
             {screen === "radar" && RadarScreen()}
@@ -6150,8 +6154,7 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
             {screen === "benchmark" && BenchmarkDecision()}
             {screen === "promotions" && Promotions()}
             {screen === "tarifs" && TarifsLesCimes()}
-            {screen === "competitors_residence" && CompetitorsSegmentScreen({ segment: "residence" })}
-            {screen === "competitors_private" && CompetitorsSegmentScreen({ segment: "private" })}
+            {screen === "competitors" && CompetitorsSegmentScreen()}
             {screen === "track" && TrackPrices()}
             {screen === "promos_trend" && PromosTrendScreen()}
           {screen === "radar" && RadarScreen()}
