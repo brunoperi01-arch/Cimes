@@ -26,6 +26,7 @@ import { OUR_RATES_LS, getOurRates, saveOurRate, deleteOurRate } from "./service
 import { sb, ls, SB_READY, SB_URL, SB_KEY, sbErrors, clearStoredSession, storeSession, refreshSessionIfNeeded, stripUserId, isMissingColumnError } from "./services/supabaseClient.js";
 import MarketPromotionsPage from "./components/MarketPromotionsPage.jsx";
 import DashboardPromoCard from "./components/DashboardPromoCard.jsx";
+import { computeAlerts, ALERT_LEVELS } from "./domain/alerts.js";
 const IA_ENDPOINT = "/api/analyse-reco";
 
 // ══ DONNÉES STATIQUES ═══════════════════════════════════════════
@@ -2801,6 +2802,22 @@ Ne jamais inventer un prix precis si aucun n'est fourni : mets detected_price a 
     return (
     <div><SBar title="Dashboard"/>
       <DashboardPromoCard cd={cd} onNavigate={()=>goScreen("promos_trend")} />
+      {(()=>{
+        const dashAlerts = computeAlerts({ ourRates, onlineRates, competitorRates: histAll, periods: ALL_PERIODS });
+        if (!dashAlerts.length) return null;
+        const top = [...dashAlerts].sort((a,b)=>ALERT_LEVELS[b.level].rank-ALERT_LEVELS[a.level].rank)[0];
+        const meta = ALERT_LEVELS[top.level];
+        return (
+          <div onClick={()=>setScreen("alertes")} style={{ ...cd(11), padding:"11px 13px", marginTop:8, borderLeft:`3px solid ${meta.color}`, cursor:"pointer" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+              <p style={{ margin:0, fontSize:13, fontWeight:700, color:C.text }}>{meta.icon} {dashAlerts.length} alerte{dashAlerts.length>1?"s":""} active{dashAlerts.length>1?"s":""}</p>
+              <span style={{ fontSize:11, fontWeight:700, color:meta.color }}>{meta.label}</span>
+            </div>
+            <p style={{ margin:"4px 0 0", fontSize:11, color:C.gray }}>{top.title}</p>
+            <p style={{ margin:"4px 0 0", fontSize:11, fontWeight:600, color:C.blue }}>Voir toutes les alertes →</p>
+          </div>
+        );
+      })()}
       {/* Filtres globaux */}
       {!isMobile&&(
         <div style={{ display:"flex", gap:8, alignItems:"flex-end", flexWrap:"wrap", padding:"12px 18px 0" }}>
