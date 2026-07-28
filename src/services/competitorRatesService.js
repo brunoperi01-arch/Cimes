@@ -259,28 +259,30 @@ export async function deleteCompetitorCatalogItem(id) {
 // plateforme ; le lien fin concurrent↔URL n'a plus de table dédiée.
 export async function getCompetitorSources() {
   if (SB_READY) {
-    try { return await sb.select("platforms", "is_active=eq.true&order=name.asc&select=*"); }
+    try { return await sb.select("competitor_sources", "is_active=eq.true&order=created_at.asc&select=*"); }
     catch { return []; }
   }
   return (ls.get(SOURCES_LS) || []).filter(r => r.is_active !== false);
 }
 
 export async function saveCompetitorSource(source) {
+  if (!source.competitor_id) throw new Error("Concurrent manquant pour cette source.");
   const name = source.source_name || source.name || "Autre";
   const isLfdnas = String(name).toLowerCase().includes("france du nord") || String(source.source_url || "").toLowerCase().includes("lafrancedunordausud.fr");
   const cleanedUrl = isLfdnas ? normalizeLfdnasBaseUrl(source.source_url) : (source.source_url || null);
   const payload = {
-    name: String(name).trim(),
-    channel_type: source.source_type || "other",
-    url: cleanedUrl,
+    competitor_id: source.competitor_id,
+    source_name: String(name).trim(),
+    source_type: source.source_type || "other",
+    source_url: cleanedUrl,
     is_active: source.is_active !== false,
     notes: source.notes || null,
   };
   if (SB_READY) {
-    if (source.id && UUID_RE.test(String(source.id))) { await sb.update("platforms", `id=eq.${source.id}`, payload); return { ...payload, id: source.id }; }
-    const existing = await sb.select("platforms", `name=eq.${encodeURIComponent(payload.name)}&select=id`);
-    if (existing?.length) { await sb.update("platforms", `id=eq.${existing[0].id}`, payload); return { ...payload, id: existing[0].id }; }
-    const ins = await sb.insert("platforms", payload); return Array.isArray(ins) ? ins[0] : ins;
+    if (source.id && UUID_RE.test(String(source.id))) { await sb.update("competitor_sources", `id=eq.${source.id}`, payload); return { ...payload, id: source.id }; }
+    const existing = await sb.select("competitor_sources", `competitor_id=eq.${source.competitor_id}&source_name=eq.${encodeURIComponent(payload.source_name)}&select=id`);
+    if (existing?.length) { await sb.update("competitor_sources", `id=eq.${existing[0].id}`, payload); return { ...payload, id: existing[0].id }; }
+    const ins = await sb.insert("competitor_sources", payload); return Array.isArray(ins) ? ins[0] : ins;
   }
   const all = ls.get(SOURCES_LS);
   if (source.id) { const i = all.findIndex(r => r.id === source.id); if (i >= 0) { all[i] = { ...all[i], ...payload }; ls.set(SOURCES_LS, all); return all[i]; } }
@@ -289,7 +291,7 @@ export async function saveCompetitorSource(source) {
 }
 
 export async function deleteCompetitorSource(id) {
-  if (SB_READY) return sb.update("platforms", `id=eq.${id}`, { is_active: false });
+  if (SB_READY) return sb.update("competitor_sources", `id=eq.${id}`, { is_active: false });
   ls.set(SOURCES_LS, (ls.get(SOURCES_LS) || []).filter(r => r.id !== id));
   return true;
 }
